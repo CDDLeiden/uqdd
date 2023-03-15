@@ -1,0 +1,30 @@
+name: uq-dd
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+  - rdkit
+  - pyg
+  - nvidia
+dependencies:
+  - python
+  - pip
+  - notebook
+  - jupyterlab
+  - pandas
+  - numpy
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - plotly
+  - pytorch
+  - torchvision
+  - cudatoolkit
+  - pytorch-cuda
+  - tensorboard
+  - tqdm
+  - rdkit
+  - pip:
+      - chembl_webresource_client
+      - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
