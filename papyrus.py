@@ -1,0 +1,249 @@
+__author__ = "Bola Khalil"
+__copyright__ = "Copyright 2022, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
+__license__ = "All rights reserved, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
+__version__ = "0.0.1"
+__maintainer__ = "Bola Khalil"
+__email__ = "bkhalil@its.jnj.com"
+__status__ = "Development"
+
+import os
+from typing import Union, List
+import pandas as pd
+import logging
+
+from papyrus_scripts.download import download_papyrus
+from papyrus_scripts.reader import (
+    read_papyrus,
+    read_protein_set,
+    read_molecular_descriptors,
+    read_protein_descriptors,
+)
+from papyrus_scripts.preprocess import (
+    keep_accession,
+    keep_quality,
+    keep_match,
+    keep_type,
+    keep_organism,
+    consume_chunks
+)
+from smiles_standardizer import check_std_smiles
+
+
+class Papyrus:
+    def __init__(
+            self,
+            path: str = "data/",
+            chunksize: int = 100000,
+            accession: Union[None, str, List] = None,
+            activity_type: Union[None, str, List] = None,
+            protein_class: Union[None, str, List] = None,
+            verbose_files: bool = False,
+    ):
+
+        # LOGGING
+        log_name = "Papyrus"
+        self.log = logging.getLogger(log_name)
+        self.log.setLevel(logging.INFO)
+        formatter = logging.Formatter(
+            fmt="%(asctime)s:%(levelname)s:%(name)s:%(message)s:%(relativeCreated)d",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        out_log = os.path.join("logs/", f"{log_name}.log")
+        file_handler = logging.FileHandler(out_log, mode="w")
+        file_handler.setFormatter(formatter)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        self.log.addHandler(file_handler)
+        self.log.addHandler(stream_handler)
+
+        self.log.info("Initializing -- PAPYRUS -- Module")
+
+        self.papyrus_path = path
+        self.papyrus_file = os.path.isfile(path)
+
+        self.chunksize = chunksize
+
+        self.keep_accession = accession
+        self.keep_type = activity_type
+        self.keep_protein_class = protein_class
+        self.verbose_files = verbose_files
+
+        self.cols_rename_map = {
+            "Activity_ID": "activityIds",
+            "Quality": "quality",
+            "source": "source",
+            "CID": "cIds",
+            "SMILES": "smiles",
+            "connectivity": "connectivity",
+            "InChIKey": "inchiKey",
+            "InChI": "inchi",
+            "InChI_AuxInfo": "inchiAuxInfo",
+            "target_id": "targetIds",
+            "TID": "tIds",
+            "accession": "accession",
+            "Protein_Type": "proteinType",
+            "AID": "aIds",
+            "doc_id": "docIds",
+            "Year": "year",
+            "all_doc_ids": "allDocIds",
+            "all_years": "allYears",
+            "type_IC50": "typeIC50",
+            "type_EC50": "typeEC50",
+            "type_KD": "typeKd",
+            "type_Ki": "typeKi",
+            "type_other": "typeOther",
+            "Activity_class": "activityClass",
+            "relation": "relation",
+            "pchembl_value": "pchemblValue",
+            "pchembl_value_Mean": "pchemblValueMean",
+            "pchembl_value_StdDev": "pchemblValueStdDev",
+            "pchembl_value_SEM": "pchemblValueSEM",
+            "pchembl_value_N": "pchemblValueN",
+            "pchembl_value_Median": "pchemblValueMedian",
+            "pchembl_value_MAD": "pchemblValueMAD",
+        }
+
+        if self.papyrus_file:
+            self.log.info("PapyrusApi processing input from previously processed file")
+            self.df_filtered = pd.read_csv(self.papyrus_path, index_col=0)
+            self.papyrus_data, self.papyrus_protein_data = None, None
+        else:
+            self.df_filtered = None
+            self.papyrus_data, self.papyrus_protein_data = self.reader()
+
+    def __call__(self):
+        return self.process_papyrus()
+
+    def _download(self):
+        if not self.papyrus_path:
+            self.papyrus_path = "data/"
+            os.makedirs(self.papyrus_path, exist_ok=True)
+
+        self.log.info("Downloading Papyrus data ...")
+        download_papyrus(
+            outdir=self.papyrus_path,
+            version="latest",
+            nostereo=True,
+            stereo=False,
+            only_pp=False,
+            structures=False,
+            descriptors="all",
+            progress=True,
+            disk_margin=0.01,
+        )
+
+        return None
+
+    def reader(self):
+        self._download()
+        papyrus_data = read_papyrus(
+            is3d=False,
+            version="latest",
+            plusplus=False,
+            chunksize=self.chunksize,
+            source_path=self.papyrus_path,
+        )
+        papyrus_protein_data = read_protein_set(source_path=self.papyrus_path, version="latest")
+        return papyrus_data, papyrus_protein_data
+
+    def process_papyrus(self):
+        self.log.info("Processing Papyrus data ...")
+        if not self.papyrus_file:
+            filter_1 = keep_quality(
+                data=self.papyrus_protein_data, min_quality="High"
+            )
+
+            filter_2 = keep_match(
+                data=filter_1, column="Protein_Type", values="WT"
+            )
+
+            filter_3 = keep_organism(
+                data=filter_2, protein_data=self.papyrus_protein_data, organism='Human'
+            )
+            if self.keep_accession:
+                filter_4 = keep_accession(
+                    data=filter_3, accession=self.keep_accession
+                )
+            else:
+                filter_4 = filter_3
+
+            if self.keep_type:
+                filter_5 = keep_type(
+                    data=filter_4, activity_types=self.keep_type
+                )
+            else:
+                filter_5 = filter_4
+
+            self.df_filtered = consume_chunks(filter_5, progress=True, total=60)
+
+            if self.verbose_files:
+                self.df_filtered.to_csv("data/papyrus_filtered_high_quality_00_preprocessed.csv")
+
+        # Renaming before any processing for consistency
+        self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
+        self.df_filtered, df_nan, df_dup = check_std_smiles(
+            df=self.df_filtered,
+            smiles_col="smiles",
+            other_dup_col="accession",
+            drop=True,
+            sorting_col="year",
+            keep="last",  # keeps latest year datapoints if duplicated
+            logger=self.log,
+        )
+
+        if self.verbose_files:
+            self.df_filtered.to_csv("data/papyrus_filtered_high_quality_01_standardized.csv")
+            df_nan.to_csv("data/papyrus_filtered_high_quality_02_NaN_smiles.csv")
+            df_dup.to_csv("data/papyrus_filtered_high_quality_03_dup_smiles.csv")
+
+        # converting pchembl values into list of floats
+        self.df_filtered["pchemblValue"] = (
+            self.df_filtered["pchemblValue"]
+            .str.split(";")
+            .apply(lambda x: [float(i) for i in x])
+        )
+
+        # TODO Adding Molecular and Protein Descriptors ????
+        mol_descriptors = self.molecular_descriptors()
+        protein_descriptors = self.protein_descriptors()
+
+        return self.df_filtered #, mol_descriptors, protein_descriptors
+
+    def molecular_descriptors(self):
+        self.log.info("Getting the molecular descriptors")
+
+        mol_descriptors = read_molecular_descriptors(
+            desc_type="all",
+            is3d=False,
+            version="latest",
+            chunksize=100000,
+            source_path=self.papyrus_path,
+            ids=self.df_filtered["connectivity"].tolist(),
+            verbose=True,
+        )
+
+        self.log.info(f"Shape of the molecular descriptors: {mol_descriptors.shape}")
+
+        if self.verbose_files:
+            mol_descriptors.to_csv("data/papyrus_filtered_high_quality_04_mol_desc.csv")
+
+        return mol_descriptors
+
+    def protein_descriptors(self):
+        self.log.info("Getting the protein descriptors")
+        target_ids = self.papyrus_protein_data["target_id"].tolist()
+        protein_descriptors = read_protein_descriptors(
+            desc_type="all",
+            version="latest",
+            chunksize=100000,
+            source_path=self.papyrus_path,
+            ids=target_ids,
+            verbose=True,
+        )
+
+        if self.verbose_files:
+            protein_descriptors.to_csv("data/papyrus_filtered_high_quality_05_protein_desc.csv")
+
+        self.log.info("Protein descriptors shape: {}".format(protein_descriptors.shape))
+
+        return protein_descriptors

@@ -4,10 +4,9 @@ channels:
   - pytorch
   - defaults
   - rdkit
-  - pyg
   - nvidia
 dependencies:
-  - python
+  - python>=3.8
   - pip
   - notebook
   - jupyterlab
@@ -25,6 +24,7 @@ dependencies:
   - tensorboard
   - tqdm
   - rdkit
+  - ignite
   - pip:
       - chembl_webresource_client
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
