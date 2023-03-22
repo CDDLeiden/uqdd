@@ -26,14 +26,13 @@ from papyrus_scripts.preprocess import (
     keep_organism,
     consume_chunks
 )
-from smiles_standardizer import check_std_smiles
-
-
+# from smiles_standardizer import check_std_smiles
+from chemutils import standardize_df, generate_ecfp, generate_mol_descriptors
 class Papyrus:
     def __init__(
             self,
             path: str = "data/",
-            chunksize: int = 100000,
+            chunksize: int = 1000000,
             accession: Union[None, str, List] = None,
             activity_type: Union[None, str, List] = None,
             protein_class: Union[None, str, List] = None,
@@ -150,7 +149,7 @@ class Papyrus:
         self.log.info("Processing Papyrus data ...")
         if not self.papyrus_file:
             filter_1 = keep_quality(
-                data=self.papyrus_protein_data, min_quality="High"
+                data=self.papyrus_data, min_quality="High"
             )
 
             filter_2 = keep_match(
@@ -174,14 +173,15 @@ class Papyrus:
             else:
                 filter_5 = filter_4
 
-            self.df_filtered = consume_chunks(filter_5, progress=True, total=60)
+            self.df_filtered = consume_chunks(filter_5, progress=True, total=int(60000000/self.chunksize))
 
             if self.verbose_files:
                 self.df_filtered.to_csv("data/papyrus_filtered_high_quality_00_preprocessed.csv")
 
         # Renaming before any processing for consistency
         self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
-        self.df_filtered, df_nan, df_dup = check_std_smiles(
+
+        self.df_filtered, df_nan, df_dup = standardize_df(
             df=self.df_filtered,
             smiles_col="smiles",
             other_dup_col="accession",
@@ -204,8 +204,8 @@ class Papyrus:
         )
 
         # TODO Adding Molecular and Protein Descriptors ????
-        mol_descriptors = self.molecular_descriptors()
-        protein_descriptors = self.protein_descriptors()
+        # mol_descriptors = self.molecular_descriptors()
+        # protein_descriptors = self.protein_descriptors()
 
         return self.df_filtered #, mol_descriptors, protein_descriptors
 
@@ -247,3 +247,4 @@ class Papyrus:
         self.log.info("Protein descriptors shape: {}".format(protein_descriptors.shape))
 
         return protein_descriptors
+
