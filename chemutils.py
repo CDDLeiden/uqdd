@@ -19,7 +19,7 @@ from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculat
 # import os
 import numpy as np
 import pandas as pd
-from typing import Union, List
+from typing import Union, List, Tuple
 
 from utils import check_nan_duplicated, custom_agg
 import copy
@@ -117,7 +117,7 @@ def standardize_df(
         keep: Union[bool, str] = "last",
         logger=None,
         suppress_exception=True,
-        ) -> pd.DataFrame:
+        ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Applies a standardization workflow to the 'smiles' column of a pandas dataframe.
 
@@ -250,14 +250,8 @@ def standardize_df(
         df_dup = (
             df_dup.groupby(smiles_col, as_index=False).agg(custom_agg).reset_index()
         )
-        # TODO implement to concatenate ??? or just keep it outside of this function
 
-    return df_filtered, df_nan, df_dup
-
-
-
-    return df
-
+    return (df_filtered, df_nan, df_dup)
 
 # define function that transforms SMILES strings into ECFPs
 def ECFP_from_smiles(smiles,

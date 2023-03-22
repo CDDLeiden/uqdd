@@ -156,30 +156,40 @@ class Papyrus:
                 data=filter_1, column="Protein_Type", values="WT"
             )
 
+            # self.df_filtered = consume_chunks(filter_2, progress=True, total=int(60000000 / self.chunksize)) #
+
             filter_3 = keep_organism(
-                data=filter_2, protein_data=self.papyrus_protein_data, organism='Human'
+                data=filter_2, protein_data=self.papyrus_protein_data, organism='Homo sapiens (Human)'
             )
-            if self.keep_accession:
-                filter_4 = keep_accession(
-                    data=filter_3, accession=self.keep_accession
-                )
-            else:
-                filter_4 = filter_3
+            # self.df_filtered = consume_chunks(filter_3, progress=True, total=int(60000000 / self.chunksize))
 
-            if self.keep_type:
-                filter_5 = keep_type(
-                    data=filter_4, activity_types=self.keep_type
-                )
-            else:
-                filter_5 = filter_4
+            # if self.keep_type:
+            #     filter_4 = keep_type(
+            #         data=filter_3, activity_types=self.keep_type
+            #     )
+            # else:
+            #     filter_4 = filter_3
 
-            self.df_filtered = consume_chunks(filter_5, progress=True, total=int(60000000/self.chunksize))
+            filter_4 = keep_type(
+                data=filter_3, activity_types=self.keep_type
+            )
+            self.df_filtered = consume_chunks(filter_4, progress=True, total=int(60000000 / self.chunksize))
+            # if self.keep_accession:
+            #     filter_5 = keep_accession(
+            #         data=filter_4, accession=self.keep_accession
+            #     )
+            # else:
+            #     filter_5 = filter_4
+
+
+
+            # self.df_filtered = consume_chunks(filter_5, progress=True, total=int(60000000/self.chunksize))
+
+            # Renaming before any processing for consistency
+            self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
 
             if self.verbose_files:
                 self.df_filtered.to_csv("data/papyrus_filtered_high_quality_00_preprocessed.csv")
-
-        # Renaming before any processing for consistency
-        self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
 
         self.df_filtered, df_nan, df_dup = standardize_df(
             df=self.df_filtered,
