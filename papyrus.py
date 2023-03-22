@@ -7,7 +7,7 @@ __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
 import os
-from typing import Union, List
+from typing import Union, List, Tuple
 import pandas as pd
 import logging
 
@@ -28,6 +28,10 @@ from papyrus_scripts.preprocess import (
 )
 # from smiles_standardizer import check_std_smiles
 from chemutils import standardize_df, generate_ecfp, generate_mol_descriptors
+
+import torch
+from torch.utils.data import Dataset
+
 class Papyrus:
     def __init__(
             self,
@@ -50,10 +54,10 @@ class Papyrus:
         out_log = os.path.join("logs/", f"{log_name}.log")
         file_handler = logging.FileHandler(out_log, mode="w")
         file_handler.setFormatter(formatter)
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
+        # stream_handler = logging.StreamHandler()
+        # stream_handler.setFormatter(formatter)
         self.log.addHandler(file_handler)
-        self.log.addHandler(stream_handler)
+        # self.log.addHandler(stream_handler)
 
         self.log.info("Initializing -- PAPYRUS -- Module")
 
@@ -210,9 +214,14 @@ class Papyrus:
         self.df_filtered["pchemblValue"] = (
             self.df_filtered["pchemblValue"]
             .str.split(";")
-            .apply(lambda x: [float(i) for i in x])
-        )
+            .apply(lambda x: [float(i) for i in x] if type(x) != float else x
+                   ))
 
+        # # calculate ECFP fingerprints
+        # self.df_filtered = generate_ecfp(self.df_filtered, 2, 1024, False, False)
+        #
+        # # calculate mol descriptors
+        # self.df_filtered = generate_mol_descriptors(self.df_filtered, 'smiles', None)
         # TODO Adding Molecular and Protein Descriptors ????
         # mol_descriptors = self.molecular_descriptors()
         # protein_descriptors = self.protein_descriptors()
@@ -258,3 +267,39 @@ class Papyrus:
 
         return protein_descriptors
 
+from chemutils import ECFP_from_smiles
+class PapyrusDataset(Dataset):
+    def __init__(
+            self,
+            data: pd.DataFrame,
+            input_col: str = "smiles",
+            target_col: str = "pchemblValueMean",
+    ):
+        self.data = data
+        self.input_col = input_col
+        self.target_col = target_col
+        # self.x_data = self.df[input_col]
+        # self.y_data = self.df[target_col]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        # print(f"{idx=}")
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        x_smiles = self.data.iloc[idx][self.input_col]
+        x_sample = ECFP_from_smiles(x_smiles, 2, 1024)
+        x_sample = torch.tensor(x_sample).to(torch.float)
+
+        y_sample = self.data.iloc[idx][self.target_col]
+        y_sample = torch.tensor(y_sample).to(torch.float) #.unsqueeze(1)
+        # x_sample = torch.tensor(self.x_data[idx])
+        # y_sample = torch.tensor(self.y_data[idx]).to(torch.float)
+
+        return x_sample, y_sample
+
+# # Example usage
+# data = pd.read_csv('data/papyrus_filtered_high_quality_xc50_00_preprocessed.csv')
+# papyrus_dataset = PapyrusDataset(data)
+# papyrus_dataloader = DataLoader(papyrus_dataset, batch_size=32, shuffle=True)
