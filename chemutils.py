@@ -6,17 +6,6 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-# import math
-import rdkit
-from rdkit import Chem, RDLogger
-
-RDLogger.DisableLog('rdApp.info')
-# from rdkit.Chem import Draw
-from rdkit.Chem import AllChem
-from rdkit.Chem.MolStandardize import rdMolStandardize
-from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
-
-# import os
 import numpy as np
 import pandas as pd
 from typing import Union, List, Tuple
@@ -24,8 +13,14 @@ from typing import Union, List, Tuple
 from utils import check_nan_duplicated, custom_agg
 import copy
 import time
-# from rdkit.Chem.Draw import IPythonConsole
-# IPythonConsole.drawOptions.comicMode = True
+
+import rdkit
+from rdkit import Chem, RDLogger
+
+RDLogger.DisableLog('rdApp.info')
+from rdkit.Chem import AllChem
+from rdkit.Chem.MolStandardize import rdMolStandardize
+from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 
 print(rdkit.__version__)
 
@@ -80,16 +75,15 @@ def standardize(smi, logger=None, suppress_exception=False):
         mol = Chem.MolFromSmiles(smi)
         mol.UpdatePropertyCache(strict=False)
         Chem.SanitizeMol(mol, sanitizeOps=(Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES))
-        normalizer = rdMolStandardize.Normalizer()  # default parameters
-        mol = normalizer.normalize(mol)
+        mol = rdMolStandardize.Normalize(mol)
 
         # Neutralization
         uncharger = rdMolStandardize.Uncharger()
-        mol = uncharger.uncharge(mol)
+        mol = uncharger.uncharge(rdMolStandardize.FragmentParent(mol))
 
-        # Parent Tautomer
-        tautomer = rdMolStandardize.TautomerEnumerator()
-        mol = tautomer.canonicalize(mol)
+        # # Parent Tautomer
+        # tautomer = rdMolStandardize.TautomerEnumerator()
+        # mol = tautomer.Canonicalize(mol)
 
     except Exception as e:
         if logger:
@@ -117,7 +111,7 @@ def standardize_df(
         keep: Union[bool, str] = "last",
         logger=None,
         suppress_exception=True,
-        ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Applies a standardization workflow to the 'smiles' column of a pandas dataframe.
 
@@ -251,7 +245,7 @@ def standardize_df(
             df_dup.groupby(smiles_col, as_index=False).agg(custom_agg).reset_index()
         )
 
-    return (df_filtered, df_nan, df_dup)
+    return df_filtered, df_nan, df_dup
 
 # define function that transforms SMILES strings into ECFPs
 def ECFP_from_smiles(smiles,
@@ -330,10 +324,10 @@ def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chiralit
     # Generate ECFP fingerprints
     # for length in [2 ** i for i in range(5, 12)]:
 
-    df[f'ECFP-{length}'] = df['smiles'].apply(lambda x: ECFP_from_smiles(x, radius=radius,
-                                                                         length=length,
-                                                                         use_features=use_features,
-                                                                         use_chirality=use_chirality))
+    df[f'ECFP'] = df['smiles'].apply(lambda x: ECFP_from_smiles(x, radius=radius,
+                                                                                  length=length,
+                                                                                  use_features=use_features,
+                                                                                  use_chirality=use_chirality)) # df[f'ECFP-{radius}-{length}']
 
     return df
 
@@ -439,7 +433,7 @@ def generate_mol_descriptors(df: pd.DataFrame, smiles_col: str = 'smiles', chose
         chosen_descriptors = descriptors
 
     # apply mol_descriptors() to the 'smiles' column using the .apply() method
-    calc_descriptors = new_df['smiles'].apply(mol_descriptors, chosen_descriptors=chosen_descriptors)
+    calc_descriptors = new_df[smiles_col].apply(mol_descriptors, chosen_descriptors=chosen_descriptors)
 
     # convert the list of descriptor values to a DataFrame with separate columns
     descriptor_df = pd.DataFrame(calc_descriptors, columns=chosen_descriptors)  # .tolist()
@@ -464,4 +458,3 @@ def generate_mol_descriptors(df: pd.DataFrame, smiles_col: str = 'smiles', chose
     # new_df.loc[i, descriptors] = descriptor_vals
     #
     # return new_df
-
