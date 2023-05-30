@@ -22,41 +22,61 @@ from sklearn.model_selection import train_test_split, KFold
 from papyrus_scripts.modelling import pcm, qsar
 import xgboost
 
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
 
 
 class DNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout):
+    def __init__(self,
+                 input_dim,
+                 hidden_dim_1,
+                 hidden_dim_2=None,
+                 hidden_dim_3=None,
+                 num_tasks=1,
+                 dropout=0.2):
+        if hidden_dim_2 is None:
+            hidden_dim_2 = hidden_dim_1
+        if hidden_dim_3 is None:
+            hidden_dim_3 = hidden_dim_1
+
         super(DNN, self).__init__()
         self.feature_extractor = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim, hidden_dim_1),
             nn.ReLU(),
-            nn.Dropout(p=dropout),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim_1, hidden_dim_2),
+            # nn.Dropout(p=dropout),
             nn.ReLU(),
+            nn.Linear(hidden_dim_2, hidden_dim_3),
             nn.Dropout(p=dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
+            nn.ReLU(),
+
         )
-        self.task_specific = nn.ModuleList([
-            nn.Linear(hidden_dim, 1) for _ in range(output_dim)
-        ])
+        # self.task_specific = nn.ModuleList([
+        #     nn.Linear(hidden_dim_3, 1) for _ in range(output_dim)
+        # ])
+        self.task_specific = nn.Linear(hidden_dim_3, num_tasks)
+        # L1 or MSE loss
+        # MSE is good if the target decreases error < 1 -> small gradients
+        # something between L1 and MSE is smoothed L1
+        # one linear layer - multi outputs faster to train
+        # Taking init from nn.Linear
         self.apply(self.init_wt)
 
     @staticmethod
-    def init_wt(n):
-        if isinstance(n, nn.Linear):
-            nn.init.xavier_uniform_(n.weight, gain=nn.init.calculate_gain('relu'))
+    def init_wt(module):
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight, gain=nn.init.calculate_gain('relu'))
 
     def forward(self, x):
-        x = self.feature_extractor(x)
-        outputs = []
-        for task in self.task_specific:
-            outputs.append(task(x))
-        return torch.cat(outputs, dim=1)
-
+        features = self.feature_extractor(x)
+        outputs = self.task_specific(features)
+        return outputs
+        # outputs = []
+        # for task_specific_layer in self.task_specific:
+        #     output = task_specific_layer(features)
+        #     outputs.append(output)
+            # outputs.append(task(x))
+        # return torch.cat(outputs, dim=1)
 
 def train(
         model,
@@ -70,34 +90,57 @@ def train(
 
     model.train()
     total_loss = 0.0
-    total_entropy = 0.0
+    # total_entropy = 0.0
     for i, (inputs, targets) in enumerate(dataloader):
         inputs, targets = inputs.to(device), targets.to(device)
-        # Create a mask for non-Nan targets
-        mask = ~torch.isnan(targets)
-
+        # Create a mask for Nan targets
+        mask = torch.isnan(targets)
         # Zero the parameter gradients
         optimizer.zero_grad()
         # ➡ Forward pass
-        logits = model(inputs)
+        outputs = model(inputs)
+        targets[mask] = 0.0
+        outputs[mask] = 0.0
+        # targets = targets[mask]
+        # outputs = outputs * (mask)
+        # outputs = outputs[mask]
         # Compute the MSE loss only for non-NaN values
-        loss = loss_fn(logits[mask], targets[mask])
+        # TODO multiply outputs * inversed mask to get rid of NaN values
+        # this multiplication will stop the gradients of thse nans
+        # TODO replace the NaN values with 0.0 in the targets -> then use default reduction
+        # all final loss will be small.
+        # outpuot * inversed mask & targets slice or replace nan with 0.0
+        # TODO check the ranges of the targets that they are technically the same.
+        # mean of the values should be similar. if not --> then rescale the targets
+        # or to use loss function with autoscaling -> kytorch loss function
+        loss_per_task = loss_fn(outputs, targets)  # , reduction='none'
+        # loss_per_task[mask] = 0.0
+        # Dont do propagation for NaN values
+        task_losses = torch.mean(loss_per_task, dim=0)
+        loss = torch.sum(task_losses) #TorchTensor(65, device='cuda', grad_fn=<SumBackward1>) grad_fn = <MeanBackward1>
         total_loss += loss.item()
-
+        # TODO
         # ⬅ Backward pass + weight update
         loss.backward()
         optimizer.step()
+        # TODO : wrapper of the loss function - Multiple tasks - Multiple losses add up the dimension
+        #  and average over the batch dimension
+        #  reduction = 'none'
+        #  https://pytorch.org/docs/stable/generated/torch.nn.MSELoss.html
+        #  use none --> (batch, tasks) torch.sum dim 1 --> torch.mean dim 0 --> scalar
 
         # batch entropy
-        prob = torch.softmax(logits, dim=-1)
-        entropy = -torch.sum(prob * torch.log(prob), dim=-1)
+        # TODO : doesnt make sense to calculate entropy
+        #  - only for classification - in RL they want to know how commited an action is.
+        # prob = torch.softmax(logits, dim=-1)
+        # entropy = -torch.sum(prob * torch.log(prob), dim=-1)
+
         if i % 25 == 0:
             # log Batch loss and Batch entropy every 25 batches
             wandb.log({"batch loss": loss.item()})
-            wandb.log({"batch entropy": torch.mean(entropy).item()})
-        total_entropy += torch.mean(entropy).item()
-    return total_loss / len(dataloader), total_entropy / len(dataloader)
-
+            # wandb.log({"batch entropy": torch.mean(entropy).item()})
+        # total_entropy += torch.mean(entropy).item()
+    return total_loss / len(dataloader)
 
 def evaluate(
         model,
@@ -110,22 +153,23 @@ def evaluate(
     with torch.no_grad():
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
-            mask = ~torch.isnan(targets)
-
-            logits = model(inputs)
-            loss = loss_fn(logits[mask], targets[mask])
+            mask = torch.isnan(targets)
+            outputs = model(inputs)
+            targets[mask] = 0.0
+            outputs[mask] = 0.0
+            loss_per_task = loss_fn(outputs, targets)
+            task_losses = torch.mean(loss_per_task, dim=0)
+            loss = torch.sum(task_losses)
             total_loss += loss.item()
-            # MSE = ((torch.pow((logits - targets), 2)).sum()) / total
 
     return total_loss / len(loader)
 
 
-def build_loader(config=None):
-
+def build_loader(config=wandb.config):
     dataset = build_top_dataset(
         data_path="data/papyrus_filtered_high_quality_xc50_01_standardized.csv",
-        activity=config.activity, #"xc50",
-        n_top=config.n_tasks,
+        activity=config.activity,  # "xc50",
+        n_top=config.num_tasks,
         multitask=True
     )
     columns = dataset.columns
@@ -143,9 +187,9 @@ def build_loader(config=None):
         test_data, test_size=0.5, shuffle=True, random_state=42
     )
 
-    train_set = PapyrusDataset(train_data, input_col='smiles', target_col=list(columns))
-    val_set = PapyrusDataset(val_data, input_col='smiles', target_col=list(columns))
-    test_set = PapyrusDataset(test_data, input_col='smiles', target_col=list(columns))
+    train_set = PapyrusDataset(train_data, input_col='smiles', target_col=list(columns), length=config.input_dim)
+    val_set = PapyrusDataset(val_data, input_col='smiles', target_col=list(columns), length=config.input_dim)
+    test_set = PapyrusDataset(test_data, input_col='smiles', target_col=list(columns), length=config.input_dim)
 
     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)
@@ -155,11 +199,13 @@ def build_loader(config=None):
 
 
 def build_optimizer(model, optimizer, lr, weight_decay):
-    if optimizer == 'adam':
+    if optimizer.lower() == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer == 'sgd':
+    elif optimizer.lower() == 'adamw':
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    elif optimizer.lower() == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer == 'rmsprop':
+    elif optimizer.lower() == 'rmsprop':
         optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
         raise ValueError('Unknown optimizer: {}'.format(optimizer))
@@ -167,24 +213,42 @@ def build_optimizer(model, optimizer, lr, weight_decay):
     return optimizer
 
 
-def model_pipeline(): #config=None
+def build_loss(loss, reduction='none'):
+    if loss.lower() == 'mse':
+        loss_fn = nn.MSELoss(reduction=reduction)
+    elif loss.lower() in ['mae', 'l1']:
+        loss_fn = nn.L1Loss(reduction=reduction)
+    elif loss.lower() in ['huber', 'smoothl1']:
+        loss_fn = nn.SmoothL1Loss(reduction=reduction)
+    else:
+        raise ValueError('Unknown loss: {}'.format(loss))
+    return loss_fn
+
+
+def model_pipeline():  # config=None
     # Initialize wandb
-    with wandb.init(): #project='multitask-learning', config=config
+    with wandb.init():  # project='multitask-learning', config=config
         config = wandb.config
 
         # Load the dataset
-        train_loader, val_loader, test_loader = build_loader(config) # wandb.config.config.batch_size
+        train_loader, val_loader, test_loader = build_loader(config)
+        # wandb.config.config.batch_size
 
         # Load the model
         model = DNN(
             input_dim=config.input_dim,
-            hidden_dim=config.hidden_dim,
-            output_dim=config.output_dim,
+            hidden_dim_1=config.hidden_dim_1,
+            hidden_dim_2=config.hidden_dim_2,
+            hidden_dim_3=config.hidden_dim_3,
+            # hidden_dim=config.hidden_dim,
+            num_tasks=config.num_tasks,
             dropout=config.dropout
         ).to(device)
 
         # Define the loss function
-        loss_fn = nn.MSELoss()
+        loss_fn = build_loss(config.loss, reduction='none')
+        # loss_fn = nn.MSELoss(reduction='none')
+        # loss_fn = nn.SmoothL1Loss(reduction='none')
 
         # Define the optimizer with weight decay and learning rate scheduler
         optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
@@ -204,14 +268,14 @@ def model_pipeline(): #config=None
         early_stop_counter = 0
         for epoch in tqdm(range(config.num_epochs)):
             # Training
-            train_loss, train_entropy = train(model, train_loader, optimizer, loss_fn)
+            train_loss = train(model, train_loader, optimizer, loss_fn)
             # Validation
             val_loss = evaluate(model, val_loader, loss_fn)
             # Log the metrics
             wandb.log({
                 'epoch': epoch,
                 'train_loss': train_loss,
-                'train_entropy': train_entropy,
+                # 'train_entropy': train_entropy,
                 'val_loss': val_loss
             })
             # Update the learning rate
@@ -221,10 +285,16 @@ def model_pipeline(): #config=None
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 early_stop_counter = 0
-                # Save the best model
+                # Save the best model - dropped to avoid memory issues
+                # best_model = model.copy()
+
                 torch.save(model.state_dict(), 'models/best_model.pt')
                 # optional: save model at the end to view in wandb
-                torch.onnx.export(model, 'models/best_model.onnx')
+                # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
+                # inputs = inputs.to(device)
+                inputs = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device, requires_grad=False)
+                # TODO : create custom torch tensor with the desired dimensions
+                torch.onnx.export(model, inputs, 'models/best_model.onnx')
                 wandb.save("models/best_model.onnx")
 
             else:
@@ -241,6 +311,7 @@ def model_pipeline(): #config=None
             'test_loss': test_loss
         })
 
+        return test_loss
         # Log the final hyperparameters
         # wandb.config.update({
         #     'best_val_loss': best_val_loss,
@@ -248,64 +319,134 @@ def model_pipeline(): #config=None
         # })
 
 
-def hyperparam_search():
+def run_pipeline(sweep=False):
+    if sweep:
+        sweep_config = get_sweep_config()
+        sweep_id = wandb.sweep(
+            sweep_config,
+            project='multitask-learning-hyperparam'
+        )
+
+        wandb.agent(sweep_id, function=model_pipeline, count=50)
+    else:
+        config = get_config()
+        wandb.init(
+            project='multitask-learning-2',
+            config=config
+        )
+
+    test_loss = model_pipeline()
+    return test_loss
+
+
+
+def get_config():
+    config = {
+            'input_dim': 1024,
+            'hidden_dim_1': 512,
+            'hidden_dim_2': 256,
+            'hidden_dim_3': 64,
+            'num_tasks': 20,
+            'batch_size': 64,
+            'loss': 'huber',
+            'learning_rate': 0.001,
+            'weight_decay': 0.01,  # 1e-5,
+            'dropout': 0.2,
+            'lr_factor': 0.1,
+            'lr_patience': 10,
+            'num_epochs': 20,
+            'optimizer': 'AdamW',
+            'early_stop': 5,
+            # 'n_tasks': 20,
+            'output_dim': 20,
+            'activity': "xc50"
+        }
+
+    return config
+
+
+def get_sweep_config():
     # # Initialize wandb
     # wandb.init(project='multitask-learning')
-
     # Sweep configuration
     sweep_config = {
         'method': 'random',
         'metric': {
-            'name': 'test_loss',
+            'name': 'val_loss',
             'goal': 'minimize'
         },
         'parameters': {
             'input_dim': {
-                'value': 1024
+                'values': [1024, 2048]
             },
-            'hidden_dim': {
-                'values': [128, 256, 512]
+            # TODO : add hidden_dim_1, hidden_dim_2, hidden_dim_3
+            # 'hidden_dim': {
+            #     'values': [128, 256, 512]
+            # },
+            'hidden_dim_1': {
+                'values': [512, 1024, 2048]
+            },
+            'hidden_dim_2': {
+                'values': [256, 512]
+            },
+            'hidden_dim_3': {
+                'values': [128, 256]
+            },
+            'num_tasks': {
+                'value': 20
             },
             'batch_size': {
-                'distribution': 'q_log_uniform',
-                'q': 1,
-                'min': math.log(32),
-                'max': math.log(256)
+                'values': [32, 64, 128]
+                # 'distribution': 'q_log_uniform',
+                # 'q': 1,
+                # 'min': math.log(32),
+                # 'max': math.log(256)
+            },
+            'loss': {
+                'values': ['huber', 'mse']
             },
             'learning_rate': {
-                'distribution': 'uniform',
-                'min': 0, # 0.001,
-                'max': 0.01
+                'values': [0.001, 0.01, 0.1]
+                # 'distribution': 'uniform',  # 'log_uniform',
+                # 'min': 0,  # 0.001, # e-4
+                # 'max': 0.01  # e-2
+            },
+            'ensemble_size': {
+                'values': [5, 10, 20]
             },
             'weight_decay': {
-                'values': [1e-5, 1e-4]
+                'value': 0.01
             },
             'dropout': {
-                'values': [0.1, 0.2]
+                'value': 0.2
+                # 'values': [0.1, 0.2]
             },
             'lr_factor': {
-                'values': [0.1, 0.5]
+                'value': 0.1
+                # 'values': [0.1, 0.5]
             },
             'lr_patience': {
-                'values': [5, 10]
+                'value': 10
+                # 'values': [5, 10]
             },
             'num_epochs': {
-                'values': [1] # [50, 100, 200]
+                'value': 200
+                # 'values': [200, 3000] # [50, 100, 200]
+                # 'values': [1]  # [50, 100, 200]
             },
             'optimizer': {
-                'values': ['adam', 'sgd']
+                'value': 'AdamW'
+                # 'values': ['adam', 'sgd']
             },
             'early_stop': {
                 'value': 10
-            },
-            'n_tasks': {
-                'value': 20
             },
             'output_dim': {
                 'value': 20
             },
             'activity': {
-                'value': "xc50"
+                'value': "xc50" # or kx
+                # 'values': ['xc50', 'kx']
             },
         },
         'early_terminate': {
@@ -313,38 +454,13 @@ def hyperparam_search():
             'min_iter': 10
         }
     }
-
-    sweep_id = wandb.sweep(
-        sweep_config,
-        project='multitask-learning-hyperparam'
-    )
-
-    wandb.agent(sweep_id, function=model_pipeline, count=50)
-
-
-def run_model():
-    # Initialize wandb
-    wandb.init(
-        project='multitask-learning-2',
-        config= {
-            'input_dim': 1024,
-            'hidden_dim': 256,
-            'batch_size': 64,
-            'learning_rate': 0.001,
-            'weight_decay': 1e-5,
-            'dropout': 0.1,
-            'lr_factor': 0.1,
-            'lr_patience': 10,
-            'num_epochs': 20,
-            'optimizer': 'adam',
-            'early_stop': 5,
-            'n_tasks': 20,
-            'output_dim': 20,
-            'activity': "xc50"
-        }
-    )
-    model_pipeline()
-
+    return sweep_config
+    # sweep_id = wandb.sweep(
+    #     sweep_config,
+    #     project='multitask-learning-hyperparam'
+    # )
+    #
+    # wandb.agent(sweep_id, function=model_pipeline, count=50)
 
 def log_mol_table(smiles_list, predicted, labels, probs, targets):
     table = wandb.Table(columns=['mol', 'predicted', 'labels'] + [f'probs_{t}' for t in targets])
@@ -361,30 +477,6 @@ def log_mol_table(smiles_list, predicted, labels, probs, targets):
     wandb.log({"mols_table": table}, commit=False)
 
 
-
-
-
-
-
-# config_keys = ["input_dim", "hidden_size", "learning_rate", "weight_decay", "dropout", "lr_factor", "lr_patience",
-#                "batch_size", "num_epochs", "n_tasks", "activity", "optimizer"]
-
-# Define a list of configurations to search over
-# configurations = {
-#
-#     'input_dim': 1024,
-#     'hidden_size': [128, 256, 512],
-#     'learning_rate': [0.001, 0.01],
-#     'weight_decay': [1e-5, 1e-4],
-#     'dropout': [0.1, 0.2],
-#     'lr_factor': [0.1, 0.5],
-#     'lr_patience': [5, 10],
-#     'batch_size': [32, 64],
-#     'num_epochs': [50, 100]
-# }
-
-
-
 def train_model(
         model,
         train_loader,
@@ -395,8 +487,9 @@ def train_model(
         momentum=0.9,
         nesterov=True,
         early_stop=200,
-        device="cuda"
+        # device="cuda"
 ):
+    #### similar to deep confidence
     run = wandb.init(
         project="uqdd",
         # Track hyperparameters and run metadata
@@ -406,7 +499,7 @@ def train_model(
 
         })
 
-    criterion = nn.MSELoss()
+    loss_fn = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=nesterov)
     early_stop = early_stop
     early_stop_counter = 0
@@ -425,7 +518,7 @@ def train_model(
 
             optimizer.zero_grad()
             logits = model(inputs)
-            loss = criterion(logits, targets)
+            loss = loss_fn(logits, targets)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -438,7 +531,7 @@ def train_model(
             for inputs, targets in val_loader:
                 outputs = model(inputs)
                 targets = targets.float().unsqueeze(1)
-                loss = criterion(outputs, targets)
+                loss = loss_fn(outputs, targets)
                 val_loss += loss.item()
             val_loss /= len(val_loader)
 
@@ -518,5 +611,139 @@ def train_ensemble(
 
 
 if __name__ == '__main__':
-    run_model()
+    best_model, test_loss = run_pipeline()
+    # run_model()
     # hyperparam_search()
+
+
+
+
+
+
+
+# class MultiTaskLossWrapper(nn.Module):
+#     def __init__(self, task_num, model):
+#         super(MultiTaskLossWrapper, self).__init__()
+#         self.model = model
+#         self.task_num = task_num
+#         self.log_vars = nn.Parameter(torch.zeros((task_num)))
+#
+#     def forward(self, input, targets):
+#         outputs = self.model(input)
+#
+#         loss = 0.0
+#         for task_index in range(self.task_num):
+#             precision = torch.exp(-self.log_vars[task_index])
+#             loss += torch.sum(precision * (targets[task_index] - outputs[task_index]) ** 2. + self.log_vars[task_index], -1)
+#
+#         precision1 = torch.exp(-self.log_vars[0])
+#         loss = torch.sum(precision1 * (targets[0] - outputs[0]) ** 2. + self.log_vars[0], -1)
+#
+#         precision2 = torch.exp(-self.log_vars[1])
+#         loss += torch.sum(precision2 * (targets[1] - outputs[1]) ** 2. + self.log_vars[1], -1)
+#
+#         loss = torch.mean(loss)
+#
+#         return loss, self.log_vars.data.tolist()
+
+
+
+
+#
+# def train(
+#         model,
+#         dataloader,
+#         optimizer,
+#         loss_fn,
+#         # device=device
+# ):
+#     # Tell wandb to watch what the model gets up to: gradients, weights, and more!
+#     wandb.watch(model, loss_fn, log="all", log_freq=10)
+#
+#     model.train()
+#     total_loss = 0.0
+#     # total_entropy = 0.0
+#     for i, (inputs, targets) in enumerate(dataloader):
+#         inputs, targets = inputs.to(device), targets.to(device)
+#         # Create a mask for Nan targets
+#         mask = torch.isnan(targets)
+#         # Zero the parameter gradients
+#         optimizer.zero_grad()
+#         # ➡ Forward pass
+#         logits = model(inputs)
+#         # Compute the MSE loss only for non-NaN values
+#         loss_per_task = loss_fn(logits, targets)  # , reduction='none'
+#         loss_per_task[mask] = 0.0
+#         task_losses = torch.mean(loss_per_task, dim=0)
+#         loss = torch.sum(task_losses)
+#         total_loss += loss.item()
+#
+#         # ⬅ Backward pass + weight update
+#         loss.backward()
+#         optimizer.step()
+#         # TODO : wrapper of the loss function - Multiple tasks - Multiple losses add up the dimension
+#         #  and average over the batch dimension
+#         #  reduction = 'none'
+#         #  https://pytorch.org/docs/stable/generated/torch.nn.MSELoss.html
+#         #  use none --> (batch, tasks) torch.sum dim 1 --> torch.mean dim 0 --> scalar
+#
+#         # batch entropy
+#         # TODO : doesnt make sense to calculate entropy
+#         #  - only for classification - in RL they want to know how commited an action is.
+#         # prob = torch.softmax(logits, dim=-1)
+#         # entropy = -torch.sum(prob * torch.log(prob), dim=-1)
+#
+#         if i % 25 == 0:
+#             # log Batch loss and Batch entropy every 25 batches
+#             wandb.log({"batch loss": loss.item()})
+#             # wandb.log({"batch entropy": torch.mean(entropy).item()})
+#         # total_entropy += torch.mean(entropy).item()
+#     return total_loss / len(dataloader)  # , total_entropy / len(dataloader)
+
+
+
+
+# config_keys = ["input_dim", "hidden_size", "learning_rate", "weight_decay", "dropout", "lr_factor", "lr_patience",
+#                "batch_size", "num_epochs", "n_tasks", "activity", "optimizer"]
+
+# Define a list of configurations to search over
+# configurations = {
+#
+#     'input_dim': 1024,
+#     'hidden_size': [128, 256, 512],
+#     'learning_rate': [0.001, 0.01],
+#     'weight_decay': [1e-5, 1e-4],
+#     'dropout': [0.1, 0.2],
+#     'lr_factor': [0.1, 0.5],
+#     'lr_patience': [5, 10],
+#     'batch_size': [32, 64],
+#     'num_epochs': [50, 100]
+# }
+
+# def run_model():
+#     # Initialize wandb
+#     config = get_config()
+#     print(config)
+#     # wandb.init(
+#     #     project='multitask-learning-2',
+#     #     config={
+#     #         'input_dim': 1024,
+#     #         'hidden_dim_1': 512,
+#     #         'hidden_dim_2': 256,
+#     #         'hidden_dim_3': 64,
+#     #         'batch_size': 64,
+#     #         'learning_rate': 0.001,
+#     #         'weight_decay': 0.01, # 1e-5,
+#     #         'dropout': 0.2,
+#     #         'lr_factor': 0.1,
+#     #         'lr_patience': 10,
+#     #         'num_epochs': 20,
+#     #         'optimizer': 'adam',
+#     #         'early_stop': 5,
+#     #         'n_tasks': 20,
+#     #         'output_dim': 20,
+#     #         'activity': "xc50"
+#     #     }
+#     # )
+#     model_pipeline()
+#
