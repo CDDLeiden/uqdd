@@ -15,10 +15,11 @@ import copy
 import time
 
 import rdkit
+# import rdkit.Chem as Chem
 from rdkit import Chem, RDLogger
-
-RDLogger.DisableLog('rdApp.info')
-from rdkit.Chem import AllChem
+# from rdkit.Chem import Draw
+# RDLogger.DisableLog('rdApp.info')
+from rdkit.Chem import Draw, AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 
@@ -247,6 +248,7 @@ def standardize_df(
 
     return df_filtered, df_nan, df_dup
 
+
 # define function that transforms SMILES strings into ECFPs
 def ECFP_from_smiles(smiles,
                      radius=2,
@@ -325,9 +327,9 @@ def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chiralit
     # for length in [2 ** i for i in range(5, 12)]:
 
     df[f'ECFP'] = df['smiles'].apply(lambda x: ECFP_from_smiles(x, radius=radius,
-                                                                                  length=length,
-                                                                                  use_features=use_features,
-                                                                                  use_chirality=use_chirality)) # df[f'ECFP-{radius}-{length}']
+                                                                length=length,
+                                                                use_features=use_features,
+                                                                use_chirality=use_chirality))  # df[f'ECFP-{radius}-{length}']
 
     return df
 
@@ -458,3 +460,56 @@ def generate_mol_descriptors(df: pd.DataFrame, smiles_col: str = 'smiles', chose
     # new_df.loc[i, descriptors] = descriptor_vals
     #
     # return new_df
+
+
+def mol_to_pil_image(molecule: Chem.rdchem.Mol, width: int = 300, height: int = 300) -> "PIL.Image":
+    """
+    Converts an RDKit molecule to a PIL image.
+
+    Parameters
+    ----------
+    molecule : rdkit.Chem.rdchem.Mol
+        The RDKit molecule to convert.
+    width : int, optional
+        The width of the image in pixels. Default is 300.
+    height : int, optional
+        The height of the image in pixels. Default is 300.
+
+    Returns
+    -------
+    PIL.Image
+        The PIL image.
+
+    source: https://www.rdkit.org/docs/Cookbook.html
+    """
+    Chem.AllChem.Compute2DCoords(molecule)
+    Chem.AllChem.GenerateDepictionMatching2DStructure(molecule, molecule)
+    pil_image = Draw.MolToImage(molecule, size=(width, height))
+    return pil_image
+
+
+def smi_to_pil_image(smiles: str, width: int = 300, height: int = 300) -> "PIL.Image":
+    """
+    Converts an RDKit molecule to a PIL image.
+
+    Parameters
+    ----------
+    smiles : str
+        The SMILES string to convert.
+    width : int, optional
+        The width of the image in pixels. Default is 300.
+    height : int, optional
+        The height of the image in pixels. Default is 300.
+
+    Returns
+    -------
+    PIL.Image
+        The PIL image.
+
+    source: https://www.rdkit.org/docs/Cookbook.html
+    """
+    molecule = Chem.MolFromSmiles(smiles)
+    Chem.AllChem.Compute2DCoords(molecule)
+    Chem.AllChem.GenerateDepictionMatching2DStructure(molecule, molecule)
+    pil_image = Draw.MolToImage(molecule, size=(width, height))
+    return pil_image

@@ -346,7 +346,7 @@ class PapyrusDataset(Dataset):
         # x_sample = torch.tensor(self.x_data[idx])
         # y_sample = torch.tensor(self.y_data[idx]).to(torch.float)
 
-        return x_sample, y_sample
+        return (x_smiles, x_sample), y_sample
 
 # # Example usage
 # data = pd.read_csv('data/papyrus_filtered_high_quality_xc50_00_preprocessed.csv')

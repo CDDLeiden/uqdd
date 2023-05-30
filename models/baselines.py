@@ -9,18 +9,20 @@ __status__ = "Development"
 import math
 import random
 from tqdm import tqdm
+import wandb
+import pandas as pd
 from papyrus import build_top_dataset, PapyrusDataset
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-import wandb
 from torch.utils.data import DataLoader, random_split
 
 from rdkit import Chem
+from chemutils import smi_to_pil_image
 from sklearn.model_selection import train_test_split, KFold
-from papyrus_scripts.modelling import pcm, qsar
-import xgboost
+# from papyrus_scripts.modelling import pcm, qsar
+# import xgboost
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
@@ -86,12 +88,12 @@ def train(
         # device=device
 ):
     # Tell wandb to watch what the model gets up to: gradients, weights, and more!
-    wandb.watch(model, loss_fn, log="all", log_freq=10)
+    wandb.watch(model, loss_fn, log="all", log_freq=10) # , log_graph=True
 
     model.train()
     total_loss = 0.0
     # total_entropy = 0.0
-    for i, (inputs, targets) in enumerate(dataloader):
+    for i, ((smiles, inputs), targets) in enumerate(dataloader):
         inputs, targets = inputs.to(device), targets.to(device)
         # Create a mask for Nan targets
         mask = torch.isnan(targets)
@@ -146,12 +148,13 @@ def evaluate(
         model,
         loader,
         loss_fn,
+        last_batch_log=False,
         # device=device
 ):
     model.eval()
     total_loss = 0.0
     with torch.no_grad():
-        for inputs, targets in loader:
+        for (smiles, inputs), targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
             mask = torch.isnan(targets)
             outputs = model(inputs)
@@ -161,6 +164,10 @@ def evaluate(
             task_losses = torch.mean(loss_per_task, dim=0)
             loss = torch.sum(task_losses)
             total_loss += loss.item()
+        if last_batch_log:
+            targets_names = loader.dataset.target_col
+            # smiles = smiles.to(device)
+            log_mol_table(smiles, inputs, targets, outputs, targets_names)
 
     return total_loss / len(loader)
 
@@ -227,7 +234,7 @@ def build_loss(loss, reduction='none'):
 
 def model_pipeline():  # config=None
     # Initialize wandb
-    with wandb.init():  # project='multitask-learning', config=config
+    with wandb.init(dir='logs/'):  # project='multitask-learning', config=config
         config = wandb.config
 
         # Load the dataset
@@ -272,12 +279,14 @@ def model_pipeline():  # config=None
             # Validation
             val_loss = evaluate(model, val_loader, loss_fn)
             # Log the metrics
-            wandb.log({
-                'epoch': epoch,
-                'train_loss': train_loss,
-                # 'train_entropy': train_entropy,
-                'val_loss': val_loss
-            })
+            wandb.log(
+                data={
+                    'train_loss': train_loss,
+                    'val_loss': val_loss,
+                },
+                step=epoch,
+            )
+            # 'epoch': epoch,
             # Update the learning rate
             lr_scheduler.step(val_loss)
 
@@ -305,7 +314,7 @@ def model_pipeline():  # config=None
         # Load the best model
         model.load_state_dict(torch.load('models/best_model.pt'))
         # Test
-        test_loss = evaluate(model, test_loader, loss_fn)
+        test_loss = evaluate(model, test_loader, loss_fn, last_batch_log=True)
         # Log the final test metrics
         wandb.log({
             'test_loss': test_loss
@@ -326,15 +335,19 @@ def run_pipeline(sweep=False):
             sweep_config,
             project='multitask-learning-hyperparam'
         )
-        wandb.agent(sweep_id, function=model_pipeline, count=100)
+        wandb.agent(sweep_id, function=model_pipeline, count=20)
+        tloss = None
+
     else:
         config = get_config()
         wandb.init(
             project='multitask-learning-2',
+            dir='logs/',
             config=config
         )
-        test_loss = model_pipeline()
-    return test_loss
+        tloss = model_pipeline()
+
+    return tloss
 
 
 
@@ -352,7 +365,7 @@ def get_config():
             'dropout': 0.2,
             'lr_factor': 0.1,
             'lr_patience': 10,
-            'num_epochs': 20,
+            'num_epochs': 1, # 20,
             'optimizer': 'AdamW',
             'early_stop': 5,
             # 'n_tasks': 20,
@@ -404,20 +417,21 @@ def get_sweep_config():
                 'values': ['huber', 'mse']
             },
             'learning_rate': {
-                'values': [0.001, 0.01, 0.1]
+                'values': [0.001, 0.01]
                 # 'distribution': 'uniform',  # 'log_uniform',
                 # 'min': 0,  # 0.001, # e-4
                 # 'max': 0.01  # e-2
             },
             'ensemble_size': {
-                'values': [5, 10, 20]
+                'value': 100
+                # 'values': [5, 10, 20]
             },
             'weight_decay': {
                 'value': 0.01
             },
             'dropout': {
-                'value': 0.2
-                # 'values': [0.1, 0.2]
+                # 'value': 0.2
+                'values': [0.1, 0.2]
             },
             'lr_factor': {
                 'value': 0.1
@@ -428,16 +442,16 @@ def get_sweep_config():
                 # 'values': [5, 10]
             },
             'num_epochs': {
-                'value': 200
+                'value': 3000
                 # 'values': [200, 3000] # [50, 100, 200]
                 # 'values': [1]  # [50, 100, 200]
+            },
+            'early_stop': {
+                'value': 100
             },
             'optimizer': {
                 'value': 'AdamW'
                 # 'values': ['adam', 'sgd']
-            },
-            'early_stop': {
-                'value': 10
             },
             'output_dim': {
                 'value': 20
@@ -452,6 +466,7 @@ def get_sweep_config():
             'min_iter': 10
         }
     }
+    # 576 combinations
     return sweep_config
     # sweep_id = wandb.sweep(
     #     sweep_config,
@@ -460,19 +475,83 @@ def get_sweep_config():
     #
     # wandb.agent(sweep_id, function=model_pipeline, count=50)
 
-def log_mol_table(smiles_list, predicted, labels, probs, targets):
-    table = wandb.Table(columns=['mol', 'predicted', 'labels'] + [f'probs_{t}' for t in targets])
-    for smiles, pred, label, prob in zip(smiles_list.to("cpu"), predicted.to("cpu"), labels.to("cpu"), probs.to("cpu")):
-        # TODO SMILES TO MOL IMAGE logging here
-        # Convert SMILES string to RDKit molecule object
-        mol = Chem.MolFromSmiles(smiles)
 
-        # Generate PIL image of the molecule
-        mol_img = Chem.Draw.MolToImage(mol)
-        # TODO : Need modifications because of MultiTask Learning.
-        table.add_data(mol_img, pred, label, *prob.numpy())
+def log_mol_table(smiles, inputs, targets, outputs, targets_names):
+    # targets_cols = targets.columns()
+    # table_cols = ['smiles', 'mol', 'mol_2D', 'ECFP', 'fp_length']
+    # for t in targets_cols:
+    #     table_cols.append(f'{t}_label')
+    #     table_cols.append(f'{t}_predicted')
+    # table = wandb.Table(columns=table_cols)
+    with wandb.init(dir='logs/'):
+        data = []
+        for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
+            row = {
+                "smiles": smi,
+                "molecule": wandb.Molecule.from_smiles(smi),
+                "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
+                "ECFP": inp,
+                "fp_length": len(inp),
+            }
 
-    wandb.log({"mols_table": table}, commit=False)
+            # Iterate over each pair of output and target
+            for targetName, target, output in zip(targets_names, tar, out):
+                row[f'{targetName}_label'] = target
+                row[f'{targetName}_predicted'] = output
+
+            data.append(row)
+
+        dataframe = pd.DataFrame.from_records(data)
+        table = wandb.Table(dataframe=dataframe)
+        # table = wandb.Table(data=data)
+        wandb.log(
+            {
+                "mols_table": table,
+                "molecules": [substance.get("molecule") for substance in data]
+            },
+        )
+
+    #
+    #     table.add_data(
+    #         smi,
+    #         wandb.Molecule.from_smiles(smi),
+    #         wandb.Image(smi_to_pil_image(smi)),
+    #         inp,
+    #         len(inp),
+    #         # *[t, o for t, o in zip(tar, out)]
+    #     )
+    # wandb.log({"mols_table": table}, commit=False)
+    #
+    #
+    # for smiles, pred, label, prob in zip(smiles_list.to("cpu"), predicted.to("cpu"), labels.to("cpu"), probs.to("cpu")):
+    #     # TODO SMILES TO MOL IMAGE logging here
+    #     # Convert SMILES string to RDKit molecule object
+    #     mol = Chem.MolFromSmiles(smiles)
+    #
+    #     # Generate PIL image of the molecule
+    #     mol_img = Chem.Draw.MolToImage(mol)
+    #     # TODO : Need modifications because of MultiTask Learning.
+    #     table.add_data(mol_img, pred, label, *prob.numpy())
+    #
+    # wandb.log({"mols_table": table}, commit=False)
+
+
+# def log_mol_table(smiles_list, predicted, labels, probs, targets):
+#     data = []
+#
+#     table = wandb.Table(columns=['mol', 'predicted', 'labels'] + [f'probs_{t}' for t in targets])
+#     for smiles, pred, label, prob in zip(smiles_list.to("cpu"), predicted.to("cpu"), labels.to("cpu"), probs.to("cpu")):
+#         # TODO SMILES TO MOL IMAGE logging here
+#         # Convert SMILES string to RDKit molecule object
+#         mol = Chem.MolFromSmiles(smiles)
+#
+#         # Generate PIL image of the molecule
+#         mol_img = Chem.Draw.MolToImage(mol)
+#         # TODO : Need modifications because of MultiTask Learning.
+#         table.add_data(mol_img, pred, label, *prob.numpy())
+#
+#
+#     wandb.log({"mols_table": table}, commit=False)
 
 
 def train_model(
