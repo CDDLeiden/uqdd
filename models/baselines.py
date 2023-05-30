@@ -326,16 +326,14 @@ def run_pipeline(sweep=False):
             sweep_config,
             project='multitask-learning-hyperparam'
         )
-
-        wandb.agent(sweep_id, function=model_pipeline, count=50)
+        wandb.agent(sweep_id, function=model_pipeline, count=100)
     else:
         config = get_config()
         wandb.init(
             project='multitask-learning-2',
             config=config
         )
-
-    test_loss = model_pipeline()
+        test_loss = model_pipeline()
     return test_loss
 
 
