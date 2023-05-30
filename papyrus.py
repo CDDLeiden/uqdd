@@ -33,6 +33,11 @@ from chemutils import standardize_df, ECFP_from_smiles, generate_ecfp, generate_
 import torch
 from torch.utils.data import Dataset
 
+# get todays date as yyyy/mm/dd format
+from datetime import date
+today = date.today()
+today = today.strftime("%Y%m%d")
+
 
 class Papyrus:
     def __init__(
@@ -42,6 +47,7 @@ class Papyrus:
             accession: Union[None, str, List] = None,
             activity_type: Union[None, str, List] = None,
             protein_class: Union[None, str, List] = None,
+            std_smiles: bool = True,
             verbose_files: bool = False,
     ):
 
@@ -71,6 +77,7 @@ class Papyrus:
         self.keep_accession = accession
         self.keep_type = activity_type
         self.keep_protein_class = protein_class
+        self.std_smiles = std_smiles
         self.verbose_files = verbose_files
 
         self.cols_rename_map = {
@@ -178,10 +185,16 @@ class Papyrus:
             filter_1 = keep_quality(
                 data=self.papyrus_data, min_quality="High"
             )
-
             filter_2 = keep_match(
                 data=filter_1, column="Protein_Type", values="WT"
             )
+            filter_3 = keep_type(
+                data=filter_2, activity_types=self.keep_type
+            )
+            self.df_filtered = consume_chunks(filter_3, progress=True, total=int(60000000 / self.chunksize))
+
+            # IMPORTANT - WE HERE HAVE TO SET THE STD_SMILES TO TRUE
+            self.std_smiles = True
 
             # self.df_filtered = consume_chunks(filter_2, progress=True, total=int(60000000 / self.chunksize)) #
             # filter_3 = keep_organism(
@@ -200,10 +213,6 @@ class Papyrus:
             #     data=filter_3, activity_types=self.keep_type
             # )
 
-            filter_4 = keep_type(
-                data=filter_2, activity_types=self.keep_type
-            )
-            self.df_filtered = consume_chunks(filter_4, progress=True, total=int(60000000 / self.chunksize))
             # if self.keep_accession:
             #     filter_5 = keep_accession(
             #         data=filter_4, accession=self.keep_accession
@@ -213,40 +222,44 @@ class Papyrus:
 
             # self.df_filtered = consume_chunks(filter_5, progress=True, total=int(60000000/self.chunksize))
 
-            # Renaming before any processing for consistency
-            self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
+            # if self.verbose_files:
+            #     # Renaming before any processing for consistency
+            #     # self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
+            #     self.df_filtered.to_csv(f"data/{today}_papyrus_filtered_high_quality_00_preprocessed.csv")
+
+        # Renaming before any processing for consistency
+        self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
+
+        # SMILES standardization
+        if self.std_smiles:
+            self.df_filtered, df_nan, df_dup = standardize_df(
+                df=self.df_filtered,
+                smiles_col="smiles",
+                other_dup_col="accession",
+                drop=True,
+                sorting_col="year",
+                keep="last",  # keeps latest year datapoints if duplicated
+                logger=self.log,
+            )
 
             if self.verbose_files:
-                self.df_filtered.to_csv("data/papyrus_filtered_high_quality_00_preprocessed.csv")
+                self.df_filtered.to_csv(f"data/{today}_papyrus_filtered_high_quality_01_standardized.csv")
+                df_nan.to_csv(f"data/{today}_papyrus_filtered_high_quality_02_NaN_smiles.csv")
+                df_dup.to_csv(f"data/{today}_papyrus_filtered_high_quality_03_dup_smiles.csv")
 
-        self.df_filtered, df_nan, df_dup = standardize_df(
-            df=self.df_filtered,
-            smiles_col="smiles",
-            other_dup_col="accession",
-            drop=True,
-            sorting_col="year",
-            keep="last",  # keeps latest year datapoints if duplicated
-            logger=self.log,
-        )
-
-        if self.verbose_files:
-            self.df_filtered.to_csv("data/papyrus_filtered_high_quality_01_standardized.csv")
-            df_nan.to_csv("data/papyrus_filtered_high_quality_02_NaN_smiles.csv")
-            df_dup.to_csv("data/papyrus_filtered_high_quality_03_dup_smiles.csv")
-
-        # converting pchembl values into list of floats
-        self.df_filtered["pchemblValue"] = (
-            self.df_filtered["pchemblValue"]
-            .str.split(";")
-            .apply(lambda x: [float(i) for i in x] if type(x) != float else x)
-        )
+        # # converting pchembl values into list of floats - not needed anymore
+        # self.df_filtered["pchemblValue"] = (
+        #     self.df_filtered["pchemblValue"]
+        #     .str.split(";")
+        #     .apply(lambda x: [float(i) for i in x] if type(x) != float else x)
+        # )
 
         # # calculate ECFP fingerprints
         # self.df_filtered = generate_ecfp(self.df_filtered, 2, 1024, False, False)
-        #
+        # >>>>>>> TO THE DATALOADER
         # # calculate mol descriptors
         # self.df_filtered = generate_mol_descriptors(self.df_filtered, 'smiles', None)
-        # TODO Adding Molecular and Protein Descriptors ???
+        # TODO Adding Molecular and Protein Descriptors ??? NO NEED will be added in the dataloader
         # mol_descriptors = self.molecular_descriptors()
         # protein_descriptors = self.protein_descriptors()
 
@@ -298,10 +311,18 @@ class PapyrusDataset(Dataset):
             data: pd.DataFrame,
             input_col: str = "smiles",
             target_col: Union[str, List] = "pchemblValueMean",
+            length: int = 1024,
+            radius: int = 0,
     ):
         self.data = data
         self.input_col = input_col
         self.target_col = target_col
+        self.length = length
+        if radius == 0:
+            radius_dict = {1024: 2, 2048: 4, 4096: 4}
+            self.radius = radius_dict[length]
+        else:
+            self.radius = radius
         # self.x_data = self.df[input_col]
         # self.y_data = self.df[target_col]
 
@@ -315,7 +336,7 @@ class PapyrusDataset(Dataset):
         row = self.data.iloc[idx]
         x_smiles = row[self.input_col]
         # x_smiles = self.data.iloc[idx][self.input_col]
-        x_sample = ECFP_from_smiles(x_smiles, 2, 1024)
+        x_sample = ECFP_from_smiles(x_smiles, self.radius, self.length)
         # x_sample = np.array(x_sample, dtype=bool).astype(np.float32)
         x_sample = torch.tensor(x_sample).to(torch.float)
 
@@ -344,35 +365,48 @@ def build_top_dataset(
         "xc50": ["IC50", "EC50"],
         "kx": ["Ki", "Kd"]}
     activity = activity.lower()
+
+    papyrus_ = Papyrus(
+        path=data_path,
+        chunksize=1000000,
+        accession=None,
+        activity_type=act_dict[activity],
+        protein_class=None,
+        std_smiles=False, # TODO WATCH OUT FOR THIS - WHEN WE CHANGE THE DATASET
+        verbose_files=True,
+    )
+    df = papyrus_()
+
+    # if os.path.isfile(data_path):
+    #     dtypes = {
+    #         "typeIC50": 'str',  # 'int32',
+    #         "typeEC50": 'str',  # 'int32',
+    #         "typeKi": 'str',  # 'int32',
+    #         "typeKd": 'str',  # 'int32',
+    #         "relation": 'str',
+    #         "activityClass": 'str',
+    #         "pchemblValue": 'str',
+    #         "pchemblValueMean": 'float64',
+    #         "pchemblValueStdDev": 'float64',
+    #         "pchemblValueSEM": 'float64',
+    #         "pchemblValueN": 'int32',
+    #         "pchemblValueMedian": 'float64',
+    #         "pchemblValueMAD": 'float64',
+    #     }
     #
-    # papyrus_ = Papyrus(
-    #     path=data_path,
-    #     chunksize=1000000,
-    #     accession=None,
-    #     activity_type=act_dict[activity],
-    #     protein_class=None,
-    #     verbose_files=True
-    # )
-    # df = papyrus_()
-
-    dtypes = {
-        "typeIC50": 'str',  # 'int32',
-        "typeEC50": 'str',  # 'int32',
-        "typeKi": 'str',  # 'int32',
-        "typeKd": 'str',  # 'int32',
-        "relation": 'str',
-        "activityClass": 'str',
-        "pchemblValue": 'str',
-        "pchemblValueMean": 'float64',
-        "pchemblValueStdDev": 'float64',
-        "pchemblValueSEM": 'float64',
-        "pchemblValueN": 'int32',
-        "pchemblValueMedian": 'float64',
-        "pchemblValueMAD": 'float64',
-    }
-
-    df = pd.read_csv(data_path, dtype=dtypes, index_col=0, header=0, low_memory=False)
-
+    #     df = pd.read_csv(data_path, dtype=dtypes, index_col=0, header=0, low_memory=False)
+    #
+    # else:
+    #     papyrus_ = Papyrus(
+    #         path=data_path,
+    #         chunksize=1000000,
+    #         accession=None,
+    #         activity_type=act_dict[activity],
+    #         protein_class=None,
+    #         verbose_files=True
+    #     )
+    #     df = papyrus_()
+    #     df.to_csv(data_path+f"{date}_{activity}.csv")
     # Filtering the top x targets in number of datapoints.
     # step 1: group the dataframe by protein target
     # print(df_xc50.shape)
