@@ -29,3 +29,4 @@ dependencies:
       - chembl_webresource_client
       - uncertainty-toolbox
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
+      - wandb
