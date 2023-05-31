@@ -148,7 +148,7 @@ def evaluate(
         model,
         loader,
         loss_fn,
-        last_batch_log=False,
+        # last_batch_log=False,
         # device=device
 ):
     model.eval()
@@ -164,10 +164,10 @@ def evaluate(
             task_losses = torch.mean(loss_per_task, dim=0)
             loss = torch.sum(task_losses)
             total_loss += loss.item()
-        if last_batch_log:
-            targets_names = loader.dataset.target_col
-            # smiles = smiles.to(device)
-            log_mol_table(smiles, inputs, targets, outputs, targets_names)
+        # if last_batch_log:
+        #     targets_names = loader.dataset.target_col
+        #     # smiles = smiles.to(device)
+        #     log_mol_table(smiles, inputs, targets, outputs, targets_names)
 
     return total_loss / len(loader)
 
@@ -314,7 +314,7 @@ def model_pipeline():  # config=None
         # Load the best model
         model.load_state_dict(torch.load('models/best_model.pt'))
         # Test
-        test_loss = evaluate(model, test_loader, loss_fn, last_batch_log=True)
+        test_loss = evaluate(model, test_loader, loss_fn) # , last_batch_log=True
         # Log the final test metrics
         wandb.log({
             'test_loss': test_loss
@@ -333,7 +333,7 @@ def run_pipeline(sweep=False):
         sweep_config = get_sweep_config()
         sweep_id = wandb.sweep(
             sweep_config,
-            project='multitask-learning-hyperparam'
+            project='2023-05-31-mtl-hyperparam'
         )
         wandb.agent(sweep_id, function=model_pipeline, count=20)
         tloss = None
@@ -341,7 +341,7 @@ def run_pipeline(sweep=False):
     else:
         config = get_config()
         wandb.init(
-            project='multitask-learning-2',
+            project='2023-05-31-mtl',
             dir='logs/',
             config=config
         )
@@ -365,7 +365,7 @@ def get_config():
             'dropout': 0.2,
             'lr_factor': 0.1,
             'lr_patience': 10,
-            'num_epochs': 1, # 20,
+            'num_epochs': 10, # 20,
             'optimizer': 'AdamW',
             'early_stop': 5,
             # 'n_tasks': 20,
@@ -483,34 +483,31 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     #     table_cols.append(f'{t}_label')
     #     table_cols.append(f'{t}_predicted')
     # table = wandb.Table(columns=table_cols)
-    with wandb.init(dir='logs/'):
-        data = []
-        for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
-            row = {
-                "smiles": smi,
-                "molecule": wandb.Molecule.from_smiles(smi),
-                "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
-                "ECFP": inp,
-                "fp_length": len(inp),
-            }
+    run = wandb.init(dir='logs/')
+    # with :
+    data = []
+    for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
+        row = {
+            "smiles": smi,
+            "molecule": wandb.Molecule.from_smiles(smi),
+            "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
+            "ECFP": inp,
+            "fp_length": len(inp),
+        }
 
-            # Iterate over each pair of output and target
-            for targetName, target, output in zip(targets_names, tar, out):
-                row[f'{targetName}_label'] = target
-                row[f'{targetName}_predicted'] = output
+        # Iterate over each pair of output and target
+        for targetName, target, output in zip(targets_names, tar, out):
+            row[f'{targetName}_label'] = target.item()
+            row[f'{targetName}_predicted'] = output.item()
 
-            data.append(row)
+        data.append(row)
 
-        dataframe = pd.DataFrame.from_records(data)
-        table = wandb.Table(dataframe=dataframe)
-        # table = wandb.Table(data=data)
-        wandb.log(
-            {
-                "mols_table": table,
-                "molecules": [substance.get("molecule") for substance in data]
-            },
-        )
+    dataframe = pd.DataFrame.from_records(data)
+    table = wandb.Table(dataframe=dataframe)
+    run.log({"mols_table": table})
+            # "molecules": [substance.get("molecule") for substance in data]
 
+    # table = wandb.Table(data=data)
     #
     #     table.add_data(
     #         smi,
