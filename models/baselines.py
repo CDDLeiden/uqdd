@@ -27,6 +27,8 @@ from sklearn.model_selection import train_test_split, KFold
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
 
+wandb_dir = '/mnt/code/logs/'
+sweep_count = 100
 
 class DNN(nn.Module):
     def __init__(self,
@@ -234,7 +236,7 @@ def build_loss(loss, reduction='none'):
 
 def model_pipeline():  # config=None
     # Initialize wandb
-    with wandb.init(dir='logs/'):  # project='multitask-learning', config=config
+    with wandb.init(dir=wandb_dir, mode="offline"):  # project='multitask-learning', config=config
         config = wandb.config
 
         # Load the dataset
@@ -335,20 +337,20 @@ def run_pipeline(sweep=False):
             sweep_config,
             project='2023-05-31-mtl-hyperparam'
         )
-        wandb.agent(sweep_id, function=model_pipeline, count=20)
+        wandb.agent(sweep_id, function=model_pipeline, count=sweep_count)
         tloss = None
 
     else:
         config = get_config()
         wandb.init(
             project='2023-05-31-mtl',
-            dir='logs/',
+            dir=wandb_dir,
+            mode="offline",
             config=config
         )
         tloss = model_pipeline()
 
     return tloss
-
 
 
 def get_config():
@@ -450,8 +452,8 @@ def get_sweep_config():
                 'value': 100
             },
             'optimizer': {
-                'value': 'AdamW'
-                # 'values': ['adam', 'sgd']
+                 # 'value': 'AdamW'
+                'values': ['adamw', 'sgd']
             },
             'output_dim': {
                 'value': 20
@@ -483,7 +485,7 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     #     table_cols.append(f'{t}_label')
     #     table_cols.append(f'{t}_predicted')
     # table = wandb.Table(columns=table_cols)
-    run = wandb.init(dir='logs/')
+    run = wandb.init(dir=wandb_dir, mode="offline")
     # with :
     data = []
     for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
@@ -570,8 +572,10 @@ def train_model(
         config={
             "learning_rate": lr,
             "epochs": num_epochs,
-
-        })
+        },
+        dir=wandb_dir,
+        mode="offline"
+    )
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=nesterov)
