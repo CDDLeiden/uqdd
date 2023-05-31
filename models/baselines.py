@@ -452,7 +452,7 @@ def get_sweep_config():
                 'value': 100
             },
             'optimizer': {
-                 # 'value': 'AdamW'
+                # 'value': 'AdamW'
                 'values': ['adamw', 'sgd']
             },
             'output_dim': {
