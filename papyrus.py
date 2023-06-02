@@ -339,13 +339,12 @@ def data_preparation(
         os.makedirs(output_path)
 
 
-
     # Read the data
     papyrus_ = Papyrus(
         path=papyrus_path,
         chunksize=1000000,
         accession=None,
-        activity_type=act_dict[activity],
+        activity_type=activity,
         protein_class=None,
         std_smiles=std_smiles,
         verbose_files=verbose_files,
