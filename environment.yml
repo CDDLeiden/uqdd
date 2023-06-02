@@ -1,4 +1,4 @@
-name: uq-dd
+name: uqdd-env
 channels:
   - conda-forge
   - pytorch
@@ -17,16 +17,15 @@ dependencies:
   - matplotlib
   - seaborn
   - plotly
-  - pytorch
-  - torchvision
-  - cudatoolkit
-  - pytorch-cuda
+  - pytorch=1.13.1
+  - torchvision=0.14.1
+  - pytorch-cuda=11.7
   - tensorboard
   - tqdm
   - rdkit
   - ignite
   - pip:
       - chembl_webresource_client
-      - uncertainty-toolbox
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
+      - uncertainty-toolbox
       - wandb
