@@ -11,7 +11,8 @@ from typing import Union, List, Tuple
 import pandas as pd
 import numpy as np
 import logging
-
+import pickle
+from sklearn.model_selection import train_test_split
 from papyrus_scripts.download import download_papyrus
 from papyrus_scripts.reader import (
     read_papyrus,
@@ -75,6 +76,21 @@ class Papyrus:
         self.chunksize = chunksize
 
         self.keep_accession = accession
+        activity_type = activity_type.lower()
+        if type(activity_type)==str and activity_type in ["xc50", "kx"]:
+            act_dict = {
+                "xc50": ["IC50", "EC50"],
+                "kx": ["Ki", "Kd"]}
+
+            self.activity_key = activity_type
+            activity_type = act_dict[activity_type]
+            # self.activity_type = activity_type
+        elif type(activity_type)==str and activity_type in ["ic50", "ec50", "kd", "ki"]:
+            self.activity_key = activity_type
+
+        elif type(activity_type)==list:
+            self.activity_key = activity_type.join("_")
+
         self.keep_type = activity_type
         self.keep_protein_class = protein_class
         self.std_smiles = std_smiles
@@ -243,9 +259,9 @@ class Papyrus:
             )
 
             if self.verbose_files:
-                self.df_filtered.to_csv(f"data/{today}_papyrus_filtered_high_quality_01_standardized.csv")
-                df_nan.to_csv(f"data/{today}_papyrus_filtered_high_quality_02_NaN_smiles.csv")
-                df_dup.to_csv(f"data/{today}_papyrus_filtered_high_quality_03_dup_smiles.csv")
+                self.df_filtered.to_csv(f"data/{today}_papyrus_{self.activity_key}_01_standardized.csv")
+                df_nan.to_csv(f"data/{today}_papyrus_{self.activity_key}_02_NaN_smiles.csv")
+                df_dup.to_csv(f"data/{today}_papyrus_{self.activity_key}_03_dup_smiles.csv")
 
         # # converting pchembl values into list of floats - not needed anymore
         # self.df_filtered["pchemblValue"] = (
@@ -281,7 +297,7 @@ class Papyrus:
         self.log.info(f"Shape of the molecular descriptors: {mol_descriptors.shape}")
 
         if self.verbose_files:
-            mol_descriptors.to_csv("data/papyrus_filtered_high_quality_04_mol_desc.csv")
+            mol_descriptors.to_csv(f"data/{today}_papyrus_{self.activity_key}_04_mol_desc.csv")
 
         return mol_descriptors
 
@@ -298,31 +314,131 @@ class Papyrus:
         )
 
         if self.verbose_files:
-            protein_descriptors.to_csv("data/papyrus_filtered_high_quality_05_protein_desc.csv")
+            protein_descriptors.to_csv(f"data/{today}_papyrus_{self.activity_key}_05_protein_desc.csv")
 
         self.log.info("Protein descriptors shape: {}".format(protein_descriptors.shape))
 
         return protein_descriptors
 
 
+def data_preparation(
+        papyrus_path: str = "data/",
+        activity="xc50",
+        n_top=20,
+        multitask=True,
+        std_smiles=True,
+        output_path="data/dataset/",
+        verbose_files=False,
+):
+    assert activity.lower() in ["xc50", "kx"], "activity must be either xc50 or kx"
+    assert isinstance(n_top, int), "n_top must be an integer"
+    assert isinstance(std_smiles, bool), "std_smiles must be a boolean"
+    # assert isinstance(ecfp_length, int), "ecfp_length must be an integer"
+    if not os.path.exists(output_path):
+        # make dir
+        os.makedirs(output_path)
+
+
+
+    # Read the data
+    papyrus_ = Papyrus(
+        path=papyrus_path,
+        chunksize=1000000,
+        accession=None,
+        activity_type=act_dict[activity],
+        protein_class=None,
+        std_smiles=std_smiles,
+        verbose_files=verbose_files,
+    )
+    df = papyrus_()
+    # step 1: group the dataframe by protein target
+    # print(df_xc50.shape)
+    grouped = df.groupby('accession')
+    # step 2: count the number of measurements for each protein target
+    counts = grouped['accession'].count()
+    # step 3: sort the counts in descending order
+    sorted_counts = counts.sort_values(ascending=False)  # by='counts',
+    # step 4: select the 20 protein targets with the highest counts
+    top_targets = sorted_counts.head(n_top)
+    # step 5: filter the original dataframe to only include rows corresponding to these 20 protein targets
+    filtered_df = df[df['accession'].isin(top_targets.index)]
+    # step 6: filter the dataframe to only include rows with a pchembl value mean
+    filtered_df = filtered_df[filtered_df['pchemblValueMean'].notna()]
+
+    # step 7: multitask pivoting
+    if multitask:
+        pivoted = pd.pivot_table(
+            filtered_df,
+            index='smiles',
+            columns='accession',
+            values='pchemblValueMean',
+            aggfunc='first'
+        )
+        # reset the index to make the 'smiles' column a regular column
+        pivoted = pivoted.reset_index()
+        # replace any missing values with NaN
+        df = pivoted.fillna(value=np.nan)
+        target_col = list(top_targets.index)
+
+    else:
+        df = filtered_df[["smiles", "accession", "pchemblValueMean"]]
+        target_col = ['pchemblValueMean']
+    # step 8: generate the ecfp descriptors
+    df = generate_ecfp(df, 2, 1024, False, False)
+    df = generate_ecfp(df, 4, 2048, False, False)
+
+    # step 9: split and save the dataframes
+    train_path = os.path.join(output_path, "train.pkl")
+    val_path = os.path.join(output_path, "val.pkl")
+    test_path = os.path.join(output_path, "test.pkl")
+    all_path = os.path.join(output_path, "all.pkl")
+    target_col_path = os.path.join(output_path, "target_col.pkl")
+
+    train_data, test_data = train_test_split(
+        df, test_size=0.3, shuffle=True, random_state=42
+    )
+    val_data, test_data = train_test_split(
+        test_data, test_size=0.5, shuffle=True, random_state=42
+    )
+
+    for file_path, data in zip(
+            [train_path, val_path, test_path, all_path, target_col_path],
+            [train_data, val_data, test_data, df, target_col]):
+        with open(file_path, 'wb') as file:
+            pickle.dump(data, file)
+
+    return train_data, val_data, test_data, df
+
+
 class PapyrusDataset(Dataset):
     def __init__(
             self,
-            data: pd.DataFrame,
-            input_col: str = "smiles",
-            target_col: Union[str, List] = "pchemblValueMean",
-            length: int = 1024,
-            radius: int = 0,
+            file_path: str = "data/dataset/train.pkl",
+            input_col: str = "ecfp1024",
+            smiles_col: str = "smiles",
+            target_col: Union[str, List, None] = None,
+            # length: int = 1024,
+            # radius: int = 0,
     ):
-        self.data = data
-        self.input_col = input_col
+        folder_path = os.path.dirname(file_path)
+        with open(file_path, 'rb') as file:
+            self.data = pickle.load(file)
+
+        self.input_col = input_col.lower()
+        self.smiles_col = smiles_col.lower()
+        if target_col is None:
+            # Assuming your DataFrame is named 'df'
+            target_col_path = os.path.join(folder_path, "target_col.pkl")
+            with open(target_col_path, 'rb') as file:
+                target_col = pickle.load(file)
+
         self.target_col = target_col
-        self.length = length
-        if radius == 0:
-            radius_dict = {1024: 2, 2048: 4, 4096: 4}
-            self.radius = radius_dict[length]
-        else:
-            self.radius = radius
+        # self.length = length
+        # if radius == 0:
+        #     radius_dict = {1024: 2, 2048: 4, 4096: 4}
+        #     self.radius = radius_dict[length]
+        # else:
+        #     self.radius = radius
         # self.x_data = self.df[input_col]
         # self.y_data = self.df[target_col]
 
@@ -330,37 +446,49 @@ class PapyrusDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        # print(f"{idx=}")
         if torch.is_tensor(idx):
             idx = idx.tolist()
+
         row = self.data.iloc[idx]
-        x_smiles = row[self.input_col]
+        x_smiles = row[self.smiles_col]
+        # x_smiles = torch.tensor(data=)
+        x_sample = torch.tensor(row[self.input_col]).to(torch.float)
+        y_sample = torch.tensor(row[self.target_col]).to(torch.float)
+        return (x_smiles, x_sample), y_sample
         # x_smiles = self.data.iloc[idx][self.input_col]
-        x_sample = ECFP_from_smiles(x_smiles, self.radius, self.length)
+        # x_sample = ECFP_from_smiles(x_smiles, self.radius, self.length) # TODO : calculate ECFP for all before - not in the dataloader
+        # TODO you can also have cuda-tensor on gpu you can index from there - avoiding moving it from RAM -> GPU
+        # TODO dump them as pickle file with the ECFP calculated
         # x_sample = np.array(x_sample, dtype=bool).astype(np.float32)
-        x_sample = torch.tensor(x_sample).to(torch.float)
+
 
         # y_sample = self.data.iloc[idx][self.target_col]
-        y_sample = row[self.target_col]
-        y_sample = torch.tensor(y_sample).to(torch.float)  # .unsqueeze(1)
+
+          # .unsqueeze(1)
         # x_sample = torch.tensor(self.x_data[idx])
         # y_sample = torch.tensor(self.y_data[idx]).to(torch.float)
 
-        return (x_smiles, x_sample), y_sample
-
-# # Example usage
-# data = pd.read_csv('data/papyrus_filtered_high_quality_xc50_00_preprocessed.csv')
-# papyrus_dataset = PapyrusDataset(data)
-# papyrus_dataloader = DataLoader(papyrus_dataset, batch_size=32, shuffle=True)
 
 
 def build_top_dataset(
         data_path="data/", #"data/" , "data/papyrus_filtered_high_quality_01_standardized.csv",
         activity="xc50",
         n_top=20,
-        multitask=True
+        descriptors="ecfp",
+        multitask=True,
+        std_smiles=True,
+        ecfp_length=1024,
+        ecfp_radius=None,
+        export=True,
 ):
     assert activity.lower() in ["xc50", "kx"], "activity must be either xc50 or kx"
+    assert descriptors.lower() in ["ecfp", "mol", "none", None], "descriptors must be either ecfp or mol or none"
+    assert isinstance(n_top, int), "n_top must be an integer"
+    assert isinstance(std_smiles, bool), "std_smiles must be a boolean"
+    assert isinstance(ecfp_length, int), "ecfp_length must be an integer"
+    assert isinstance(ecfp_radius, int) or ecfp_radius == None, "ecfp_radius must be an integer or None"
+    assert isinstance(export, bool), "export must be a boolean"
+
     act_dict = {
         "xc50": ["IC50", "EC50"],
         "kx": ["Ki", "Kd"]}
@@ -372,8 +500,8 @@ def build_top_dataset(
         accession=None,
         activity_type=act_dict[activity],
         protein_class=None,
-        std_smiles=False, # TODO WATCH OUT FOR THIS - WHEN WE CHANGE THE DATASET
-        verbose_files=True,
+        std_smiles=std_smiles,
+        verbose_files=export,
     )
     df = papyrus_()
 
@@ -437,11 +565,31 @@ def build_top_dataset(
     else:
         df = filtered_df[["smiles", "accession", "pchemblValueMean"]]
 
-    ## calculate properties
-    # calculate ECFP fingerprints
+    if ecfp_radius == 0 or ecfp_radius == None:
+        radius_dict = {1024: 2, 2048: 4, 4096: 4}
+        ecfp_radius = radius_dict[ecfp_length]
+    else:
+        pass
+
+    if descriptors.lower() == "ecfp":
+        # calculate ECFP fingerprints
+        # df = generate_ecfp(df, 2, 1024, False, False)
+        df = generate_ecfp(df, ecfp_radius, ecfp_length, False, False)
+
+    elif descriptors.lower() == "mol":
+        # calculate mol descriptors
+        df = generate_mol_descriptors(df, 'smiles', None)
+    else:
+        pass
+
+
+    # ## calculate properties
+    # # calculate ECFP fingerprints
     # df = generate_ecfp(df, 2, 1024, False, False)
-    # calculate mol descriptors
+    # # calculate mol descriptors
     # df = generate_mol_descriptors(df, 'smiles', None)
+    if export:
+        df.to_csv(data_path+f"{date}_{activity}_top_{n_top}_multitask_{multitask}_descriptors_{descriptors}.csv")
 
     return df
 

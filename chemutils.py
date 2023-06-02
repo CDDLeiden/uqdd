@@ -250,11 +250,13 @@ def standardize_df(
 
 
 # define function that transforms SMILES strings into ECFPs
-def ECFP_from_smiles(smiles,
-                     radius=2,
-                     length=2 ** 10,
-                     use_features=False,
-                     use_chirality=False):
+def ECFP_from_smiles(
+        smiles,
+        radius=2,
+        length=2 ** 10,
+        use_features=False,
+        use_chirality=False
+):
     """
     Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
 
@@ -326,10 +328,10 @@ def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chiralit
     # Generate ECFP fingerprints
     # for length in [2 ** i for i in range(5, 12)]:
 
-    df[f'ECFP'] = df['smiles'].apply(lambda x: ECFP_from_smiles(x, radius=radius,
-                                                                length=length,
-                                                                use_features=use_features,
-                                                                use_chirality=use_chirality))  # df[f'ECFP-{radius}-{length}']
+    df[f'ecfp{length}'] = df['smiles'].apply(lambda x: ECFP_from_smiles(x, radius=radius,
+                                                                        length=length,
+                                                                        use_features=use_features,
+                                                                        use_chirality=use_chirality))  # df[f'ECFP-{radius}-{length}']
 
     return df
 
@@ -408,7 +410,7 @@ def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
     return list_of_descriptor_vals
 
 
-def generate_mol_descriptors(df: pd.DataFrame, smiles_col: str = 'smiles', chosen_descriptors: List[str] = None):
+def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = None): #  smiles_col: str = 'smiles',
     """
     Applies the `mol_descriptors` function to a pandas dataframe and returns a new dataframe
     with additional columns containing the calculated descriptor values.
@@ -435,7 +437,7 @@ def generate_mol_descriptors(df: pd.DataFrame, smiles_col: str = 'smiles', chose
         chosen_descriptors = descriptors
 
     # apply mol_descriptors() to the 'smiles' column using the .apply() method
-    calc_descriptors = new_df[smiles_col].apply(mol_descriptors, chosen_descriptors=chosen_descriptors)
+    calc_descriptors = new_df['smiles'].apply(mol_descriptors, chosen_descriptors=chosen_descriptors)
 
     # convert the list of descriptor values to a DataFrame with separate columns
     descriptor_df = pd.DataFrame(calc_descriptors, columns=chosen_descriptors)  # .tolist()

@@ -8,9 +8,12 @@ __status__ = "Development"
 
 import math
 import random
+import os
 from tqdm import tqdm
 import wandb
 import pandas as pd
+from typing_extensions import deprecated
+
 from papyrus import build_top_dataset, PapyrusDataset
 import torch
 import torch.nn as nn
@@ -20,15 +23,25 @@ from torch.utils.data import DataLoader, random_split
 
 from rdkit import Chem
 from chemutils import smi_to_pil_image
-from sklearn.model_selection import train_test_split, KFold
+# get todays date as yyyy/mm/dd format
+from datetime import date
+today = date.today()
+today = today.strftime("%Y%m%d")
+
+# from sklearn.model_selection import train_test_split, KFold
+
 # from papyrus_scripts.modelling import pcm, qsar
 # import xgboost
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
 
-wandb_dir = '/mnt/code/logs/'
-sweep_count = 100
+wandb_dir = 'logs/'
+wandb_mode = 'online'
+data_dir = 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
+dataset_dir = 'data/dataset/'
+sweep_count = 50
+
 
 class DNN(nn.Module):
     def __init__(self,
@@ -79,8 +92,9 @@ class DNN(nn.Module):
         # for task_specific_layer in self.task_specific:
         #     output = task_specific_layer(features)
         #     outputs.append(output)
-            # outputs.append(task(x))
+        # outputs.append(task(x))
         # return torch.cat(outputs, dim=1)
+
 
 def train(
         model,
@@ -90,7 +104,7 @@ def train(
         # device=device
 ):
     # Tell wandb to watch what the model gets up to: gradients, weights, and more!
-    wandb.watch(model, loss_fn, log="all", log_freq=10) # , log_graph=True
+    wandb.watch(model, loss_fn, log="all", log_freq=10)  # , log_graph=True
 
     model.train()
     total_loss = 0.0
@@ -121,7 +135,9 @@ def train(
         # loss_per_task[mask] = 0.0
         # Dont do propagation for NaN values
         task_losses = torch.mean(loss_per_task, dim=0)
-        loss = torch.sum(task_losses) #TorchTensor(65, device='cuda', grad_fn=<SumBackward1>) grad_fn = <MeanBackward1>
+        loss = torch.sum(
+            task_losses
+        )  # TorchTensor(65, device='cuda', grad_fn=<SumBackward1>) grad_fn = <MeanBackward1>
         total_loss += loss.item()
         # TODO
         # ⬅ Backward pass + weight update
@@ -146,6 +162,7 @@ def train(
         # total_entropy += torch.mean(entropy).item()
     return total_loss / len(dataloader)
 
+
 def evaluate(
         model,
         loader,
@@ -168,37 +185,22 @@ def evaluate(
             total_loss += loss.item()
         # if last_batch_log:
         #     targets_names = loader.dataset.target_col
-        #     # smiles = smiles.to(device)
+        #     smiles = smiles.to(device)
         #     log_mol_table(smiles, inputs, targets, outputs, targets_names)
 
     return total_loss / len(loader)
 
 
 def build_loader(config=wandb.config):
-    dataset = build_top_dataset(
-        data_path="data/papyrus_filtered_high_quality_xc50_01_standardized.csv",
-        activity=config.activity,  # "xc50",
-        n_top=config.num_tasks,
-        multitask=True
-    )
-    columns = dataset.columns
-    columns = columns[1:]
+    d_dir = os.path.join(dataset_dir, config.activity)
 
-    # train_size = int(0.7 * len(dataset))
-    # val_size = int(0.15 * len(dataset))
-    # test_size = len(dataset) - train_size - val_size
-    # train_set, val_set, test_set = random_split(dataset, lengths=[train_size, val_size, test_size])
+    train_path = os.path.join(d_dir, "train.pkl")
+    val_path = os.path.join(d_dir, "val.pkl")
+    test_path = os.path.join(d_dir, "test.pkl")
 
-    train_data, test_data = train_test_split(
-        dataset, test_size=0.3, shuffle=True, random_state=42
-    )
-    val_data, test_data = train_test_split(
-        test_data, test_size=0.5, shuffle=True, random_state=42
-    )
-
-    train_set = PapyrusDataset(train_data, input_col='smiles', target_col=list(columns), length=config.input_dim)
-    val_set = PapyrusDataset(val_data, input_col='smiles', target_col=list(columns), length=config.input_dim)
-    test_set = PapyrusDataset(test_data, input_col='smiles', target_col=list(columns), length=config.input_dim)
+    train_set = PapyrusDataset(train_path, input_col=f"ecfp{config.input_dim}")
+    val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}")
+    test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}")
 
     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)
@@ -236,7 +238,7 @@ def build_loss(loss, reduction='none'):
 
 def model_pipeline():  # config=None
     # Initialize wandb
-    with wandb.init(dir=wandb_dir, mode="offline"):  # project='multitask-learning', config=config
+    with wandb.init(dir=wandb_dir, mode=wandb_mode):  # project='multitask-learning', config=config
         config = wandb.config
 
         # Load the dataset
@@ -256,12 +258,9 @@ def model_pipeline():  # config=None
 
         # Define the loss function
         loss_fn = build_loss(config.loss, reduction='none')
-        # loss_fn = nn.MSELoss(reduction='none')
-        # loss_fn = nn.SmoothL1Loss(reduction='none')
 
         # Define the optimizer with weight decay and learning rate scheduler
         optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
-        # optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
 
         # Define Learning rate scheduler
         lr_scheduler = ReduceLROnPlateau(
@@ -283,10 +282,11 @@ def model_pipeline():  # config=None
             # Log the metrics
             wandb.log(
                 data={
+                    'epoch': epoch,
                     'train_loss': train_loss,
                     'val_loss': val_loss,
-                },
-                step=epoch,
+                }
+                # step=epoch,
             )
             # 'epoch': epoch,
             # Update the learning rate
@@ -299,14 +299,14 @@ def model_pipeline():  # config=None
                 # Save the best model - dropped to avoid memory issues
                 # best_model = model.copy()
 
-                torch.save(model.state_dict(), 'models/best_model.pt')
+                torch.save(model.state_dict(), f'models/{today}_best_model.pt')
                 # optional: save model at the end to view in wandb
                 # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
                 # inputs = inputs.to(device)
-                inputs = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device, requires_grad=False)
-                # TODO : create custom torch tensor with the desired dimensions
-                torch.onnx.export(model, inputs, 'models/best_model.onnx')
-                wandb.save("models/best_model.onnx")
+                inputs = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device,
+                                     requires_grad=False)
+                torch.onnx.export(model, inputs, f'models/{today}_best_model.onnx')
+                wandb.save(f"models/{today}_best_model.onnx")
 
             else:
                 early_stop_counter += 1
@@ -314,9 +314,9 @@ def model_pipeline():  # config=None
                     break
 
         # Load the best model
-        model.load_state_dict(torch.load('models/best_model.pt'))
+        model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
         # Test
-        test_loss = evaluate(model, test_loader, loss_fn) # , last_batch_log=True
+        test_loss = evaluate(model, test_loader, loss_fn)  # , last_batch_log=True
         # Log the final test metrics
         wandb.log({
             'test_loss': test_loss
@@ -333,19 +333,21 @@ def model_pipeline():  # config=None
 def run_pipeline(sweep=False):
     if sweep:
         sweep_config = get_sweep_config()
+
         sweep_id = wandb.sweep(
             sweep_config,
-            project='2023-05-31-mtl-hyperparam'
+            project='2023-06-02-mtl-testing-hyperparam'
         )
+        # dataset = build_top_dataset(data_path=data_dir, )
         wandb.agent(sweep_id, function=model_pipeline, count=sweep_count)
         tloss = None
 
     else:
         config = get_config()
         wandb.init(
-            project='2023-05-31-mtl',
+            project='2023-06-02-mtl-testing',
             dir=wandb_dir,
-            mode="offline",
+            mode=wandb_mode,
             config=config
         )
         tloss = model_pipeline()
@@ -355,25 +357,25 @@ def run_pipeline(sweep=False):
 
 def get_config():
     config = {
-            'input_dim': 1024,
-            'hidden_dim_1': 512,
-            'hidden_dim_2': 256,
-            'hidden_dim_3': 64,
-            'num_tasks': 20,
-            'batch_size': 64,
-            'loss': 'huber',
-            'learning_rate': 0.001,
-            'weight_decay': 0.01,  # 1e-5,
-            'dropout': 0.2,
-            'lr_factor': 0.1,
-            'lr_patience': 10,
-            'num_epochs': 10, # 20,
-            'optimizer': 'AdamW',
-            'early_stop': 5,
-            # 'n_tasks': 20,
-            'output_dim': 20,
-            'activity': "xc50"
-        }
+        'input_dim': 1024,
+        'hidden_dim_1': 512,
+        'hidden_dim_2': 256,
+        'hidden_dim_3': 64,
+        'num_tasks': 20,
+        'batch_size': 256,
+        'loss': 'huber',
+        'learning_rate': 0.001,
+        'weight_decay': 0.01,  # 1e-5,
+        'dropout': 0.2,
+        'lr_factor': 0.1,
+        'lr_patience': 10,
+        'num_epochs': 10,  # 20,
+        'optimizer': 'AdamW',
+        'early_stop': 5,
+        # 'n_tasks': 20,
+        'output_dim': 20,
+        'activity': "xc50"
+    }
 
     return config
 
@@ -429,7 +431,7 @@ def get_sweep_config():
                 # 'values': [5, 10, 20]
             },
             'weight_decay': {
-                'value': 0.01
+                'value': 0.001
             },
             'dropout': {
                 # 'value': 0.2
@@ -459,7 +461,7 @@ def get_sweep_config():
                 'value': 20
             },
             'activity': {
-                'value': "xc50" # or kx
+                'value': "xc50"  # or kx
                 # 'values': ['xc50', 'kx']
             },
         },
@@ -485,29 +487,30 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     #     table_cols.append(f'{t}_label')
     #     table_cols.append(f'{t}_predicted')
     # table = wandb.Table(columns=table_cols)
-    run = wandb.init(dir=wandb_dir, mode="offline")
-    # with :
-    data = []
-    for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
-        row = {
-            "smiles": smi,
-            "molecule": wandb.Molecule.from_smiles(smi),
-            "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
-            "ECFP": inp,
-            "fp_length": len(inp),
-        }
+    with wandb.init(dir=wandb_dir, mode=wandb_mode):
+        data = []
+        for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
+            row = {
+                "smiles": smi,
+                "molecule": wandb.Molecule.from_smiles(smi),
+                "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
+                "ECFP": inp,
+                "fp_length": len(inp),
+            }
 
-        # Iterate over each pair of output and target
-        for targetName, target, output in zip(targets_names, tar, out):
-            row[f'{targetName}_label'] = target.item()
-            row[f'{targetName}_predicted'] = output.item()
+            # Iterate over each pair of output and target
+            for targetName, target, output in zip(targets_names, tar, out):
+                row[f'{targetName}_label'] = target.item()
+                row[f'{targetName}_predicted'] = output.item()
 
-        data.append(row)
+            data.append(row)
 
-    dataframe = pd.DataFrame.from_records(data)
-    table = wandb.Table(dataframe=dataframe)
-    run.log({"mols_table": table})
-            # "molecules": [substance.get("molecule") for substance in data]
+        dataframe = pd.DataFrame.from_records(data)
+        table = wandb.Table(dataframe=dataframe)
+        wandb.log({"mols_table": table}, commit=False)
+
+
+    # "molecules": [substance.get("molecule") for substance in data]
 
     # table = wandb.Table(data=data)
     #
@@ -574,9 +577,9 @@ def train_model(
             "epochs": num_epochs,
         },
         dir=wandb_dir,
-        mode="offline"
+        mode=wandb_mode
     )
-
+    model.to(device)
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=nesterov)
     early_stop = early_stop
@@ -586,7 +589,7 @@ def train_model(
         # Training
         model.train()
         train_loss = 0.0
-        train_entropy = 0.0
+        # train_entropy = 0.0
         for inputs, targets in train_loader:
             inputs = inputs.to(device)
             targets = targets.to(device)
@@ -693,12 +696,6 @@ if __name__ == '__main__':
     # run_model()
     # hyperparam_search()
 
-
-
-
-
-
-
 # class MultiTaskLossWrapper(nn.Module):
 #     def __init__(self, task_num, model):
 #         super(MultiTaskLossWrapper, self).__init__()
@@ -723,8 +720,6 @@ if __name__ == '__main__':
 #         loss = torch.mean(loss)
 #
 #         return loss, self.log_vars.data.tolist()
-
-
 
 
 #
@@ -779,8 +774,6 @@ if __name__ == '__main__':
 #     return total_loss / len(dataloader)  # , total_entropy / len(dataloader)
 
 
-
-
 # config_keys = ["input_dim", "hidden_size", "learning_rate", "weight_decay", "dropout", "lr_factor", "lr_patience",
 #                "batch_size", "num_epochs", "n_tasks", "activity", "optimizer"]
 
@@ -824,4 +817,43 @@ if __name__ == '__main__':
 #     #     }
 #     # )
 #     model_pipeline()
+#
+
+
+
+### DEPRECATED
+#
+# def _build_loader_(config=wandb.config, dataset=None):
+#     if dataset is None:
+#         dataset = build_top_dataset(
+#             data_path=config.data_dir,
+#             activity=config.activity,  # "xc50",
+#             n_top=config.num_tasks,
+#             multitask=True
+#         )
+#
+#     columns = dataset.columns
+#     columns = columns[1:]
+#
+#     # train_size = int(0.7 * len(dataset))
+#     # val_size = int(0.15 * len(dataset))
+#     # test_size = len(dataset) - train_size - val_size
+#     # train_set, val_set, test_set = random_split(dataset, lengths=[train_size, val_size, test_size])
+#
+#     train_data, test_data = train_test_split(
+#         dataset, test_size=0.3, shuffle=True, random_state=42
+#     )
+#     val_data, test_data = train_test_split(
+#         test_data, test_size=0.5, shuffle=True, random_state=42
+#     )
+#
+#     train_set = PapyrusDataset(train_data, input_col='smiles', target_col=list(columns)) # , length=config.input_dim
+#     val_set = PapyrusDataset(val_data, input_col='smiles', target_col=list(columns))
+#     test_set = PapyrusDataset(test_data, input_col='smiles', target_col=list(columns))
+#
+#     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)
+#     val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)
+#     test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False)
+#
+#     return train_loader, val_loader, test_loader
 #
