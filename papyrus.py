@@ -415,8 +415,9 @@ class PapyrusDataset(Dataset):
             self,
             file_path: str = "data/dataset/train.pkl",
             input_col: str = "ecfp1024",
-            smiles_col: str = "smiles",
             target_col: Union[str, List, None] = None,
+            device="cuda",
+            # smiles_col: str = "smiles",
             # length: int = 1024,
             # radius: int = 0,
     ):
@@ -424,8 +425,10 @@ class PapyrusDataset(Dataset):
         with open(file_path, 'rb') as file:
             self.data = pickle.load(file)
 
+        # self.data = self.data.to(device)
+
         self.input_col = input_col.lower()
-        self.smiles_col = smiles_col.lower()
+        # self.smiles_col = smiles_col.lower()
         if target_col is None:
             # Assuming your DataFrame is named 'df'
             target_col_path = os.path.join(folder_path, "target_col.pkl")
@@ -450,11 +453,12 @@ class PapyrusDataset(Dataset):
             idx = idx.tolist()
 
         row = self.data.iloc[idx]
-        x_smiles = row[self.smiles_col]
-        # x_smiles = torch.tensor(data=)
+        # x_smiles = row[self.smiles_col]
         x_sample = torch.tensor(row[self.input_col]).to(torch.float)
         y_sample = torch.tensor(row[self.target_col]).to(torch.float)
-        return (x_smiles, x_sample), y_sample
+        return x_sample, y_sample
+
+        # return (x_smiles, x_sample), y_sample
         # x_smiles = self.data.iloc[idx][self.input_col]
         # x_sample = ECFP_from_smiles(x_smiles, self.radius, self.length) # TODO : calculate ECFP for all before - not in the dataloader
         # TODO you can also have cuda-tensor on gpu you can index from there - avoiding moving it from RAM -> GPU

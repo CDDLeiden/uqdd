@@ -6,39 +6,33 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-import math
-import random
 import os
-from tqdm import tqdm
+import copy
+import random
 import wandb
 import pandas as pd
-from typing_extensions import deprecated
+from tqdm import tqdm
 
-from papyrus import build_top_dataset, PapyrusDataset
+from papyrus import PapyrusDataset # build_top_dataset,
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader # , random_split
 
-from rdkit import Chem
+# from rdkit import Chem
 from chemutils import smi_to_pil_image
-# get todays date as yyyy/mm/dd format
+# get today's date as yyyy/mm/dd format
 from datetime import date
 today = date.today()
 today = today.strftime("%Y%m%d")
-
-# from sklearn.model_selection import train_test_split, KFold
-
-# from papyrus_scripts.modelling import pcm, qsar
-# import xgboost
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
 
 wandb_dir = 'logs/'
 wandb_mode = 'online'
-data_dir = 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
+data_dir = 'data/' # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 dataset_dir = 'data/dataset/'
 sweep_count = 50
 
@@ -66,11 +60,7 @@ class DNN(nn.Module):
             nn.Linear(hidden_dim_2, hidden_dim_3),
             nn.Dropout(p=dropout),
             nn.ReLU(),
-
         )
-        # self.task_specific = nn.ModuleList([
-        #     nn.Linear(hidden_dim_3, 1) for _ in range(output_dim)
-        # ])
         self.task_specific = nn.Linear(hidden_dim_3, num_tasks)
         # L1 or MSE loss
         # MSE is good if the target decreases error < 1 -> small gradients
@@ -88,12 +78,6 @@ class DNN(nn.Module):
         features = self.feature_extractor(x)
         outputs = self.task_specific(features)
         return outputs
-        # outputs = []
-        # for task_specific_layer in self.task_specific:
-        #     output = task_specific_layer(features)
-        #     outputs.append(output)
-        # outputs.append(task(x))
-        # return torch.cat(outputs, dim=1)
 
 
 def train(
@@ -104,12 +88,11 @@ def train(
         # device=device
 ):
     # Tell wandb to watch what the model gets up to: gradients, weights, and more!
-    wandb.watch(model, loss_fn, log="all", log_freq=10)  # , log_graph=True
+    wandb.watch(model, loss_fn, log="all", log_freq=100)
 
     model.train()
     total_loss = 0.0
-    # total_entropy = 0.0
-    for i, ((smiles, inputs), targets) in enumerate(dataloader):
+    for i, (inputs, targets) in enumerate(dataloader):
         inputs, targets = inputs.to(device), targets.to(device)
         # Create a mask for Nan targets
         mask = torch.isnan(targets)
@@ -117,8 +100,7 @@ def train(
         optimizer.zero_grad()
         # ➡ Forward pass
         outputs = model(inputs)
-        targets[mask] = 0.0
-        outputs[mask] = 0.0
+        targets[mask], outputs[mask] = 0.0, 0.0
         # targets = targets[mask]
         # outputs = outputs * (mask)
         # outputs = outputs[mask]
@@ -131,35 +113,16 @@ def train(
         # TODO check the ranges of the targets that they are technically the same.
         # mean of the values should be similar. if not --> then rescale the targets
         # or to use loss function with autoscaling -> kytorch loss function
-        loss_per_task = loss_fn(outputs, targets)  # , reduction='none'
-        # loss_per_task[mask] = 0.0
-        # Dont do propagation for NaN values
-        task_losses = torch.mean(loss_per_task, dim=0)
-        loss = torch.sum(
-            task_losses
-        )  # TorchTensor(65, device='cuda', grad_fn=<SumBackward1>) grad_fn = <MeanBackward1>
+        loss_per_task = loss_fn(outputs, targets)
+        loss = torch.mean(loss_per_task, dim=0)
+        loss = torch.sum(loss)
         total_loss += loss.item()
-        # TODO
         # ⬅ Backward pass + weight update
         loss.backward()
         optimizer.step()
-        # TODO : wrapper of the loss function - Multiple tasks - Multiple losses add up the dimension
-        #  and average over the batch dimension
-        #  reduction = 'none'
-        #  https://pytorch.org/docs/stable/generated/torch.nn.MSELoss.html
-        #  use none --> (batch, tasks) torch.sum dim 1 --> torch.mean dim 0 --> scalar
-
-        # batch entropy
-        # TODO : doesnt make sense to calculate entropy
-        #  - only for classification - in RL they want to know how commited an action is.
-        # prob = torch.softmax(logits, dim=-1)
-        # entropy = -torch.sum(prob * torch.log(prob), dim=-1)
-
-        if i % 25 == 0:
-            # log Batch loss and Batch entropy every 25 batches
-            wandb.log({"batch loss": loss.item()})
-            # wandb.log({"batch entropy": torch.mean(entropy).item()})
-        # total_entropy += torch.mean(entropy).item()
+        # if i % 200 == 0:
+        #     # log Batch loss and Batch entropy every 25 batches
+        #     wandb.log({"batch loss": loss.item()})
     return total_loss / len(dataloader)
 
 
@@ -173,12 +136,11 @@ def evaluate(
     model.eval()
     total_loss = 0.0
     with torch.no_grad():
-        for (smiles, inputs), targets in loader:
+        for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
             mask = torch.isnan(targets)
             outputs = model(inputs)
-            targets[mask] = 0.0
-            outputs[mask] = 0.0
+            targets[mask], outputs[mask] = 0.0, 0.0
             loss_per_task = loss_fn(outputs, targets)
             task_losses = torch.mean(loss_per_task, dim=0)
             loss = torch.sum(task_losses)
@@ -198,13 +160,13 @@ def build_loader(config=wandb.config):
     val_path = os.path.join(d_dir, "val.pkl")
     test_path = os.path.join(d_dir, "test.pkl")
 
-    train_set = PapyrusDataset(train_path, input_col=f"ecfp{config.input_dim}")
-    val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}")
-    test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}")
+    train_set = PapyrusDataset(train_path, input_col=f"ecfp{config.input_dim}", device=device)
+    val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}", device=device)
+    test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}", device=device)
 
-    train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)
-    test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False)
+    train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True, pin_memory=True)
+    val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False, pin_memory=True)
+    test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False, pin_memory=True)
 
     return train_loader, val_loader, test_loader
 
@@ -243,7 +205,6 @@ def model_pipeline():  # config=None
 
         # Load the dataset
         train_loader, val_loader, test_loader = build_loader(config)
-        # wandb.config.config.batch_size
 
         # Load the model
         model = DNN(
@@ -254,7 +215,8 @@ def model_pipeline():  # config=None
             # hidden_dim=config.hidden_dim,
             num_tasks=config.num_tasks,
             dropout=config.dropout
-        ).to(device)
+        )
+        model = model.to(device)
 
         # Define the loss function
         loss_fn = build_loss(config.loss, reduction='none')
@@ -286,9 +248,8 @@ def model_pipeline():  # config=None
                     'train_loss': train_loss,
                     'val_loss': val_loss,
                 }
-                # step=epoch,
             )
-            # 'epoch': epoch,
+
             # Update the learning rate
             lr_scheduler.step(val_loss)
 
@@ -297,26 +258,30 @@ def model_pipeline():  # config=None
                 best_val_loss = val_loss
                 early_stop_counter = 0
                 # Save the best model - dropped to avoid memory issues
-                # best_model = model.copy()
+                # Update the best model and its performance
+                best_model = copy.deepcopy(model)
 
-                torch.save(model.state_dict(), f'models/{today}_best_model.pt')
                 # optional: save model at the end to view in wandb
                 # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
                 # inputs = inputs.to(device)
-                inputs = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device,
-                                     requires_grad=False)
-                torch.onnx.export(model, inputs, f'models/{today}_best_model.onnx')
-                wandb.save(f"models/{today}_best_model.onnx")
+                # x = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device,
+                #                      requires_grad=False)
+                # torch.onnx.export(model, x, f'models/{today}_best_model.onnx')
+                # wandb.save(f"models/{today}_best_model.onnx")
 
             else:
                 early_stop_counter += 1
                 if early_stop_counter > config.early_stop:
                     break
 
+        # Save the best model
+        torch.save(best_model.state_dict(), f'models/{today}_best_model.pt')
+        wandb.save(f"models/{today}_best_model.pt")
+
         # Load the best model
-        model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
+        # model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
         # Test
-        test_loss = evaluate(model, test_loader, loss_fn)  # , last_batch_log=True
+        test_loss = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
         # Log the final test metrics
         wandb.log({
             'test_loss': test_loss
@@ -333,14 +298,12 @@ def model_pipeline():  # config=None
 def run_pipeline(sweep=False):
     if sweep:
         sweep_config = get_sweep_config()
-
         sweep_id = wandb.sweep(
             sweep_config,
             project='2023-06-02-mtl-testing-hyperparam'
         )
-        # dataset = build_top_dataset(data_path=data_dir, )
         wandb.agent(sweep_id, function=model_pipeline, count=sweep_count)
-        tloss = None
+        test_loss = None
 
     else:
         config = get_config()
@@ -350,9 +313,9 @@ def run_pipeline(sweep=False):
             mode=wandb_mode,
             config=config
         )
-        tloss = model_pipeline()
+        test_loss = model_pipeline()
 
-    return tloss
+    return test_loss
 
 
 def get_config():
@@ -362,7 +325,7 @@ def get_config():
         'hidden_dim_2': 256,
         'hidden_dim_3': 64,
         'num_tasks': 20,
-        'batch_size': 256,
+        'batch_size': 32,
         'loss': 'huber',
         'learning_rate': 0.001,
         'weight_decay': 0.01,  # 1e-5,
@@ -411,7 +374,7 @@ def get_sweep_config():
                 'value': 20
             },
             'batch_size': {
-                'values': [32, 64, 128]
+                'values': [64, 128, 256]
                 # 'distribution': 'q_log_uniform',
                 # 'q': 1,
                 # 'min': math.log(32),
@@ -536,8 +499,6 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     #     table.add_data(mol_img, pred, label, *prob.numpy())
     #
     # wandb.log({"mols_table": table}, commit=False)
-
-
 # def log_mol_table(smiles_list, predicted, labels, probs, targets):
 #     data = []
 #
@@ -555,141 +516,138 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
 #
 #     wandb.log({"mols_table": table}, commit=False)
 
-
-def train_model(
-        model,
-        train_loader,
-        val_loader,
-        num_epochs=3000,
-        lr=0.01,
-        lr_decay=0.0,
-        momentum=0.9,
-        nesterov=True,
-        early_stop=200,
-        # device="cuda"
-):
-    #### similar to deep confidence
-    run = wandb.init(
-        project="uqdd",
-        # Track hyperparameters and run metadata
-        config={
-            "learning_rate": lr,
-            "epochs": num_epochs,
-        },
-        dir=wandb_dir,
-        mode=wandb_mode
-    )
-    model.to(device)
-    loss_fn = nn.MSELoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=nesterov)
-    early_stop = early_stop
-    early_stop_counter = 0
-    best_val_loss = float('inf')
-    for epoch in range(num_epochs):
-        # Training
-        model.train()
-        train_loss = 0.0
-        # train_entropy = 0.0
-        for inputs, targets in train_loader:
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-
-            # inputs = torch.tensor(inputs, dtype=torch.float)
-            # targets = targets.float().unsqueeze(1) # TODO check this line if it is important
-
-            optimizer.zero_grad()
-            logits = model(inputs)
-            loss = loss_fn(logits, targets)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-        train_loss /= len(train_loader)
-
-        # Validation
-        model.eval()
-        val_loss = 0.0
-        with torch.no_grad():
-            for inputs, targets in val_loader:
-                outputs = model(inputs)
-                targets = targets.float().unsqueeze(1)
-                loss = loss_fn(outputs, targets)
-                val_loss += loss.item()
-            val_loss /= len(val_loader)
-
-        # Early Stopping
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            early_stop_counter = 0
-        else:
-            early_stop_counter += 1
-            if early_stop_counter == early_stop:
-                print(f"Stopped early after {epoch + 1} epochs")
-                break
-
-        # Print progress
-        if (epoch + 1) % 100 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs} -- Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
-
-        # Learning Rate Decay
-        if (epoch + 1) % 200 == 0 and lr_decay > 0:
-            lr *= lr_decay
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
-
-    return model
-
-
-def test_model(model, test_loader):
-    criterion = nn.MSELoss()
-    test_loss = 0.0
-    with torch.no_grad():
-        for inputs, targets in test_loader:
-            outputs = model(inputs)
-            targets = targets.float().unsqueeze(1)
-            loss = criterion(outputs, targets)
-            test_loss += loss.item()
-        test_loss /= len(test_loader)
-    rmse = torch.sqrt(torch.tensor(test_loss)).item()
-    return rmse
-
-
-def train_ensemble(
-        train_loader, val_loader, test_loader,
-        input_size, hidden_size1, hidden_size2, hidden_size3,
-        output_size, num_epochs=3000):
-    ensemble = []
-    learning_rate = 0.005
-    learning_rate_decay = 0.4
-    early_stop = 200
-    for _ in range(100):
-        # Set random seed for reproducibility
-        seed = random.randint(0, 10000)
-        torch.manual_seed(seed)
-        random.seed(seed)
-
-        # Create and train model
-        model = DNN(input_size, hidden_size1, hidden_size2, hidden_size3, output_size)
-        model = train_model(
-            model,
-            train_loader,
-            val_loader,
-            num_epochs=num_epochs,
-            lr=learning_rate,
-            lr_decay=learning_rate_decay,
-            momentum=0.9,
-            nesterov=True,
-            early_stop=early_stop
-        )
-
-        # Test model and calculate uncertainties
-        val_rmse = test_model(model, val_loader)
-        test_rmse = test_model(model, test_loader)
-
-        if val_rmse < 1.2:
-            ensemble.append((model, val_rmse, test_rmse))
-
-    return ensemble
-
+#
+# def train_model(
+#         model,
+#         train_loader,
+#         val_loader,
+#         num_epochs=3000,
+#         lr=0.01,
+#         lr_decay=0.0,
+#         momentum=0.9,
+#         nesterov=True,
+#         early_stop=200,
+#         # device="cuda"
+# ):
+#     #### similar to deep confidence
+#     run = wandb.init(
+#         project="uqdd",
+#         # Track hyperparameters and run metadata
+#         config={
+#             "learning_rate": lr,
+#             "epochs": num_epochs,
+#         },
+#         dir=wandb_dir,
+#         mode=wandb_mode
+#     )
+#     model.to(device)
+#     loss_fn = nn.MSELoss()
+#     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=nesterov)
+#     early_stop = early_stop
+#     early_stop_counter = 0
+#     best_val_loss = float('inf')
+#     for epoch in range(num_epochs):
+#         # Training
+#         model.train()
+#         train_loss = 0.0
+#         # train_entropy = 0.0
+#         for inputs, targets in train_loader:
+#             inputs = inputs.to(device)
+#             targets = targets.to(device)
+#
+#             optimizer.zero_grad()
+#             logits = model(inputs)
+#             loss = loss_fn(logits, targets)
+#             loss.backward()
+#             optimizer.step()
+#             train_loss += loss.item()
+#         train_loss /= len(train_loader)
+#
+#         # Validation
+#         model.eval()
+#         val_loss = 0.0
+#         with torch.no_grad():
+#             for inputs, targets in val_loader:
+#                 outputs = model(inputs)
+#                 targets = targets.float().unsqueeze(1)
+#                 loss = loss_fn(outputs, targets)
+#                 val_loss += loss.item()
+#             val_loss /= len(val_loader)
+#
+#         # Early Stopping
+#         if val_loss < best_val_loss:
+#             best_val_loss = val_loss
+#             early_stop_counter = 0
+#         else:
+#             early_stop_counter += 1
+#             if early_stop_counter == early_stop:
+#                 print(f"Stopped early after {epoch + 1} epochs")
+#                 break
+#
+#         # Print progress
+#         if (epoch + 1) % 100 == 0:
+#             print(f"Epoch {epoch + 1}/{num_epochs} -- Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
+#
+#         # Learning Rate Decay
+#         if (epoch + 1) % 200 == 0 and lr_decay > 0:
+#             lr *= lr_decay
+#             for param_group in optimizer.param_groups:
+#                 param_group['lr'] = lr
+#
+#     return model
+#
+#
+# def test_model(model, test_loader):
+#     criterion = nn.MSELoss()
+#     test_loss = 0.0
+#     with torch.no_grad():
+#         for inputs, targets in test_loader:
+#             outputs = model(inputs)
+#             targets = targets.float().unsqueeze(1)
+#             loss = criterion(outputs, targets)
+#             test_loss += loss.item()
+#         test_loss /= len(test_loader)
+#     rmse = torch.sqrt(torch.tensor(test_loss)).item()
+#     return rmse
+#
+#
+# def train_ensemble(
+#         train_loader, val_loader, test_loader,
+#         input_size, hidden_size1, hidden_size2, hidden_size3,
+#         output_size, num_epochs=3000):
+#     ensemble = []
+#     learning_rate = 0.005
+#     learning_rate_decay = 0.4
+#     early_stop = 200
+#     for _ in range(100):
+#         # Set random seed for reproducibility
+#         seed = random.randint(0, 10000)
+#         torch.manual_seed(seed)
+#         random.seed(seed)
+#
+#         # Create and train model
+#         model = DNN(input_size, hidden_size1, hidden_size2, hidden_size3, output_size)
+#         model = train_model(
+#             model,
+#             train_loader,
+#             val_loader,
+#             num_epochs=num_epochs,
+#             lr=learning_rate,
+#             lr_decay=learning_rate_decay,
+#             momentum=0.9,
+#             nesterov=True,
+#             early_stop=early_stop
+#         )
+#
+#         # Test model and calculate uncertainties
+#         val_rmse = test_model(model, val_loader)
+#         test_rmse = test_model(model, test_loader)
+#
+#         if val_rmse < 1.2:
+#             ensemble.append((model, val_rmse, test_rmse))
+#
+#     return ensemble
+#
 
 if __name__ == '__main__':
     best_model, test_loss = run_pipeline()
