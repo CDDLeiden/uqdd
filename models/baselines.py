@@ -35,7 +35,7 @@ wandb_dir = 'logs/'
 wandb_mode = 'online'
 data_dir = 'data/' # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 dataset_dir = 'data/dataset/'
-sweep_count = 50
+# sweep_count = 50
 
 
 class DNN(nn.Module):
@@ -199,14 +199,14 @@ def build_loss(loss, reduction='none'):
     return loss_fn
 
 
-def model_pipeline(config=wandb.config):  #
+def model_pipeline(config=wandb.config, wandb_project_name="test-project"):  #
     # Initialize wandb
-    wandb_name = config.pop('wandb_name')
+    # wandb_name = config.pop('wandb_name')
 
     with wandb.init(
             dir=wandb_dir,
             mode=wandb_mode,
-            project=wandb_name,
+            project=wandb_project_name,
             config=config
     ):  # project='multitask-learning', config=config
         config = wandb.config
@@ -303,16 +303,20 @@ def model_pipeline(config=wandb.config):  #
         # })
 
 
-def run_pipeline(sweep=False):
+def run_pipeline(wandb_project_name="test-project", sweep=False, sweep_count=1):
 
     if sweep:
         # with wandb.init(dir=wandb_dir, mode=wandb_mode):
         sweep_config = get_sweep_config()
         sweep_id = wandb.sweep(
-            sweep_config,
-            project='2023-06-02-mtl-testing-hyperparam'
+            sweep_config
         )
-        wandb_train_func = partial(model_pipeline, config=sweep_config)
+        wandb_train_func = partial(
+            model_pipeline,
+            config=sweep_config,
+            wandb_project_name=wandb_project_name,
+            # wandb_project_name="2023-06-02-mtl-testing-hyperparam"
+        )
         wandb.agent(sweep_id, function=wandb_train_func, count=sweep_count)
         test_loss = None
 
@@ -324,7 +328,11 @@ def run_pipeline(sweep=False):
         #     mode=wandb_mode,
         #     config=config
         # )
-        test_loss = model_pipeline(config)
+        test_loss = model_pipeline(
+            config,
+            wandb_project_name=wandb_project_name,
+            # wandb_project_name="2023-06-02-mtl-testing"
+        )
 
     return test_loss
 
@@ -349,7 +357,7 @@ def get_config():
         # 'n_tasks': 20,
         'output_dim': 20,
         'activity': "xc50",
-        'wandb_name': "2023-06-02-mtl-testing",
+        # 'wandb_name': "2023-06-02-mtl-testing",
     }
 
     return config
@@ -444,7 +452,7 @@ def get_sweep_config():
             'type': 'hyperband',
             'min_iter': 10
         },
-        'wandb_name': "2023-06-02-mtl-testing-hyperparam"
+        # 'wandb_name': "2023-06-02-mtl-testing-hyperparam"
     }
     # 576 combinations
     return sweep_config
