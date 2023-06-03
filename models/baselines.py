@@ -29,6 +29,7 @@ today = today.strftime("%Y%m%d")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
+print(torch.version.cuda) if device == 'cuda' else None
 
 wandb_dir = 'logs/'
 wandb_mode = 'online'
@@ -200,94 +201,94 @@ def build_loss(loss, reduction='none'):
 
 def model_pipeline():  # config=None
     # Initialize wandb
-    with wandb.init(dir=wandb_dir, mode=wandb_mode):  # project='multitask-learning', config=config
-        config = wandb.config
+    # with wandb.init(dir=wandb_dir, mode=wandb_mode):  # project='multitask-learning', config=config
+    config = wandb.config
 
-        # Load the dataset
-        train_loader, val_loader, test_loader = build_loader(config)
+    # Load the dataset
+    train_loader, val_loader, test_loader = build_loader(config)
 
-        # Load the model
-        model = DNN(
-            input_dim=config.input_dim,
-            hidden_dim_1=config.hidden_dim_1,
-            hidden_dim_2=config.hidden_dim_2,
-            hidden_dim_3=config.hidden_dim_3,
-            # hidden_dim=config.hidden_dim,
-            num_tasks=config.num_tasks,
-            dropout=config.dropout
+    # Load the model
+    model = DNN(
+        input_dim=config.input_dim,
+        hidden_dim_1=config.hidden_dim_1,
+        hidden_dim_2=config.hidden_dim_2,
+        hidden_dim_3=config.hidden_dim_3,
+        # hidden_dim=config.hidden_dim,
+        num_tasks=config.num_tasks,
+        dropout=config.dropout
+    )
+    model = model.to(device)
+
+    # Define the loss function
+    loss_fn = build_loss(config.loss, reduction='none')
+
+    # Define the optimizer with weight decay and learning rate scheduler
+    optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+
+    # Define Learning rate scheduler
+    lr_scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=config.lr_factor,
+        patience=config.lr_patience,
+        verbose=True
+    )
+
+    # Train the model
+    best_val_loss = float('inf')
+    early_stop_counter = 0
+    for epoch in tqdm(range(config.num_epochs)):
+        # Training
+        train_loss = train(model, train_loader, optimizer, loss_fn)
+        # Validation
+        val_loss = evaluate(model, val_loader, loss_fn)
+        # Log the metrics
+        wandb.log(
+            data={
+                'epoch': epoch,
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+            }
         )
-        model = model.to(device)
 
-        # Define the loss function
-        loss_fn = build_loss(config.loss, reduction='none')
+        # Update the learning rate
+        lr_scheduler.step(val_loss)
 
-        # Define the optimizer with weight decay and learning rate scheduler
-        optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            early_stop_counter = 0
+            # Save the best model - dropped to avoid memory issues
+            # Update the best model and its performance
+            best_model = copy.deepcopy(model)
 
-        # Define Learning rate scheduler
-        lr_scheduler = ReduceLROnPlateau(
-            optimizer,
-            mode='min',
-            factor=config.lr_factor,
-            patience=config.lr_patience,
-            verbose=True
-        )
+            # optional: save model at the end to view in wandb
+            # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
+            # inputs = inputs.to(device)
+            # x = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device,
+            #                      requires_grad=False)
+            # torch.onnx.export(model, x, f'models/{today}_best_model.onnx')
+            # wandb.save(f"models/{today}_best_model.onnx")
 
-        # Train the model
-        best_val_loss = float('inf')
-        early_stop_counter = 0
-        for epoch in tqdm(range(config.num_epochs)):
-            # Training
-            train_loss = train(model, train_loader, optimizer, loss_fn)
-            # Validation
-            val_loss = evaluate(model, val_loader, loss_fn)
-            # Log the metrics
-            wandb.log(
-                data={
-                    'epoch': epoch,
-                    'train_loss': train_loss,
-                    'val_loss': val_loss,
-                }
-            )
+        else:
+            early_stop_counter += 1
+            if early_stop_counter > config.early_stop:
+                break
 
-            # Update the learning rate
-            lr_scheduler.step(val_loss)
+    # Save the best model
+    torch.save(best_model.state_dict(), f'models/{today}_best_model.pt')
+    wandb.save(f"models/{today}_best_model.pt")
 
-            # Early stopping
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                early_stop_counter = 0
-                # Save the best model - dropped to avoid memory issues
-                # Update the best model and its performance
-                best_model = copy.deepcopy(model)
+    # Load the best model
+    # model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
+    # Test
+    test_loss = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
+    # Log the final test metrics
+    wandb.log({
+        'test_loss': test_loss
+    })
 
-                # optional: save model at the end to view in wandb
-                # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
-                # inputs = inputs.to(device)
-                # x = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device,
-                #                      requires_grad=False)
-                # torch.onnx.export(model, x, f'models/{today}_best_model.onnx')
-                # wandb.save(f"models/{today}_best_model.onnx")
-
-            else:
-                early_stop_counter += 1
-                if early_stop_counter > config.early_stop:
-                    break
-
-        # Save the best model
-        torch.save(best_model.state_dict(), f'models/{today}_best_model.pt')
-        wandb.save(f"models/{today}_best_model.pt")
-
-        # Load the best model
-        # model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
-        # Test
-        test_loss = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
-        # Log the final test metrics
-        wandb.log({
-            'test_loss': test_loss
-        })
-
-        return test_loss
+    return test_loss
         # Log the final hyperparameters
         # wandb.config.update({
         #     'best_val_loss': best_val_loss,
@@ -450,27 +451,27 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     #     table_cols.append(f'{t}_label')
     #     table_cols.append(f'{t}_predicted')
     # table = wandb.Table(columns=table_cols)
-    with wandb.init(dir=wandb_dir, mode=wandb_mode):
-        data = []
-        for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
-            row = {
-                "smiles": smi,
-                "molecule": wandb.Molecule.from_smiles(smi),
-                "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
-                "ECFP": inp,
-                "fp_length": len(inp),
-            }
+    # with wandb.init(dir=wandb_dir, mode=wandb_mode):
+    data = []
+    for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
+        row = {
+            "smiles": smi,
+            "molecule": wandb.Molecule.from_smiles(smi),
+            "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
+            "ECFP": inp,
+            "fp_length": len(inp),
+        }
 
-            # Iterate over each pair of output and target
-            for targetName, target, output in zip(targets_names, tar, out):
-                row[f'{targetName}_label'] = target.item()
-                row[f'{targetName}_predicted'] = output.item()
+        # Iterate over each pair of output and target
+        for targetName, target, output in zip(targets_names, tar, out):
+            row[f'{targetName}_label'] = target.item()
+            row[f'{targetName}_predicted'] = output.item()
 
-            data.append(row)
+        data.append(row)
 
-        dataframe = pd.DataFrame.from_records(data)
-        table = wandb.Table(dataframe=dataframe)
-        wandb.log({"mols_table": table}, commit=False)
+    dataframe = pd.DataFrame.from_records(data)
+    table = wandb.Table(dataframe=dataframe)
+    wandb.log({"mols_table": table}, commit=False)
 
 
     # "molecules": [substance.get("molecule") for substance in data]
