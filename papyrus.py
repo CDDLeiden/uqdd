@@ -416,18 +416,12 @@ class PapyrusDataset(Dataset):
             input_col: str = "ecfp1024",
             target_col: Union[str, List, None] = None,
             device="cuda",
-            # smiles_col: str = "smiles",
-            # length: int = 1024,
-            # radius: int = 0,
     ):
         folder_path = os.path.dirname(file_path)
         with open(file_path, 'rb') as file:
             self.data = pickle.load(file)
 
-        # self.data = self.data.to(device)
-
         self.input_col = input_col.lower()
-        # self.smiles_col = smiles_col.lower()
         if target_col is None:
             # Assuming your DataFrame is named 'df'
             target_col_path = os.path.join(folder_path, "target_col.pkl")
@@ -435,26 +429,24 @@ class PapyrusDataset(Dataset):
                 target_col = pickle.load(file)
 
         self.target_col = target_col
-        # self.length = length
-        # if radius == 0:
-        #     radius_dict = {1024: 2, 2048: 4, 4096: 4}
-        #     self.radius = radius_dict[length]
-        # else:
-        #     self.radius = radius
-        # self.x_data = self.df[input_col]
-        # self.y_data = self.df[target_col]
+
+        self.input_data = torch.from_numpy(np.stack(self.data[self.input_col].values)).to(torch.float).to(device)
+        self.target_data = torch.tensor(self.data[self.target_col].values).to(torch.float).to(device)
+
+        del self.data
 
     def __len__(self):
-        return len(self.data)
+        return len(self.input_data)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        row = self.data.iloc[idx]
-        # x_smiles = row[self.smiles_col]
-        x_sample = torch.tensor(row[self.input_col]).to(torch.float)
-        y_sample = torch.tensor(row[self.target_col]).to(torch.float)
+        x_sample = self.input_data[idx]
+        y_sample = self.target_data[idx]
+        # row = self.data.iloc[idx]
+        # x_sample = row[self.input_col] #torch.tensor(row[self.input_col]).to(torch.float)
+        # y_sample = row[self.target_col] # torch.tensor(row[self.target_col]).to(torch.float)
         return x_sample, y_sample
 
         # return (x_smiles, x_sample), y_sample

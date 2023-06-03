@@ -165,9 +165,9 @@ def build_loader(config=wandb.config):
     val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}", device=device)
     test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}", device=device)
 
-    train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False, pin_memory=True)
-    test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False, pin_memory=True)
+    train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True) # , pin_memory=True
+    val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False) # , pin_memory=True
+    test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False) # , pin_memory=True
 
     return train_loader, val_loader, test_loader
 

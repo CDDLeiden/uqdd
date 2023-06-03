@@ -12,7 +12,7 @@ import wandb
 
 # running config for multitask debugging
 test_loss = run_pipeline(sweep=False)
-
+print(test_loss)
 # running config for multitask debugging
 # test_loss = run_pipeline(sweep=False)
 #
