@@ -11,7 +11,9 @@ import wandb
 # train_data_kx, val_data_kx, test_data_kx, df_kx = data_preparation(papyrus_path='data/', activity='kx', n_top=20, multitask=True, std_smiles=True, output_path='data/dataset/kx/', verbose_files=True)
 
 # running config for multitask debugging
-test_loss = run_pipeline(sweep=False)
+# test_loss = run_pipeline(sweep=False)
+test_loss = run_pipeline(sweep=True)
+
 print(test_loss)
 # running config for multitask debugging
 # test_loss = run_pipeline(sweep=False)

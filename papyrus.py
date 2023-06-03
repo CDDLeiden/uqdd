@@ -444,9 +444,7 @@ class PapyrusDataset(Dataset):
 
         x_sample = self.input_data[idx]
         y_sample = self.target_data[idx]
-        # row = self.data.iloc[idx]
-        # x_sample = row[self.input_col] #torch.tensor(row[self.input_col]).to(torch.float)
-        # y_sample = row[self.target_col] # torch.tensor(row[self.target_col]).to(torch.float)
+
         return x_sample, y_sample
 
         # return (x_smiles, x_sample), y_sample

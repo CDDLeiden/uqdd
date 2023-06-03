@@ -56,7 +56,7 @@ class DNN(nn.Module):
             nn.Linear(input_dim, hidden_dim_1),
             nn.ReLU(),
             nn.Linear(hidden_dim_1, hidden_dim_2),
-            # nn.Dropout(p=dropout),
+            nn.Dropout(p=dropout),
             nn.ReLU(),
             nn.Linear(hidden_dim_2, hidden_dim_3),
             nn.Dropout(p=dropout),
@@ -201,94 +201,94 @@ def build_loss(loss, reduction='none'):
 
 def model_pipeline():  # config=None
     # Initialize wandb
-    # with wandb.init(dir=wandb_dir, mode=wandb_mode):  # project='multitask-learning', config=config
-    config = wandb.config
+    with wandb.init(dir=wandb_dir, mode=wandb_mode):  # project='multitask-learning', config=config
+        config = wandb.config
 
-    # Load the dataset
-    train_loader, val_loader, test_loader = build_loader(config)
+        # Load the dataset
+        train_loader, val_loader, test_loader = build_loader(config)
 
-    # Load the model
-    model = DNN(
-        input_dim=config.input_dim,
-        hidden_dim_1=config.hidden_dim_1,
-        hidden_dim_2=config.hidden_dim_2,
-        hidden_dim_3=config.hidden_dim_3,
-        # hidden_dim=config.hidden_dim,
-        num_tasks=config.num_tasks,
-        dropout=config.dropout
-    )
-    model = model.to(device)
+        # Load the model
+        model = DNN(
+            input_dim=config.input_dim,
+            hidden_dim_1=config.hidden_dim_1,
+            hidden_dim_2=config.hidden_dim_2,
+            hidden_dim_3=config.hidden_dim_3,
+            # hidden_dim=config.hidden_dim,
+            num_tasks=config.num_tasks,
+            dropout=config.dropout
+        )
+        model = model.to(device)
 
-    # Define the loss function
-    loss_fn = build_loss(config.loss, reduction='none')
+        # Define the loss function
+        loss_fn = build_loss(config.loss, reduction='none')
 
-    # Define the optimizer with weight decay and learning rate scheduler
-    optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+        # Define the optimizer with weight decay and learning rate scheduler
+        optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
 
-    # Define Learning rate scheduler
-    lr_scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=config.lr_factor,
-        patience=config.lr_patience,
-        verbose=True
-    )
-
-    # Train the model
-    best_val_loss = float('inf')
-    early_stop_counter = 0
-    for epoch in tqdm(range(config.num_epochs)):
-        # Training
-        train_loss = train(model, train_loader, optimizer, loss_fn)
-        # Validation
-        val_loss = evaluate(model, val_loader, loss_fn)
-        # Log the metrics
-        wandb.log(
-            data={
-                'epoch': epoch,
-                'train_loss': train_loss,
-                'val_loss': val_loss,
-            }
+        # Define Learning rate scheduler
+        lr_scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=config.lr_factor,
+            patience=config.lr_patience,
+            verbose=True
         )
 
-        # Update the learning rate
-        lr_scheduler.step(val_loss)
+        # Train the model
+        best_val_loss = float('inf')
+        early_stop_counter = 0
+        for epoch in tqdm(range(config.num_epochs)):
+            # Training
+            train_loss = train(model, train_loader, optimizer, loss_fn)
+            # Validation
+            val_loss = evaluate(model, val_loader, loss_fn)
+            # Log the metrics
+            wandb.log(
+                data={
+                    'epoch': epoch,
+                    'train_loss': train_loss,
+                    'val_loss': val_loss,
+                }
+            )
 
-        # Early stopping
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            early_stop_counter = 0
-            # Save the best model - dropped to avoid memory issues
-            # Update the best model and its performance
-            best_model = copy.deepcopy(model)
+            # Update the learning rate
+            lr_scheduler.step(val_loss)
 
-            # optional: save model at the end to view in wandb
-            # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
-            # inputs = inputs.to(device)
-            # x = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device,
-            #                      requires_grad=False)
-            # torch.onnx.export(model, x, f'models/{today}_best_model.onnx')
-            # wandb.save(f"models/{today}_best_model.onnx")
+            # Early stopping
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                early_stop_counter = 0
+                # Save the best model - dropped to avoid memory issues
+                # Update the best model and its performance
+                best_model = copy.deepcopy(model)
 
-        else:
-            early_stop_counter += 1
-            if early_stop_counter > config.early_stop:
-                break
+                # optional: save model at the end to view in wandb
+                # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
+                # inputs = inputs.to(device)
+                # x = torch.zeros((config.batch_size, config.input_dim), dtype=torch.float32, device=device,
+                #                      requires_grad=False)
+                # torch.onnx.export(model, x, f'models/{today}_best_model.onnx')
+                # wandb.save(f"models/{today}_best_model.onnx")
 
-    # Save the best model
-    torch.save(best_model.state_dict(), f'models/{today}_best_model.pt')
-    wandb.save(f"models/{today}_best_model.pt")
+            else:
+                early_stop_counter += 1
+                if early_stop_counter > config.early_stop:
+                    break
 
-    # Load the best model
-    # model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
-    # Test
-    test_loss = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
-    # Log the final test metrics
-    wandb.log({
-        'test_loss': test_loss
-    })
+        # Save the best model
+        torch.save(best_model.state_dict(), f'models/{today}_best_model.pt')
+        wandb.save(f"models/{today}_best_model.pt")
 
-    return test_loss
+        # Load the best model
+        # model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
+        # Test
+        test_loss = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
+        # Log the final test metrics
+        wandb.log({
+            'test_loss': test_loss
+        })
+
+        return test_loss
         # Log the final hyperparameters
         # wandb.config.update({
         #     'best_val_loss': best_val_loss,
@@ -298,6 +298,7 @@ def model_pipeline():  # config=None
 
 def run_pipeline(sweep=False):
     if sweep:
+        # with wandb.init(dir=wandb_dir, mode=wandb_mode):
         sweep_config = get_sweep_config()
         sweep_id = wandb.sweep(
             sweep_config,
