@@ -29,3 +29,4 @@ dependencies:
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
       - uncertainty-toolbox
       - wandb
+      - gpustat
