@@ -309,7 +309,8 @@ def run_pipeline(wandb_project_name="test-project", sweep=False, sweep_count=1):
         # with wandb.init(dir=wandb_dir, mode=wandb_mode):
         sweep_config = get_sweep_config()
         sweep_id = wandb.sweep(
-            sweep_config
+            sweep_config,
+            project=wandb_project_name,
         )
         wandb_train_func = partial(
             model_pipeline,
