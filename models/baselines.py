@@ -12,7 +12,7 @@ import random
 import wandb
 import pandas as pd
 from tqdm import tqdm
-
+from functools import partial
 from papyrus import PapyrusDataset # build_top_dataset,
 import torch
 import torch.nn as nn
@@ -199,9 +199,16 @@ def build_loss(loss, reduction='none'):
     return loss_fn
 
 
-def model_pipeline():  # config=None
+def model_pipeline(config=wandb.config):  #
     # Initialize wandb
-    with wandb.init(dir=wandb_dir, mode=wandb_mode):  # project='multitask-learning', config=config
+    wandb_name = config.pop('wandb_name')
+
+    with wandb.init(
+            dir=wandb_dir,
+            mode=wandb_mode,
+            project=wandb_name,
+            config=config
+    ):  # project='multitask-learning', config=config
         config = wandb.config
 
         # Load the dataset
@@ -297,6 +304,7 @@ def model_pipeline():  # config=None
 
 
 def run_pipeline(sweep=False):
+
     if sweep:
         # with wandb.init(dir=wandb_dir, mode=wandb_mode):
         sweep_config = get_sweep_config()
@@ -304,18 +312,19 @@ def run_pipeline(sweep=False):
             sweep_config,
             project='2023-06-02-mtl-testing-hyperparam'
         )
-        wandb.agent(sweep_id, function=model_pipeline, count=sweep_count)
+        wandb_train_func = partial(model_pipeline, config=sweep_config)
+        wandb.agent(sweep_id, function=wandb_train_func, count=sweep_count)
         test_loss = None
 
     else:
         config = get_config()
-        wandb.init(
-            project='2023-06-02-mtl-testing',
-            dir=wandb_dir,
-            mode=wandb_mode,
-            config=config
-        )
-        test_loss = model_pipeline()
+        # wandb.init(
+        #     project='2023-06-02-mtl-testing',
+        #     dir=wandb_dir,
+        #     mode=wandb_mode,
+        #     config=config
+        # )
+        test_loss = model_pipeline(config)
 
     return test_loss
 
@@ -339,7 +348,8 @@ def get_config():
         'early_stop': 5,
         # 'n_tasks': 20,
         'output_dim': 20,
-        'activity': "xc50"
+        'activity': "xc50",
+        'wandb_name': "2023-06-02-mtl-testing",
     }
 
     return config
@@ -433,7 +443,8 @@ def get_sweep_config():
         'early_terminate': {
             'type': 'hyperband',
             'min_iter': 10
-        }
+        },
+        'wandb_name': "2023-06-02-mtl-testing-hyperparam"
     }
     # 576 combinations
     return sweep_config
