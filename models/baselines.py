@@ -449,10 +449,10 @@ def get_sweep_config():
                 # 'values': ['xc50', 'kx']
             },
         },
-        'early_terminate': {
-            'type': 'hyperband',
-            'min_iter': 10
-        },
+        # 'early_terminate': {
+        #     'type': 'hyperband',
+        #     'min_iter': 10
+        # },
         # 'wandb_name': "2023-06-02-mtl-testing-hyperparam"
     }
     # 576 combinations
