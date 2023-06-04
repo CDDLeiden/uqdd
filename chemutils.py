@@ -20,6 +20,7 @@ from rdkit import Chem, RDLogger
 # from rdkit.Chem import Draw
 # RDLogger.DisableLog('rdApp.info')
 from rdkit.Chem import Draw, AllChem
+from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 
@@ -410,7 +411,7 @@ def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
     return list_of_descriptor_vals
 
 
-def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = None): #  smiles_col: str = 'smiles',
+def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = None):  # smiles_col: str = 'smiles',
     """
     Applies the `mol_descriptors` function to a pandas dataframe and returns a new dataframe
     with additional columns containing the calculated descriptor values.
@@ -515,3 +516,81 @@ def smi_to_pil_image(smiles: str, width: int = 300, height: int = 300) -> "PIL.I
     Chem.AllChem.GenerateDepictionMatching2DStructure(molecule, molecule)
     pil_image = Draw.MolToImage(molecule, size=(width, height))
     return pil_image
+
+
+def generate_scaffold(smiles, include_chirality=False):
+    """
+    calculates the Bemis-Murcko scaffold for a SMILES string.
+
+    Parameters
+    ----------
+    smiles : str
+        The SMILES string.
+    include_chirality : bool, optional
+        Whether to include chirality in the scaffold. Default is False.
+
+    Returns
+    -------
+    str
+        The scaffold SMILES string.
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    scaffold = MurckoScaffold \
+        .MurckoScaffoldSmiles(mol=mol, includeChirality=include_chirality)
+    return scaffold
+
+
+def scaffold_split(df, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42):
+    """
+    Splits dataframe into scaffold splits.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input dataframe.
+    train_frac : float, optional
+        The fraction of the data to use for training. Default is 0.7.
+    val_frac : float, optional
+        The fraction of the data to use for validation. Default is 0.15.
+    test_frac : float, optional
+        The fraction of the data to use for testing. Default is 0.15.
+    seed : int, optional
+        The random seed to use for splitting the data. Default is 42.
+
+    Returns
+    -------
+    train_df : pandas.DataFrame
+        The training dataframe.
+    val_df : pandas.DataFrame
+        The validation dataframe.
+    test_df : pandas.DataFrame
+        The testing dataframe.
+    """
+
+    # set random seed
+    np.random.seed(seed)
+
+    # calculate scaffolds for each smiles string
+    df['scaffold'] = df['smiles'].apply(generate_scaffold)
+
+    # get unique scaffolds
+    scaffolds = list(df['scaffold'].unique())
+    np.random.shuffle(scaffolds)
+    len_scaffolds = len(scaffolds)
+    # calculate number of compounds for each split
+    num_train = int(train_frac * len_scaffolds)
+    num_val = int(val_frac * len_scaffolds)
+    # num_test = int(test_frac * len_scaffolds)
+
+    # split scaffolds
+    scaffold_train = scaffolds[:num_train]
+    scaffold_val = scaffolds[num_train:num_train + num_val]
+    scaffold_test = scaffolds[num_train + num_val:]
+
+    # split dataframe
+    train_df = df[df['scaffold'].isin(scaffold_train)]
+    val_df = df[df['scaffold'].isin(scaffold_val)]
+    test_df = df[df['scaffold'].isin(scaffold_test)]
+
+    return train_df, val_df, test_df
+

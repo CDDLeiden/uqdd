@@ -29,7 +29,7 @@ from papyrus_scripts.preprocess import (
     consume_chunks
 )
 # from smiles_standardizer import check_std_smiles
-from chemutils import standardize_df, ECFP_from_smiles, generate_ecfp, generate_mol_descriptors
+from chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
 
 import torch
 from torch.utils.data import Dataset
@@ -47,6 +47,7 @@ class Papyrus:
             chunksize: int = 1000000,
             accession: Union[None, str, List] = None,
             activity_type: Union[None, str, List] = None,
+            organism: Union[None, str, List] = 'Homo sapiens (Human)',
             protein_class: Union[None, str, List] = None,
             std_smiles: bool = True,
             verbose_files: bool = False,
@@ -92,6 +93,7 @@ class Papyrus:
             self.activity_key = activity_type.join("_")
 
         self.keep_type = activity_type
+        self.keep_organism = organism
         self.keep_protein_class = protein_class
         self.std_smiles = std_smiles
         self.verbose_files = verbose_files
@@ -207,7 +209,10 @@ class Papyrus:
             filter_3 = keep_type(
                 data=filter_2, activity_types=self.keep_type
             )
-            self.df_filtered = consume_chunks(filter_3, progress=True, total=int(60000000 / self.chunksize))
+            filter_4 = keep_organism(
+                data=filter_3, protein_data=self.papyrus_protein_data, organism=self.keep_organism
+            )
+            self.df_filtered = consume_chunks(filter_4, progress=True, total=int(60000000 / self.chunksize))
 
             # IMPORTANT - WE HERE HAVE TO SET THE STD_SMILES TO TRUE
             self.std_smiles = True
@@ -324,15 +329,18 @@ class Papyrus:
 def data_preparation(
         papyrus_path: str = "data/",
         activity="xc50",
+        organism=None,
         n_top=20,
         multitask=True,
         std_smiles=True,
+        split_type='random',
         output_path="data/dataset/",
         verbose_files=False,
 ):
     assert activity.lower() in ["xc50", "kx"], "activity must be either xc50 or kx"
     assert isinstance(n_top, int), "n_top must be an integer"
     assert isinstance(std_smiles, bool), "std_smiles must be a boolean"
+    assert split_type.lower() in ["random", "scaffold"], "split_type must be either random or scaffold"
     # assert isinstance(ecfp_length, int), "ecfp_length must be an integer"
     if not os.path.exists(output_path):
         # make dir
@@ -345,6 +353,7 @@ def data_preparation(
         chunksize=1000000,
         accession=None,
         activity_type=activity,
+        organism=organism,
         protein_class=None,
         std_smiles=std_smiles,
         verbose_files=verbose_files,
@@ -392,13 +401,20 @@ def data_preparation(
     test_path = os.path.join(output_path, "test.pkl")
     all_path = os.path.join(output_path, "all.pkl")
     target_col_path = os.path.join(output_path, "target_col.pkl")
+    if split_type == 'random':
+        # Random splitting of the data
+        train_data, test_data = train_test_split(
+            df, test_size=0.3, shuffle=True, random_state=42
+        )
+        val_data, test_data = train_test_split(
+            test_data, test_size=0.5, shuffle=True, random_state=42
+        )
+    else:
+        # Scaffold-splitting of the data
+        train_data, val_data, test_data = scaffold_split(
+            df, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42
+        )
 
-    train_data, test_data = train_test_split(
-        df, test_size=0.3, shuffle=True, random_state=42
-    )
-    val_data, test_data = train_test_split(
-        test_data, test_size=0.5, shuffle=True, random_state=42
-    )
 
     for file_path, data in zip(
             [train_path, val_path, test_path, all_path, target_col_path],
