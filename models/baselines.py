@@ -7,7 +7,6 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-import copy
 import wandb
 
 from tqdm import tqdm
@@ -16,7 +15,7 @@ import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from models.models_utils import build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, calc_regr_metrics, log_mol_table
+from models.models_utils import build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, calc_regr_metrics
 
 
 # get today's date as yyyy/mm/dd format
@@ -34,7 +33,7 @@ wandb_mode = 'online'
 # dataset_dir = 'data/dataset/'
 
 
-def get_config(activity="xc50"):
+def get_config(activity="xc50", split="random"):
     config = {
         'activity': activity,
         'batch_size': 32,
@@ -54,13 +53,13 @@ def get_config(activity="xc50"):
         'output_dim': 20,
         'weight_decay': 0.01,  # 1e-5,
         'seed': 42,
-        'split': 'random'
+        'split': split
     }
 
     return config
 
 
-def get_sweep_config(activity="xc50"):
+def get_sweep_config(activity="xc50", split='random'):
     # # Initialize wandb
     # wandb.init(project='multitask-learning')
     # Sweep configuration
@@ -129,7 +128,8 @@ def get_sweep_config(activity="xc50"):
                 'value': 42
             },
             'split': {
-                'values': ['random', 'scaffold']
+                'value': split
+                # 'values': ['random', 'scaffold']
             },
         },
     }
@@ -363,8 +363,8 @@ def model_pipeline(config=wandb.config, wandb_project_name="test-project"):  #
         return test_loss, test_rmse, test_r2, test_evs
 
 
-def run_baseline(wandb_project_name=f"{today}-baseline"):
-    config = get_config()
+def run_baseline(activity="xc50", split='random', wandb_project_name=f"{today}-baseline"):
+    config = get_config(activity=activity, split=split)
     test_loss, test_rmse, test_r2, test_evs = model_pipeline(
         config,
         wandb_project_name=wandb_project_name
@@ -372,8 +372,8 @@ def run_baseline(wandb_project_name=f"{today}-baseline"):
     return test_loss, test_rmse, test_r2, test_evs
 
 
-def run_baseline_hyperparam(wandb_project_name=f"{today}-baseline-hyperparam", sweep_count=1):
-    sweep_config = get_sweep_config()
+def run_baseline_hyperparam(activity="xc50", split='random', wandb_project_name=f"{today}-baseline-hyperparam", sweep_count=1):
+    sweep_config = get_sweep_config(activity=activity, split=split)
     sweep_id = wandb.sweep(
         sweep_config,
         project=wandb_project_name,
