@@ -70,14 +70,18 @@ def build_loader(config=wandb.config):
     train_path = os.path.join(d_dir, "train.pkl")
     val_path = os.path.join(d_dir, "val.pkl")
     test_path = os.path.join(d_dir, "test.pkl")
-
+    print("Loading data from: " + d_dir)
     train_set = PapyrusDataset(train_path, input_col=f"ecfp{config.input_dim}", device=device)
     val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}", device=device)
     test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}", device=device)
+    print("Train set size: " + str(len(train_set)))
+    print("Val set size: " + str(len(val_set)))
+    print("Test set size: " + str(len(test_set)))
 
     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)  # , pin_memory=True
     val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
     test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
+    print("Data loaders created")
 
     return train_loader, val_loader, test_loader
 
