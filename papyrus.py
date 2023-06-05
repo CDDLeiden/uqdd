@@ -440,7 +440,7 @@ def data_preparation(
 class PapyrusDataset(Dataset):
     def __init__(
             self,
-            file_path: str = "data/dataset/train.pkl",
+            file_path: str = "data/dataset/xc50/random/train.pkl",
             input_col: str = "ecfp1024",
             target_col: Union[str, List, None] = None,
             device="cuda",

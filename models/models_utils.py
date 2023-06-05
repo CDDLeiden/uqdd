@@ -114,19 +114,19 @@ def build_loss(loss, reduction='none'):
 
 
 def save_models(config, model):
-    model_dir = os.path.join('models', 'saved_models', config.activity)
+    model_dir = os.path.join('models', 'saved_models', config.activity, config.split)
     os.makedirs(model_dir, exist_ok=True)
     model_path = os.path.join(model_dir, f"{today}-{wandb.run.name}-best-model")
     pt_path = model_path + ".pt"
     onnx_path = model_path + ".onnx"
 
-    x = torch.zeros(
+    dummy_input = torch.zeros(
         (config.batch_size, config.input_dim),
         dtype=torch.float32,
         device=device,
         requires_grad=False
     )
-    torch.onnx.export(model, x, onnx_path)
+    torch.onnx.export(model, dummy_input, onnx_path)
     torch.save(model.state_dict(), pt_path)
     # ONNX saving
     wandb.save(onnx_path)

@@ -34,9 +34,9 @@ wandb_mode = 'online'
 # dataset_dir = 'data/dataset/'
 
 
-def get_config():
+def get_config(activity="xc50"):
     config = {
-        'activity': "xc50",
+        'activity': activity,
         'batch_size': 32,
         'dropout': 0.2,
         'early_stop': 5,
@@ -60,7 +60,7 @@ def get_config():
     return config
 
 
-def get_sweep_config():
+def get_sweep_config(activity="xc50"):
     # # Initialize wandb
     # wandb.init(project='multitask-learning')
     # Sweep configuration
@@ -123,7 +123,7 @@ def get_sweep_config():
                 'value': 20
             },
             'activity': {
-                'value': "xc50"
+                'value': activity
             },
             'seed': {
                 'value': 42
