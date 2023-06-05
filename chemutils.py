@@ -534,9 +534,12 @@ def generate_scaffold(smiles, include_chirality=False):
     str
         The scaffold SMILES string.
     """
-    mol = Chem.MolFromSmiles(smiles)
-    scaffold = MurckoScaffold \
-        .MurckoScaffoldSmiles(mol=mol, includeChirality=include_chirality)
+    # mol = Chem.MolFromSmiles(smiles)
+    try:
+        scaffold = MurckoScaffold.MurckoScaffoldSmiles(smiles=smiles, includeChirality=include_chirality)
+    except Exception as e:
+        scaffold = None
+        print(f"following error {e} \n occured while processing smiles: {smiles}")
     return scaffold
 
 

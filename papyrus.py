@@ -326,6 +326,15 @@ class Papyrus:
         return protein_descriptors
 
 
+def get_data_info(train_data, val_data, test_data):
+    combined_data = pd.concat([train_data, val_data, test_data], keys=['train_data', 'val_data', 'test_data'])
+    combined_data.reset_index(inplace=True)
+    count_data = combined_data.groupby('level_0').count()
+    count_data = count_data.pivot_table(columns='level_0')
+    # count_data.rename(columns={'index': 'Column Name', 'level_0': 'Dataframe', 'level_1': 'Count'}, inplace=True)
+    count_data.reset_index(inplace=True)
+    return count_data
+
 def data_preparation(
         papyrus_path: str = "data/",
         activity="xc50",
@@ -401,6 +410,8 @@ def data_preparation(
     test_path = os.path.join(output_path, "test.pkl")
     all_path = os.path.join(output_path, "all.pkl")
     target_col_path = os.path.join(output_path, "target_col.pkl")
+    data_info_path = os.path.join(output_path, "data_info")
+
     if split_type == 'random':
         # Random splitting of the data
         train_data, test_data = train_test_split(
@@ -414,11 +425,12 @@ def data_preparation(
         train_data, val_data, test_data = scaffold_split(
             df, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42
         )
-
+    data_info = get_data_info(train_data, val_data, test_data)
+    data_info.to_csv(data_info_path+".csv", index=False)
 
     for file_path, data in zip(
-            [train_path, val_path, test_path, all_path, target_col_path],
-            [train_data, val_data, test_data, df, target_col]):
+            [train_path, val_path, test_path, all_path, target_col_path, data_info_path+".pkl"],
+            [train_data, val_data, test_data, df, target_col, data_info]):
         with open(file_path, 'wb') as file:
             pickle.dump(data, file)
 
