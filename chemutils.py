@@ -18,12 +18,12 @@ import rdkit
 # import rdkit.Chem as Chem
 from rdkit import Chem, RDLogger
 # from rdkit.Chem import Draw
-# RDLogger.DisableLog('rdApp.info')
 from rdkit.Chem import Draw, AllChem
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 
+RDLogger.DisableLog('rdApp.info')
 print(rdkit.__version__)
 
 
