@@ -65,7 +65,7 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
 
 
 def build_loader(config=wandb.config):
-    d_dir = os.path.join(dataset_dir, config.activity)
+    d_dir = os.path.join(dataset_dir, config.activity, config.split)
 
     train_path = os.path.join(d_dir, "train.pkl")
     val_path = os.path.join(d_dir, "val.pkl")

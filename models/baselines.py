@@ -30,8 +30,8 @@ print(torch.version.cuda) if device == 'cuda' else None
 
 wandb_dir = 'logs/'
 wandb_mode = 'online'
-data_dir = 'data/' # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
-dataset_dir = 'data/dataset/'
+# data_dir = 'data/' # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
+# dataset_dir = 'data/dataset/'
 
 
 def get_config():
@@ -54,6 +54,7 @@ def get_config():
         'output_dim': 20,
         'weight_decay': 0.01,  # 1e-5,
         'seed': 42,
+        'split': 'random'
     }
 
     return config
@@ -126,6 +127,9 @@ def get_sweep_config():
             },
             'seed': {
                 'value': 42
+            },
+            'split': {
+                'values': ['random', 'scaffold']
             },
         },
     }
