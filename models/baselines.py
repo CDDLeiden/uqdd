@@ -67,7 +67,7 @@ def get_sweep_config():
     sweep_config = {
         'method': 'random',
         'metric': {
-            'name': 'val_loss',
+            'name': 'val_rmse', # 'val_loss',
             'goal': 'minimize'
         },
         'parameters': {
