@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from models.models_utils import build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, calc_regr_metrics
+from models.models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, calc_regr_metrics
 
 
 # get today's date as yyyy/mm/dd format
@@ -33,7 +33,7 @@ wandb_mode = 'online'
 # dataset_dir = 'data/dataset/'
 
 
-def get_config(activity="xc50", split="random"):
+def get_config(activity='xc50', split='random'):
     config = {
         'activity': activity,
         'batch_size': 32,
@@ -52,14 +52,14 @@ def get_config(activity="xc50", split="random"):
         'optimizer': 'AdamW',
         'output_dim': 20,
         'weight_decay': 0.01,  # 1e-5,
-        'seed': 42,
         'split': split
+        # 'seed': 42,
     }
 
     return config
 
 
-def get_sweep_config(activity="xc50", split='random'):
+def get_sweep_config(activity='xc50', split='random'):
     # # Initialize wandb
     # wandb.init(project='multitask-learning')
     # Sweep configuration
@@ -124,13 +124,13 @@ def get_sweep_config(activity="xc50", split='random'):
             'activity': {
                 'value': activity
             },
-            'seed': {
-                'value': 42
-            },
             'split': {
                 'value': split
                 # 'values': ['random', 'scaffold']
             },
+            # 'seed': {
+            #     'value': 42
+            # },
         },
     }
     # 576 combinations
@@ -244,28 +244,85 @@ def evaluate(
     return total_loss, rmse, r2, evs
 
 
-def model_pipeline(config=wandb.config, wandb_project_name="test-project"):  #
-    with wandb.init(
-            dir=wandb_dir,
-            mode=wandb_mode,
-            project=wandb_project_name,
-            config=config
-    ):
-        config = wandb.config
+def initial_evaluation(model, train_loader, val_loader, loss_fn):
+    val_loss, val_rmse, val_r2, val_evs = evaluate(model, val_loader, loss_fn)
+    train_loss, _, _, _ = evaluate(model, train_loader, loss_fn)
+    # # Log the metrics
+    # wandb.log(
+    #     data={
+    #         'epoch': 0,
+    #         'train_loss': train_loss,
+    #         'val_loss': val_loss,
+    #         'val_rmse': val_rmse,
+    #         'val_r2': val_r2,
+    #         'val_evs': val_evs
+    #     }
+    # )
+    return train_loss, val_loss, val_rmse, val_r2, val_evs
 
-        # Load the dataset
-        train_loader, val_loader, test_loader = build_loader(config)
 
+def run_epoch(model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler, epoch=0):
+    """
+    Run a single epoch of training and evaluation.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to be trained and evaluated.
+    train_loader : torch.utils.data.DataLoader
+        DataLoader for training data.
+    val_loader : torch.utils.data.DataLoader
+        DataLoader for validation data.
+    loss_fn : torch.nn.Module
+        Loss function used for training and evaluation.
+    optimizer : torch.optim.Optimizer
+        Optimizer for model parameter updates.
+    lr_scheduler : torch.optim.lr_scheduler._LRScheduler
+        Learning rate scheduler.
+    epoch : int, optional
+        Current epoch number. Default is 0.
+
+    Returns
+    -------
+    float
+        Validation loss for the epoch.
+    """
+    if epoch == 0:
+        # Perform evaluation before training starts (epoch 0)
+        train_loss, val_loss, val_rmse, val_r2, val_evs = initial_evaluation(model, train_loader, val_loader, loss_fn)
+
+    else:
+        train_loss = train(model, train_loader, optimizer, loss_fn)
+        val_loss, val_rmse, val_r2, val_evs = evaluate(model, val_loader, loss_fn)
+        # Update the learning rate
+        lr_scheduler.step(val_loss)
+
+    # Log the metrics
+    wandb.log(
+        data={
+            'epoch': epoch,
+            'train_loss': train_loss,
+            'val_loss': val_loss,
+            'val_rmse': val_rmse,
+            'val_r2': val_r2,
+            'val_evs': val_evs
+        }
+    )
+
+    return val_loss
+
+
+def train_model(
+        train_loader,
+        val_loader,
+        config=wandb.config,
+        seed=42
+):
+    try:
         # set a random seed for reproducibility
-        try:
-            seed = config.seed
-        except AttributeError:
-            seed = 42
-        # seed = 42 if not config.seed else config.seed
         torch.manual_seed(seed)
         # deterministic cuda algorithms
         torch.backends.cudnn.deterministic = True
-        # torch.use_deterministic_algorithms(True)
 
         # Load the model
         model = BaselineDNN(
@@ -273,11 +330,13 @@ def model_pipeline(config=wandb.config, wandb_project_name="test-project"):  #
             hidden_dim_1=config.hidden_dim_1,
             hidden_dim_2=config.hidden_dim_2,
             hidden_dim_3=config.hidden_dim_3,
-            # hidden_dim=config.hidden_dim,
             num_tasks=config.num_tasks,
             dropout=config.dropout
         )
         model = model.to(device)
+
+        # Temporarily initialize best_model
+        best_model = model
 
         # Define the loss function
         loss_fn = build_loss(config.loss, reduction='none')
@@ -297,61 +356,172 @@ def model_pipeline(config=wandb.config, wandb_project_name="test-project"):  #
         # Train the model
         best_val_loss = float('inf')
         early_stop_counter = 0
-        for epoch in tqdm(range(config.num_epochs+1)):
-            if epoch == 0:
-                val_loss, val_rmse, val_r2, val_evs = evaluate(model, val_loader, loss_fn)
-                train_loss, _, _, _ = evaluate(model, train_loader, loss_fn)
-                # Log the metrics
-                wandb.log(
-                    data={
-                        'epoch': epoch,
-                        'train_loss': train_loss,
-                        'val_loss': val_loss,
-                        'val_rmse': val_rmse,
-                        'val_r2': val_r2,
-                        'val_evs': val_evs
-                    }
-                )
-                continue
-            # else:
-            # Training
-            train_loss = train(model, train_loader, optimizer, loss_fn)
-            # Validation
-            val_loss, val_rmse, val_r2, val_evs = evaluate(model, val_loader, loss_fn)
-            # Log the metrics
-            wandb.log(
-                data={
-                    'epoch': epoch,
-                    'train_loss': train_loss,
-                    'val_loss': val_loss,
-                    'val_rmse': val_rmse,
-                    'val_r2': val_r2,
-                    'val_evs': val_evs
-                }
-            )
+        # Train the model
+        for epoch in tqdm(range(config.num_epochs + 1)):
+            try:
+                val_loss = run_epoch(model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler, epoch=epoch)
 
-            # Update the learning rate
-            lr_scheduler.step(val_loss)
+                # Early stopping
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    early_stop_counter = 0
+                    # Save the best model - dropped to avoid memory issues
+                    # Update the best model and its performance
+                    best_model = model
 
-            # Early stopping
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                early_stop_counter = 0
-                # Save the best model - dropped to avoid memory issues
-                # Update the best model and its performance
-                best_model = model
+                else:
+                    early_stop_counter += 1
+                    if early_stop_counter > config.early_stop:
+                        break
 
-            else:
-                early_stop_counter += 1
-                # print(config)
-                if early_stop_counter > config.early_stop:
-                    break
+            except Exception as e:
+                raise Exception(f"The following exception occurred inside the epoch loop {e}")
 
         # Save the best model
         save_models(config, best_model)
+        return best_model, loss_fn
 
-        # Test
-        test_loss, test_rmse, test_r2, test_evs = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
+    except Exception as e:
+        raise Exception(f"The following exception occurred in train_model {e}")
+
+
+# def baseline_pipeline(config=wandb.config, wandb_project_name="test-project"):  #
+#     with wandb.init(
+#             dir=wandb_dir,
+#             mode=wandb_mode,
+#             project=wandb_project_name,
+#             config=config
+#     ):
+#         # config = wandb.config
+#
+#         # Load the dataset
+#         train_loader, val_loader, test_loader = build_loader(config)
+#
+#         best_model, loss_fn = train_model(train_loader, val_loader, config=config, seed=42)
+#
+#         # Test
+#         test_loss, test_rmse, test_r2, test_evs = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
+#
+#         # Log the final test metrics
+#         wandb.log({
+#             'test_loss': test_loss,
+#             'test_rmse': test_rmse,
+#             'test_r2': test_r2,
+#             'test_evs': test_evs
+#         })
+#
+#         return test_loss, test_rmse, test_r2, test_evs
+
+
+        #
+        #
+        #
+        #
+        #
+        # # set a random seed for reproducibility
+        # try:
+        #     seed = config.seed
+        # except AttributeError:
+        #     seed = 42
+        # # seed = 42 if not config.seed else config.seed
+        # torch.manual_seed(seed)
+        # # deterministic cuda algorithms
+        # torch.backends.cudnn.deterministic = True
+        # # torch.use_deterministic_algorithms(True)
+        #
+        # # Load the model
+        # model = BaselineDNN(
+        #     input_dim=config.input_dim,
+        #     hidden_dim_1=config.hidden_dim_1,
+        #     hidden_dim_2=config.hidden_dim_2,
+        #     hidden_dim_3=config.hidden_dim_3,
+        #     num_tasks=config.num_tasks,
+        #     dropout=config.dropout
+        # )
+        # model = model.to(device)
+        #
+        # # Define the loss function
+        # loss_fn = build_loss(config.loss, reduction='none')
+        #
+        # # Define the optimizer with weight decay and learning rate scheduler
+        # optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+        #
+        # # Define Learning rate scheduler
+        # lr_scheduler = ReduceLROnPlateau(
+        #     optimizer,
+        #     mode='min',
+        #     factor=config.lr_factor,
+        #     patience=config.lr_patience,
+        #     verbose=True
+        # )
+        #
+        # # Train the model
+        # best_val_loss = float('inf')
+        # early_stop_counter = 0
+        # for epoch in tqdm(range(config.num_epochs+1)):
+        #
+        #     val_loss = run_epoch(model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler, epoch=epoch)
+        #
+        #     # Early stopping
+        #     if val_loss < best_val_loss:
+        #         best_val_loss = val_loss
+        #         early_stop_counter = 0
+        #         # Save the best model - dropped to avoid memory issues
+        #         # Update the best model and its performance
+        #         best_model = model
+        #
+        #     else:
+        #         early_stop_counter += 1
+        #         if early_stop_counter > config.early_stop:
+        #             break
+        #
+        # # Save the best model
+        # save_models(config, best_model)
+        #
+        # # Test
+        # test_loss, test_rmse, test_r2, test_evs = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
+        # # Log the final test metrics
+        # wandb.log({
+        #     'test_loss': test_loss,
+        #     'test_rmse': test_rmse,
+        #     'test_r2': test_r2,
+        #     'test_evs': test_evs
+        # })
+        #
+        # return test_loss, test_rmse, test_r2, test_evs
+
+
+def run_baseline(
+        datasets=None,
+        config=None,
+        activity="xc50",
+        split='random',
+        wandb_project_name=f"{today}-baseline",
+        seed=42,
+):
+    if datasets is None:
+        datasets = get_datasets(activity=activity, split=split)
+
+    if config is None:
+        config = get_config(activity=activity, split=split)
+
+    with wandb.init(
+            dir=wandb_dir,
+            mode=wandb_mode,
+            project=wandb_project_name,
+            config=config
+    ):
+
+        config = wandb.config
+        # Load the dataset
+        train_loader, val_loader, test_loader = build_loader(datasets, config.batch_size, config.input_dim)
+
+        # Train the model
+        best_model, loss_fn = train_model(train_loader, val_loader, config=config, seed=seed)
+
+        # Testing metrics on the best model
+        test_loss, test_rmse, test_r2, test_evs = evaluate(best_model, test_loader, loss_fn)
+
         # Log the final test metrics
         wandb.log({
             'test_loss': test_loss,
@@ -360,28 +530,32 @@ def model_pipeline(config=wandb.config, wandb_project_name="test-project"):  #
             'test_evs': test_evs
         })
 
-        return test_loss, test_rmse, test_r2, test_evs
+    # return test_loss, test_rmse, test_r2, test_evs
 
 
-def run_baseline(activity="xc50", split='random', wandb_project_name=f"{today}-baseline"):
-    config = get_config(activity=activity, split=split)
-    test_loss, test_rmse, test_r2, test_evs = model_pipeline(
-        config,
-        wandb_project_name=wandb_project_name
-    )
-    return test_loss, test_rmse, test_r2, test_evs
+def run_baseline_hyperparam(
+        activity="xc50",
+        split='random',
+        wandb_project_name=f"{today}-baseline-hyperparam",
+        sweep_count=1
+):
 
-
-def run_baseline_hyperparam(activity="xc50", split='random', wandb_project_name=f"{today}-baseline-hyperparam", sweep_count=1):
+    datasets = get_datasets(activity=activity, split=split)
     sweep_config = get_sweep_config(activity=activity, split=split)
+
     sweep_id = wandb.sweep(
         sweep_config,
         project=wandb_project_name,
     )
+
     wandb_train_func = partial(
-        model_pipeline,
+        run_baseline,
+        datasets=datasets,
+        activity=activity,
+        split=split,
         config=sweep_config,
         wandb_project_name=wandb_project_name,
+        seed=42
     )
     wandb.agent(sweep_id, function=wandb_train_func, count=sweep_count)
 
