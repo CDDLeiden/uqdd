@@ -64,24 +64,72 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     wandb.log({"mols_table": table}, commit=False)
 
 
-def build_loader(config=wandb.config):
-    d_dir = os.path.join(dataset_dir, config.activity, config.split)
 
-    train_path = os.path.join(d_dir, "train.pkl")
-    val_path = os.path.join(d_dir, "val.pkl")
-    test_path = os.path.join(d_dir, "test.pkl")
-    print("Loading data from: " + d_dir)
-    train_set = PapyrusDataset(train_path, input_col=f"ecfp{config.input_dim}", device=device)
-    val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}", device=device)
-    test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}", device=device)
-    print("Train set size: " + str(len(train_set)))
-    print("Val set size: " + str(len(val_set)))
-    print("Test set size: " + str(len(test_set)))
+def get_datasets(activity, split):
+    try:
+        d_dir = os.path.join(dataset_dir, activity, split)
 
-    train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)  # , pin_memory=True
-    val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
-    test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
-    print("Data loaders created")
+        train_path = os.path.join(d_dir, "train.pkl")
+        val_path = os.path.join(d_dir, "val.pkl")
+        test_path = os.path.join(d_dir, "test.pkl")
+
+        train_set_1024 = PapyrusDataset(train_path, input_col="ecfp1024", device=device)
+        val_set_1024 = PapyrusDataset(val_path, input_col="ecfp1024", device=device)
+        test_set_1024 = PapyrusDataset(test_path, input_col="ecfp1024", device=device)
+
+        train_set_2048 = PapyrusDataset(train_path, input_col="ecfp2048", device=device)
+        val_set_2048 = PapyrusDataset(val_path, input_col="ecfp2048", device=device)
+        test_set_2048 = PapyrusDataset(test_path, input_col="ecfp2048", device=device)
+        print("Train set size: " + str(len(train_set_1024)))
+        print("Val set size: " + str(len(val_set_1024)))
+        print("Test set size: " + str(len(test_set_1024)))
+
+        return train_set_1024, val_set_1024, test_set_1024, \
+            train_set_2048, val_set_2048, test_set_2048
+
+    except Exception as e:
+        # print("Error loading data")
+        raise Exception(f"Error building dataset with PapyrusDataset {e}")
+
+
+def build_loader(datasets, batch_size, ecfp_size=1024):
+    try:
+        train_set, val_set, test_set = datasets[:3] if ecfp_size == 1024 else datasets[3:]
+
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)  # , pin_memory=True
+        val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)  # , pin_memory=True
+        test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)  # , pin_memory=True
+        print("Data loaders created")
+    except Exception as e:
+        # print("Error loading data")
+        raise Exception(f"Error loading data {e}")
+
+    return train_loader, val_loader, test_loader
+
+
+def _build_loader(config=wandb.config):
+    """Deprecated function"""
+    try:
+        d_dir = os.path.join(dataset_dir, config.activity, config.split)
+
+        train_path = os.path.join(d_dir, "train.pkl")
+        val_path = os.path.join(d_dir, "val.pkl")
+        test_path = os.path.join(d_dir, "test.pkl")
+        print("Loading data from: " + d_dir)
+        train_set = PapyrusDataset(train_path, input_col=f"ecfp{config.input_dim}", device=device)
+        val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}", device=device)
+        test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}", device=device)
+        print("Train set size: " + str(len(train_set)))
+        print("Val set size: " + str(len(val_set)))
+        print("Test set size: " + str(len(test_set)))
+
+        train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)  # , pin_memory=True
+        val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
+        test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
+        print("Data loaders created")
+
+    except Exception as e:
+        raise Exception("Error loading data: " + str(e))
 
     return train_loader, val_loader, test_loader
 
@@ -114,22 +162,26 @@ def build_loss(loss, reduction='none'):
 
 
 def save_models(config, model):
-    model_dir = os.path.join('models', 'saved_models', config.activity, config.split)
-    os.makedirs(model_dir, exist_ok=True)
-    model_path = os.path.join(model_dir, f"{today}-{wandb.run.name}-best-model")
-    pt_path = model_path + ".pt"
-    onnx_path = model_path + ".onnx"
+    try:
+        model_dir = os.path.join('models', 'saved_models', config.activity, config.split)
+        os.makedirs(model_dir, exist_ok=True)
+        model_path = os.path.join(model_dir, f"{today}-{wandb.run.name}-best-model")
+        pt_path = model_path + ".pt"
+        onnx_path = model_path + ".onnx"
 
-    dummy_input = torch.zeros(
-        (config.batch_size, config.input_dim),
-        dtype=torch.float32,
-        device=device,
-        requires_grad=False
-    )
-    torch.onnx.export(model, dummy_input, onnx_path)
-    torch.save(model.state_dict(), pt_path)
-    # ONNX saving
-    wandb.save(onnx_path)
+        dummy_input = torch.zeros(
+            (config.batch_size, config.input_dim),
+            dtype=torch.float32,
+            device=device,
+            requires_grad=False
+        )
+        torch.onnx.export(model, dummy_input, onnx_path)
+        torch.save(model.state_dict(), pt_path)
+        # ONNX saving
+        wandb.save(onnx_path)
+
+    except Exception as e:
+        print("Error saving models: " + str(e))
 
 
 def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):

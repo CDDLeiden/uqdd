@@ -10,6 +10,8 @@ import functools
 import inspect
 import logging
 import warnings
+from logging.handlers import QueueListener
+
 import numpy as np
 import re
 import time
@@ -280,3 +282,26 @@ def check_nan_duplicated(
     )
 
     return df_filtered, df_nan, df_dup
+
+
+# def setup_primary_logging(log_file, level):
+#     log_queue = Queue(-1)
+#
+#     file_handler = logging.FileHandler(filename=log_file)
+#     stream_handler = logging.StreamHandler()
+#
+#     formatter = logging.Formatter(
+#         '%(asctime)s | %(levelname)s | %(message)s',
+#         datefmt='%Y-%m-%d,%H:%M:%S')
+#
+#     file_handler.setFormatter(formatter)
+#     stream_handler.setFormatter(formatter)
+#
+#     file_handler.setLevel(level)
+#     stream_handler.setLevel(level)
+#
+#     listener = QueueListener(log_queue, file_handler, stream_handler)
+#     listener.start()
+#
+#     return log_queue
+
