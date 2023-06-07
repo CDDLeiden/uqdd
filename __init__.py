@@ -1,4 +1,5 @@
 import os
+from . import papyrus
 
 # Get the absolute path to the project's root directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
