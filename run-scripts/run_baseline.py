@@ -1,9 +1,11 @@
 import argparse
+import os
 from papyrus import data_preparation
 from models.baselines import run_baseline, run_baseline_hyperparam
 from datetime import date, datetime
 import sys
 
+from . import DATA_DIR, LOGS_DIR, SCRIPTS_DIR, MODELS_DIR
 
 def main():
     parser = argparse.ArgumentParser(description='Baseline Model Running')
@@ -24,9 +26,10 @@ def main():
     start_time = datetime.now()
 
     if args.prepare_dataset:
-        output_path = f'data/dataset/{args.activity}/{args.split}/'
+        output_path = os.path.join(DATA_DIR, 'dataset', args.activity, args.split)
+            # f'data/dataset/{args.activity}/{args.split}/'
         _, _, _, _ = data_preparation(
-            papyrus_path='../data/',
+            papyrus_path=DATA_DIR,
             activity=args.activity,
             organism='Homo sapiens (Human)',
             n_top=20,

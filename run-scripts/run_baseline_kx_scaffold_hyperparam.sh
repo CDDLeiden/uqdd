@@ -9,5 +9,10 @@ mkdir -p ../logs
 # Get today's date as yyyy-mm-dd format
 today=$(date +%Y-%m-%d)
 
+pwd
+# Change to the directory where the script is located
+cd "$(dirname "$0")"
+pwd
+
 # Run hyperparameter search for kx-scaffold
-python run_baseline.py --activity kx --split scaffold --hyperparam --sweep-count 250 --wandb-project-name "${today}-kx-scaffold-baseline_hyperparam" > "../logs/${today}-kx_scaffold_baseline_hyperparam_output.txt"
+python run_baseline.py --activity kx --split scaffold --hyperparam --sweep-count 250 --wandb-project-name "${today}-kx-scaffold-baseline_hyperparam" > "../logs/${today}-kx_scaffold_baseline_hyperparam_output.txt 2>&1"

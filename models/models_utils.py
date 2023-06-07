@@ -8,18 +8,24 @@ __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
 import os
-import numpy as np
-import pandas as pd
-from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
-from papyrus import PapyrusDataset
-from chemutils import smi_to_pil_image
+from datetime import date
 
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
 import wandb
-from datetime import date
+from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
+from torch.utils.data import DataLoader
+
+from chemutils import smi_to_pil_image
+from papyrus import PapyrusDataset
+from . import DATA_DIR, LOGS_DIR
+
+wandb_dir = LOGS_DIR  # 'logs/'
+wandb_mode = 'online'
+data_dir = DATA_DIR  # 'data/'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
+dataset_dir = os.path.join(DATA_DIR, 'dataset/')  # 'data/dataset/'
 
 today = date.today()
 today = today.strftime("%Y%m%d")
@@ -27,12 +33,6 @@ today = today.strftime("%Y%m%d")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # print("Device: " + str(device))
 # print(torch.version.cuda) if device == 'cuda' else None
-
-wandb_dir = 'logs/'
-wandb_mode = 'online'
-data_dir = 'data/'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
-dataset_dir = 'data/dataset/'
-
 
 def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     # targets_cols = targets.columns()
@@ -62,7 +62,6 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     dataframe = pd.DataFrame.from_records(data)
     table = wandb.Table(dataframe=dataframe)
     wandb.log({"mols_table": table}, commit=False)
-
 
 
 def get_datasets(activity, split):
