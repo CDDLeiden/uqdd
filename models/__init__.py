@@ -1,0 +1,3 @@
+from .. import DATA_DIR, LOGS_DIR, SCRIPTS_DIR, MODELS_DIR
+
+__all__ = ['DATA_DIR', 'LOGS_DIR', 'SCRIPTS_DIR', 'MODELS_DIR']
