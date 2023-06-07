@@ -7,19 +7,19 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-import wandb
-
-from tqdm import tqdm
-from functools import partial
-import torch
-import torch.nn as nn
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-
-from models.models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, calc_regr_metrics
-
-
 # get today's date as yyyy/mm/dd format
 from datetime import date
+from functools import partial
+
+import torch
+import torch.nn as nn
+import wandb
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from tqdm import tqdm
+
+from models.models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, \
+    calc_regr_metrics
+
 today = date.today()
 today = today.strftime("%Y%m%d")
 

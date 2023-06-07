@@ -6,31 +6,12 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-import functools
-import inspect
-import logging
-import warnings
-from logging.handlers import QueueListener
+from typing import List, Union, Tuple  # , List, Tuple, Any, Set, Dict
 
 import numpy as np
-import re
-import time
-
-from typing import Optional, List, Union, Tuple  # , List, Tuple, Any, Set, Dict
 import pandas as pd
-from rdkit import Chem
-from rdkit.Chem import (
-    MolToSmiles,
-    MolFromSmiles,
-    MolFromSmarts,
-    # MolToSmarts,
-    # SDMolSupplier,
-    # ForwardSDMolSupplier,
-)
-
 # noinspection PyUnresolvedReferences
 from rdkit.Chem.rdchem import Mol as RdkitMol
-import copy
 
 string_types = (type(b""), type(""))
 

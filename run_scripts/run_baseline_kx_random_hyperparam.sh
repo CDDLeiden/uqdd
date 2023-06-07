@@ -10,4 +10,4 @@ mkdir -p ../logs
 today=$(date +%Y-%m-%d)
 
 # Run hyperparameter search for kx-random
-python run_baseline.py --activity kx --split random --sweep-count 250 --hyperparam --wandb-project-name "${today}-kx-random-baseline_hyperparam" > ../logs/${today}-kx_random_baseline_hyperparam_output.txt 2>&1
+python run_baseline.py --activity kx --split random --sweep-count 250 --hyperparam --wandb-project-name "${today}-kx-random-baseline_hyperparam" > ../logs/${today}-kx_random_baseline_hyperparam_output.txt

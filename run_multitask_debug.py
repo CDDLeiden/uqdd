@@ -1,9 +1,8 @@
-from papyrus import data_preparation
-from models.baselines import run_baseline, run_baseline_hyperparam
-
-import wandb
 # get today's date as yyyy/mm/dd format
 from datetime import date
+
+from models.baselines import run_baseline_hyperparam
+
 today = date.today()
 today = today.strftime("%Y%m%d")
 # # preparing the xc50 dataset - scaffold split

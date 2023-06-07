@@ -1,11 +1,12 @@
 import argparse
 import os
-from papyrus import data_preparation
-from models.baselines import run_baseline, run_baseline_hyperparam
-from datetime import date, datetime
 import sys
+from datetime import date, datetime
 
-from . import DATA_DIR, LOGS_DIR, SCRIPTS_DIR, MODELS_DIR
+from models.baselines import run_baseline, run_baseline_hyperparam
+from papyrus import data_preparation
+from . import DATA_DIR
+
 
 def main():
     parser = argparse.ArgumentParser(description='Baseline Model Running')

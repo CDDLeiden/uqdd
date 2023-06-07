@@ -6,22 +6,22 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-import numpy as np
-import pandas as pd
-from typing import Union, List, Tuple
-
-from utils import check_nan_duplicated, custom_agg
 import copy
 import time
+from typing import Union, List, Tuple
 
+import numpy as np
+import pandas as pd
 import rdkit
 # import rdkit.Chem as Chem
 from rdkit import Chem, RDLogger
 # from rdkit.Chem import Draw
 from rdkit.Chem import Draw, AllChem
-from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.Chem.MolStandardize import rdMolStandardize
+from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
+
+from utils import check_nan_duplicated, custom_agg
 
 RDLogger.DisableLog('rdApp.info')
 print(rdkit.__version__)

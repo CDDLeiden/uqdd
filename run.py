@@ -1,8 +1,10 @@
 import pandas as pd
-from papyrus import Papyrus
-from papyrus_scripts.modelling import pcm, qsar
 import xgboost
+from papyrus_scripts.modelling import pcm
+
 from chemutils import generate_ecfp, generate_mol_descriptors
+from papyrus import Papyrus
+
 # generate xc50 and ki dataframes
 # papyrus_xc50 = Papyrus(
 #     path="data/",

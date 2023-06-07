@@ -6,36 +6,36 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-import os
-from typing import Union, List, Tuple
-import pandas as pd
-import numpy as np
 import logging
+import os
 import pickle
-from sklearn.model_selection import train_test_split
+# get todays date as yyyy/mm/dd format
+from datetime import date
+from typing import Union, List
+
+import numpy as np
+import pandas as pd
+import torch
 from papyrus_scripts.download import download_papyrus
-from papyrus_scripts.reader import (
-    read_papyrus,
-    read_protein_set,
-    read_molecular_descriptors,
-    read_protein_descriptors,
-)
 from papyrus_scripts.preprocess import (
-    keep_accession,
     keep_quality,
     keep_match,
     keep_type,
     keep_organism,
     consume_chunks
 )
+from papyrus_scripts.reader import (
+    read_papyrus,
+    read_protein_set,
+    read_molecular_descriptors,
+    read_protein_descriptors,
+)
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Dataset
+
 # from smiles_standardizer import check_std_smiles
 from chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
 
-import torch
-from torch.utils.data import Dataset
-
-# get todays date as yyyy/mm/dd format
-from datetime import date
 today = date.today()
 today = today.strftime("%Y%m%d")
 

@@ -1,5 +1,5 @@
 import os
-from . import papyrus
+from . import utils, chemutils, data, models, papyrus, run_scripts
 
 # Get the absolute path to the project's root directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -7,7 +7,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Define the paths to different directories
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 LOGS_DIR = os.path.join(BASE_DIR, 'logs')
-SCRIPTS_DIR = os.path.join(BASE_DIR, 'run-scripts')
+SCRIPTS_DIR = os.path.join(BASE_DIR, 'run_scripts')
 MODELS_DIR = os.path.join(BASE_DIR, 'models')
 
 # Define the paths to different files

@@ -10,4 +10,4 @@ mkdir -p ../logs
 today=$(date +%Y-%m-%d)
 
 # Run hyperparameter search for kx-scaffold
-python run_baseline.py --activity kx --split scaffold --hyperparam --sweep-count 250 --wandb-project-name "${today}-kx-scaffold-baseline_hyperparam" > ../logs/${today}-kx_scaffold_baseline_hyperparam_output.txt 2>&1
+python run_baseline.py --activity kx --split scaffold --hyperparam --sweep-count 250 --wandb-project-name "${today}-kx-scaffold-baseline_hyperparam" > ../logs/${today}-kx_scaffold_baseline_hyperparam_output.txt
