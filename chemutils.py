@@ -420,8 +420,6 @@ def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = N
     ----------
     df : pandas.DataFrame
         The input dataframe.
-    smiles_col : str, optional
-        The name of the column containing the SMILES strings.
     chosen_descriptors : list of str, optional
         The list of descriptors to calculate. If None, the default list of descriptors in
         `mol_descriptors` will be used.

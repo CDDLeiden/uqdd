@@ -1,5 +1,8 @@
+# from .models import *
+# from .papyrus import *
+# from .run_scripts import *
+
 import os
-from . import utils, chemutils, data, models, papyrus, run_scripts
 
 # Get the absolute path to the project's root directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,3 +27,4 @@ os.environ['MODELS_DIR'] = MODELS_DIR
 # os.environ['REQUIREMENTS_FILE'] = REQUIREMENTS_FILE
 
 __all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'SCRIPTS_DIR', 'MODELS_DIR']
+

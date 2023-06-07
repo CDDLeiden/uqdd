@@ -34,7 +34,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 
 # from smiles_standardizer import check_std_smiles
-from chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
+from .chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
 
 today = date.today()
 today = today.strftime("%Y%m%d")
@@ -507,7 +507,7 @@ def build_top_dataset(
     assert isinstance(n_top, int), "n_top must be an integer"
     assert isinstance(std_smiles, bool), "std_smiles must be a boolean"
     assert isinstance(ecfp_length, int), "ecfp_length must be an integer"
-    assert isinstance(ecfp_radius, int) or ecfp_radius == None, "ecfp_radius must be an integer or None"
+    assert isinstance(ecfp_radius, int) or ecfp_radius is None, "ecfp_radius must be an integer or None"
     assert isinstance(export, bool), "export must be a boolean"
 
     act_dict = {
@@ -586,7 +586,7 @@ def build_top_dataset(
     else:
         df = filtered_df[["smiles", "accession", "pchemblValueMean"]]
 
-    if ecfp_radius == 0 or ecfp_radius == None:
+    if ecfp_radius == 0 or ecfp_radius is None:
         radius_dict = {1024: 2, 2048: 4, 4096: 4}
         ecfp_radius = radius_dict[ecfp_length]
     else:
