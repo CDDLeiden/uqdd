@@ -10,7 +10,7 @@ import sys
 # from ..papyrus import data_preparation
 # from uqdd import DATA_DIR
 from papyrus import data_preparation
-from models.baselines import run_baseline, run_baseline_hyperparam
+from baselines import run_baseline, run_baseline_hyperparam
 
 # from papyrus import data_preparation
 
