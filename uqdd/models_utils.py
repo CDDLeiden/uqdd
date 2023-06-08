@@ -23,8 +23,10 @@ from papyrus import PapyrusDataset
 # from uqdd.chemutils import smi_to_pil_image
 # from uqdd.papyrus import PapyrusDataset
 # from .. import DATA_DIR, LOGS_DIR
-DATA_DIR = os.environ.get('DATA_DIR')
-LOGS_DIR = os.environ.get('LOGS_DIR')
+# DATA_DIR = os.environ.get('DATA_DIR')
+# LOGS_DIR = os.environ.get('LOGS_DIR')
+DATA_DIR = 'data/'
+LOGS_DIR = 'logs/'
 
 wandb_dir = LOGS_DIR  # 'logs/'
 wandb_mode = 'online'
