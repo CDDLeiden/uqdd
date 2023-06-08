@@ -18,8 +18,10 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 from torch.utils.data import DataLoader
 
-from uqdd.chemutils import smi_to_pil_image
-from uqdd.papyrus import PapyrusDataset
+from ..chemutils import smi_to_pil_image
+from ..papyrus import PapyrusDataset
+# from uqdd.chemutils import smi_to_pil_image
+# from uqdd.papyrus import PapyrusDataset
 # from .. import DATA_DIR, LOGS_DIR
 DATA_DIR = os.environ.get('DATA_DIR')
 LOGS_DIR = os.environ.get('LOGS_DIR')
