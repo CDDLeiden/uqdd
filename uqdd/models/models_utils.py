@@ -20,7 +20,9 @@ from torch.utils.data import DataLoader
 
 from uqdd.chemutils import smi_to_pil_image
 from uqdd.papyrus import PapyrusDataset
-from .. import DATA_DIR, LOGS_DIR
+# from .. import DATA_DIR, LOGS_DIR
+DATA_DIR = os.environ.get('DATA_DIR')
+LOGS_DIR = os.environ.get('LOGS_DIR')
 
 wandb_dir = LOGS_DIR  # 'logs/'
 wandb_mode = 'online'
@@ -33,6 +35,7 @@ today = today.strftime("%Y%m%d")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # print("Device: " + str(device))
 # print(torch.version.cuda) if device == 'cuda' else None
+
 
 def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     # targets_cols = targets.columns()

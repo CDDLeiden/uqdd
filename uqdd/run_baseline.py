@@ -1,12 +1,17 @@
+from datetime import date, datetime
 import argparse
 import os
 import sys
-from datetime import date, datetime
+### append uqdd folder to sys.path
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # from .. import DATA_DIR
-from uqdd.models.baselines import run_baseline, run_baseline_hyperparam
-from uqdd.papyrus import data_preparation
-# from models.baselines import run_baseline, run_baseline_hyperparam
+# from ..models.baselines import run_baseline, run_baseline_hyperparam
+# from ..papyrus import data_preparation
+# from uqdd import DATA_DIR
+from papyrus import data_preparation
+from models.baselines import run_baseline, run_baseline_hyperparam
+
 # from papyrus import data_preparation
 
 DATA_DIR = os.environ.get('DATA_DIR')
