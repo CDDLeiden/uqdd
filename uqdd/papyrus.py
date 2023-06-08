@@ -34,7 +34,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 
 # from smiles_standardizer import check_std_smiles
-from .chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
+from chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
 
 today = date.today()
 today = today.strftime("%Y%m%d")

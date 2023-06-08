@@ -18,9 +18,9 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 from torch.utils.data import DataLoader
 
-from chemutils import smi_to_pil_image
-from papyrus import PapyrusDataset
-from . import DATA_DIR, LOGS_DIR
+from uqdd.chemutils import smi_to_pil_image
+from uqdd.papyrus import PapyrusDataset
+from .. import DATA_DIR, LOGS_DIR
 
 wandb_dir = LOGS_DIR  # 'logs/'
 wandb_mode = 'online'

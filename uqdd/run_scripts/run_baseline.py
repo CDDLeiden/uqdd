@@ -3,13 +3,13 @@ import os
 import sys
 from datetime import date, datetime
 
-from .. import DATA_DIR
-from ..models.baselines import run_baseline, run_baseline_hyperparam
-from ..papyrus import data_preparation
+# from .. import DATA_DIR
+from uqdd.models.baselines import run_baseline, run_baseline_hyperparam
+from uqdd.papyrus import data_preparation
 # from models.baselines import run_baseline, run_baseline_hyperparam
 # from papyrus import data_preparation
-# from .. import DATA_DIR
 
+DATA_DIR = os.environ.get('DATA_DIR')
 
 def main():
     parser = argparse.ArgumentParser(description='Baseline Model Running')

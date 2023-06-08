@@ -1,7 +1,7 @@
 # get today's date as yyyy/mm/dd format
 from datetime import date
 
-from models.baselines import run_baseline_hyperparam
+from uqdd.models import run_baseline_hyperparam
 
 today = date.today()
 today = today.strftime("%Y%m%d")

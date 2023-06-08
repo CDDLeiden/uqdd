@@ -17,7 +17,7 @@ import wandb
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
-from models.models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, \
+from models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, \
     calc_regr_metrics
 
 today = date.today()

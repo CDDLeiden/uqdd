@@ -6,7 +6,7 @@ import copy
 from torch import nn
 from typing import Optional
 from torch import Tensor
-from models.spectral_normalization import spectral_norm
+from uqdd.models.spectral_normalization import spectral_norm
 
 
 def BertLinear(i_dim, o_dim, bias=True):
