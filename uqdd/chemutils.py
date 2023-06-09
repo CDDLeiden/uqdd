@@ -21,7 +21,7 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 
-from utils import check_nan_duplicated, custom_agg
+from uqdd.utils import check_nan_duplicated, custom_agg
 
 RDLogger.DisableLog('rdApp.info')
 print(rdkit.__version__)

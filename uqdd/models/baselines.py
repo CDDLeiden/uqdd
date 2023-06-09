@@ -16,8 +16,7 @@ import torch.nn as nn
 import wandb
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
-
-from models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, \
+from uqdd.models.models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, \
     calc_regr_metrics
 
 today = date.today()
@@ -27,7 +26,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
 print(torch.version.cuda) if device == 'cuda' else None
 
-wandb_dir = 'logs/'
+wandb_dir = '../logs/'
 wandb_mode = 'online'
 # data_dir = 'data/' # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 # dataset_dir = 'data/dataset/'

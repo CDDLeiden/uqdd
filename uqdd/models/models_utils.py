@@ -18,15 +18,15 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 from torch.utils.data import DataLoader
 
-from chemutils import smi_to_pil_image
-from papyrus import PapyrusDataset
+from uqdd.chemutils import smi_to_pil_image
+from uqdd.models.papyrus import PapyrusDataset
 # from uqdd.chemutils import smi_to_pil_image
 # from uqdd.papyrus import PapyrusDataset
 # from .. import DATA_DIR, LOGS_DIR
-# DATA_DIR = os.environ.get('DATA_DIR')
-# LOGS_DIR = os.environ.get('LOGS_DIR')
-DATA_DIR = 'data/'
-LOGS_DIR = 'logs/'
+DATA_DIR = os.environ.get('DATA_DIR')
+LOGS_DIR = os.environ.get('LOGS_DIR')
+# DATA_DIR = 'data/'
+# LOGS_DIR = 'logs/'
 
 wandb_dir = LOGS_DIR  # 'logs/'
 wandb_mode = 'online'
@@ -169,7 +169,7 @@ def build_loss(loss, reduction='none'):
 
 def save_models(config, model):
     try:
-        model_dir = os.path.join('models', 'models/saved_models', config.activity, config.split)
+        model_dir = os.path.join('', 'models/saved_models', config.activity, config.split)
         os.makedirs(model_dir, exist_ok=True)
         model_path = os.path.join(model_dir, f"{today}-{wandb.run.name}-best-model")
         pt_path = model_path + ".pt"

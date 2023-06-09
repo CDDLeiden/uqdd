@@ -3,7 +3,7 @@ import xgboost
 from papyrus_scripts.modelling import pcm
 
 from uqdd.chemutils import generate_ecfp, generate_mol_descriptors
-from uqdd.papyrus import Papyrus
+from uqdd.models.papyrus import Papyrus
 
 # generate xc50 and ki dataframes
 # papyrus_xc50 = Papyrus(
