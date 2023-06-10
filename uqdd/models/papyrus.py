@@ -34,7 +34,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 
 # from smiles_standardizer import check_std_smiles
-from .chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
+from uqdd.chemutils import standardize_df, generate_ecfp, generate_mol_descriptors, scaffold_split
 
 today = date.today()
 today = today.strftime("%Y%m%d")
@@ -61,7 +61,7 @@ class Papyrus:
             fmt="%(asctime)s:%(levelname)s:%(name)s:%(message)s:%(relativeCreated)d",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
-        out_log = os.path.join("logs/", f"{log_name}.log")
+        out_log = os.path.join("../logs/", f"{log_name}.log")
         file_handler = logging.FileHandler(out_log, mode="w")
         file_handler.setFormatter(formatter)
         # stream_handler = logging.StreamHandler()
@@ -167,7 +167,7 @@ class Papyrus:
 
     def _download(self):
         if not self.papyrus_path:
-            self.papyrus_path = "data/"
+            self.papyrus_path = "../data/"
             os.makedirs(self.papyrus_path, exist_ok=True)
 
         self.log.info("Downloading Papyrus data ...")

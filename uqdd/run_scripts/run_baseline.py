@@ -1,15 +1,27 @@
+from datetime import date, datetime
 import argparse
 import os
 import sys
-from datetime import date, datetime
 
-from .. import DATA_DIR
-from ..models.baselines import run_baseline, run_baseline_hyperparam
-from ..papyrus import data_preparation
-# from models.baselines import run_baseline, run_baseline_hyperparam
-# from papyrus import data_preparation
+uqdd_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+print(f"{uqdd_path=}")
+sys.path.append(uqdd_path)
+
+from uqdd.models.papyrus import data_preparation
+from uqdd.models.baselines import run_baseline, run_baseline_hyperparam
+
+### append uqdd folder to sys.path
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # from .. import DATA_DIR
+# from ..models.baselines import run_baseline, run_baseline_hyperparam
+# from ..papyrus import data_preparation
+# from uqdd import DATA_DIR
+# from ..papyrus import
 
+# from papyrus import data_preparation
+
+DATA_DIR = os.environ.get('DATA_DIR')
 
 def main():
     parser = argparse.ArgumentParser(description='Baseline Model Running')

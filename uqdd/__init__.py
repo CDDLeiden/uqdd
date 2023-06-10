@@ -2,6 +2,13 @@
 # from .papyrus import *
 # from .run_scripts import *
 
+# from .utils import *
+# from .chemutils import *
+# from .papyrus import *
+# from .baselines import *
+# from .models import *
+# from .run_scripts import *
+
 import os
 
 # Get the absolute path to the project's root directory
@@ -26,5 +33,7 @@ os.environ['MODELS_DIR'] = MODELS_DIR
 # os.environ['CONFIG_FILE'] = CONFIG_FILE
 # os.environ['REQUIREMENTS_FILE'] = REQUIREMENTS_FILE
 
-__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'SCRIPTS_DIR', 'MODELS_DIR']
+__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'SCRIPTS_DIR', 'MODELS_DIR',
+           # 'models', 'papyrus', 'run_scripts'
+           ]
 

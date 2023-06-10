@@ -2,8 +2,8 @@ import pandas as pd
 import xgboost
 from papyrus_scripts.modelling import pcm
 
-from chemutils import generate_ecfp, generate_mol_descriptors
-from papyrus import Papyrus
+from uqdd.chemutils import generate_ecfp, generate_mol_descriptors
+from uqdd.models.papyrus import Papyrus
 
 # generate xc50 and ki dataframes
 # papyrus_xc50 = Papyrus(
@@ -18,7 +18,7 @@ from papyrus import Papyrus
 #
 
 papyrus_xc50 = Papyrus(
-    path="data/papyrus_filtered_high_quality_xc50_00_preprocessed.csv",
+    path="uqdd/data/papyrus_filtered_high_quality_xc50_00_preprocessed.csv",
     chunksize=1000000,
     accession=None,
     activity_type=["IC50", "EC50"],
@@ -27,7 +27,7 @@ papyrus_xc50 = Papyrus(
 )
 df_xc50 = papyrus_xc50()
 
-df_xc50 = pd.read_csv("data/papyrus_filtered_high_quality_xc50.csv")
+df_xc50 = pd.read_csv("uqdd/data/papyrus_filtered_high_quality_xc50.csv")
 df_xc50 = generate_ecfp(df_xc50, 2, 1024, False, False)
 df_xc50.to_csv("data/papyrus_filtered_high_quality_xc50_04_with_ECFP.csv", index=False)
 
@@ -69,7 +69,7 @@ for protein_target in top_targets.index:
 
 
 papyrus_ki = Papyrus(
-    path="data/",
+    path="uqdd/data/",
     chunksize=1000000,
     accession=None,
     activity_type=["Ki", "Kd"],

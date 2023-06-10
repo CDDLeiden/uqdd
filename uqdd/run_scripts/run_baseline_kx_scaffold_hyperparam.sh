@@ -12,5 +12,5 @@ mkdir -p ../logs
 # Get today's date as yyyy-mm-dd format
 today=$(date +%Y-%m-%d)
 
-# Run hyperparameter search for xc50-random
-python -m run_baseline.py --activity xc50 --split random --sweep-count 250 --hyperparam --wandb-project-name "${today}-xc50-random-baseline_hyperparam" > ../logs/${today}-xc50_random_baseline_hyperparam_output.txt
+# Run hyperparameter search for kx-scaffold
+python run_baseline.py --activity kx --split scaffold --hyperparam --sweep-count 250 --wandb-project-name "${today}-kx-scaffold-baseline_hyperparam" > ../logs/${today}-kx_scaffold_baseline_hyperparam_output.txt
