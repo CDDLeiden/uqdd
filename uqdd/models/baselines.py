@@ -8,6 +8,8 @@ __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
 # get today's date as yyyy/mm/dd format
+import os
+import sys; sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from datetime import date
 from functools import partial
 
@@ -16,8 +18,8 @@ import torch.nn as nn
 import wandb
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
-from uqdd.models.models_utils import get_datasets, build_loader, build_optimizer, build_loss, save_models, calc_loss_notnan, \
-    calc_regr_metrics
+from uqdd.models.models_utils import get_datasets, get_config, get_sweep_config, build_loader, build_optimizer, \
+    build_loss, save_models, calc_loss_notnan, calc_regr_metrics, set_seed
 
 today = date.today()
 today = today.strftime("%Y%m%d")
@@ -26,115 +28,118 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
 print(torch.version.cuda) if device == 'cuda' else None
 
-wandb_dir = '../logs/'
-wandb_mode = 'online'
+LOG_DIR = os.environ.get('LOG_DIR')
+DATA_DIR = os.environ.get('DATA_DIR')
+
+# wandb_dir = '../logs/'
+wandb_mode = 'online'  # 'offline'
 # data_dir = 'data/' # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 # dataset_dir = 'data/dataset/'
 
 
-def get_config(activity='xc50', split='random'):
-    config = {
-        'activity': activity,
-        'batch_size': 32,
-        'dropout': 0.2,
-        'early_stop': 5,
-        'hidden_dim_1': 512,
-        'hidden_dim_2': 256,
-        'hidden_dim_3': 64,
-        'input_dim': 1024,
-        'learning_rate': 0.001,
-        'loss': 'huber',
-        'lr_factor': 0.1,
-        'lr_patience': 10,
-        'num_epochs': 10,  # 20,
-        'num_tasks': 20,
-        'optimizer': 'AdamW',
-        'output_dim': 20,
-        'weight_decay': 0.01,  # 1e-5,
-        'split': split
-        # 'seed': 42,
-    }
+# def get_config(activity='xc50', split='random'):
+#     config = {
+#         'activity': activity,
+#         'batch_size': 32,
+#         'dropout': 0.2,
+#         'early_stop': 5,
+#         'hidden_dim_1': 512,
+#         'hidden_dim_2': 256,
+#         'hidden_dim_3': 64,
+#         'input_dim': 1024,
+#         'learning_rate': 0.001,
+#         'loss': 'huber',
+#         'lr_factor': 0.1,
+#         'lr_patience': 10,
+#         'num_epochs': 10,  # 20,
+#         'num_tasks': 20,
+#         'optimizer': 'AdamW',
+#         'output_dim': 20,
+#         'weight_decay': 0.01,  # 1e-5,
+#         'split': split
+#         # 'seed': 42,
+#     }
+#
+#     return config
 
-    return config
 
-
-def get_sweep_config(activity='xc50', split='random'):
-    # # Initialize wandb
-    # wandb.init(project='multitask-learning')
-    # Sweep configuration
-    sweep_config = {
-        'method': 'random',
-        'metric': {
-            'name': 'val_rmse', # 'val_loss',
-            'goal': 'minimize'
-        },
-        'parameters': {
-            'input_dim': {
-                'values': [1024, 2048]
-            },
-            'hidden_dim_1': {
-                'values': [512, 1024, 2048]
-            },
-            'hidden_dim_2': {
-                'values': [256, 512]
-            },
-            'hidden_dim_3': {
-                'values': [128, 256]
-            },
-            'num_tasks': {
-                'value': 20
-            },
-            'batch_size': {
-                'values': [64, 128, 256]
-            },
-            'loss': {
-                'values': ['huber', 'mse']
-            },
-            'learning_rate': {
-                'values': [0.001, 0.01]
-            },
-            'ensemble_size': {
-                'value': 100
-            },
-            'weight_decay': {
-                'value': 0.001
-            },
-            'dropout': {
-                'values': [0.1, 0.2]
-            },
-            'lr_factor': {
-                'value': 0.5
-            },
-            'lr_patience': {
-                'value': 20
-            },
-            'num_epochs': {
-                'value': 3000
-            },
-            'early_stop': {
-                'value': 100
-            },
-            'optimizer': {
-                'values': ['adamw', 'sgd']
-            },
-            'output_dim': {
-                'value': 20
-            },
-            'activity': {
-                'value': activity
-            },
-            'split': {
-                'value': split
-                # 'values': ['random', 'scaffold']
-            },
-            # 'seed': {
-            #     'value': 42
-            # },
-        },
-    }
-    # 576 combinations
-    return sweep_config
-
+# def get_sweep_config(activity='xc50', split='random'):
+#     # # Initialize wandb
+#     # wandb.init(project='multitask-learning')
+#     # Sweep configuration
+#     sweep_config = {
+#         'method': 'random',
+#         'metric': {
+#             'name': 'val_rmse', # 'val_loss',
+#             'goal': 'minimize'
+#         },
+#         'parameters': {
+#             'input_dim': {
+#                 'values': [1024, 2048]
+#             },
+#             'hidden_dim_1': {
+#                 'values': [512, 1024, 2048]
+#             },
+#             'hidden_dim_2': {
+#                 'values': [256, 512]
+#             },
+#             'hidden_dim_3': {
+#                 'values': [128, 256]
+#             },
+#             'num_tasks': {
+#                 'value': 20
+#             },
+#             'batch_size': {
+#                 'values': [64, 128, 256]
+#             },
+#             'loss': {
+#                 'values': ['huber', 'mse']
+#             },
+#             'learning_rate': {
+#                 'values': [0.001, 0.01]
+#             },
+#             'ensemble_size': {
+#                 'value': 100
+#             },
+#             'weight_decay': {
+#                 'value': 0.001
+#             },
+#             'dropout': {
+#                 'values': [0.1, 0.2]
+#             },
+#             'lr_factor': {
+#                 'value': 0.5
+#             },
+#             'lr_patience': {
+#                 'value': 20
+#             },
+#             'num_epochs': {
+#                 'value': 3000
+#             },
+#             'early_stop': {
+#                 'value': 100
+#             },
+#             'optimizer': {
+#                 'values': ['adamw', 'sgd']
+#             },
+#             'output_dim': {
+#                 'value': 20
+#             },
+#             'activity': {
+#                 'value': activity
+#             },
+#             'split': {
+#                 'value': split
+#                 # 'values': ['random', 'scaffold']
+#             },
+#             # 'seed': {
+#             #     'value': 42
+#             # },
+#         },
+#     }
+#     # 576 combinations
+#     return sweep_config
+#
 
 class BaselineDNN(nn.Module):
     def __init__(self,
@@ -226,6 +231,7 @@ def evaluate(
             nan_mask = torch.isnan(targets)
             # Loss calculation without nan in the mean
             loss = calc_loss_notnan(outputs, targets, nan_mask, loss_fn)
+            # TODO : Exchange loss_fn with an implemented LossWrapper class
             total_loss += loss.item()
 
             targets_all.append(targets)
@@ -296,19 +302,7 @@ def run_epoch(model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler,
         # Update the learning rate
         lr_scheduler.step(val_loss)
 
-    # Log the metrics
-    wandb.log(
-        data={
-            'epoch': epoch,
-            'train_loss': train_loss,
-            'val_loss': val_loss,
-            'val_rmse': val_rmse,
-            'val_r2': val_r2,
-            'val_evs': val_evs
-        }
-    )
-
-    return val_loss
+    return epoch, train_loss, val_loss, val_rmse, val_r2, val_evs
 
 
 def train_model(
@@ -358,8 +352,20 @@ def train_model(
         # Train the model
         for epoch in tqdm(range(config.num_epochs + 1)):
             try:
-                val_loss = run_epoch(model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler, epoch=epoch)
-
+                epoch, train_loss, val_loss, val_rmse, val_r2, val_evs = run_epoch(
+                    model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler, epoch=epoch
+                )
+                # Log the metrics
+                wandb.log(
+                    data={
+                        'epoch': epoch,
+                        'train/loss': train_loss,
+                        'val/loss': val_loss,
+                        'val/rmse': val_rmse,
+                        'val/r2': val_r2,
+                        # 'val_evs': val_evs
+                    }
+                )
                 # Early stopping
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -494,18 +500,21 @@ def run_baseline(
         datasets=None,
         config=None,
         activity="xc50",
-        split='random',
+        split="random",
         wandb_project_name=f"{today}-baseline",
         seed=42,
+        **kwargs
 ):
+    set_seed(seed)
+    # Load config
+    config = get_config(config=config, activity=activity, split=split, **kwargs)
+
     if datasets is None:
         datasets = get_datasets(activity=activity, split=split)
 
-    if config is None:
-        config = get_config(activity=activity, split=split)
 
     with wandb.init(
-            dir=wandb_dir,
+            dir=LOG_DIR,
             mode=wandb_mode,
             project=wandb_project_name,
             config=config
@@ -523,24 +532,27 @@ def run_baseline(
 
         # Log the final test metrics
         wandb.log({
-            'test_loss': test_loss,
-            'test_rmse': test_rmse,
-            'test_r2': test_r2,
-            'test_evs': test_evs
+            'test/loss': test_loss,
+            'test/rmse': test_rmse,
+            'test/r2': test_r2,
+            'test/evs': test_evs
         })
 
     # return test_loss, test_rmse, test_r2, test_evs
 
 
 def run_baseline_hyperparam(
+        config=None,
         activity="xc50",
-        split='random',
+        split="random",
         wandb_project_name=f"{today}-baseline-hyperparam",
-        sweep_count=1
+        sweep_count=1,
+        seed=42,
+        **kwargs
 ):
-
+    set_seed(seed)
     datasets = get_datasets(activity=activity, split=split)
-    sweep_config = get_sweep_config(activity=activity, split=split)
+    sweep_config = get_sweep_config(config=config, activity=activity, split=split, **kwargs)
 
     sweep_id = wandb.sweep(
         sweep_config,

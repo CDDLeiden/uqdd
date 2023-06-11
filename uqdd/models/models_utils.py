@@ -8,8 +8,11 @@ __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
 import os
+# import sys; sys.path.append()
 from datetime import date
-
+import json, yaml
+import random
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -20,17 +23,14 @@ from torch.utils.data import DataLoader
 
 from uqdd.chemutils import smi_to_pil_image
 from uqdd.models.papyrus import PapyrusDataset
-# from uqdd.chemutils import smi_to_pil_image
-# from uqdd.papyrus import PapyrusDataset
-# from .. import DATA_DIR, LOGS_DIR
+
 DATA_DIR = os.environ.get('DATA_DIR')
 LOGS_DIR = os.environ.get('LOGS_DIR')
-# DATA_DIR = 'data/'
-# LOGS_DIR = 'logs/'
+CONFIG_DIR = os.environ.get('CONFIG_DIR')
 
-wandb_dir = LOGS_DIR  # 'logs/'
+# wandb_dir = LOGS_DIR  # 'logs/'
 wandb_mode = 'online'
-data_dir = DATA_DIR  # 'data/'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
+# data_dir = DATA_DIR  # 'data/'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 dataset_dir = os.path.join(DATA_DIR, 'dataset/')  # 'data/dataset/'
 
 today = date.today()
@@ -286,3 +286,225 @@ def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
     # task_losses = torch.sum(loss_per_task, dim=1) / torch.sum(~nan_mask, dim=1)
     # loss = torch.sum(task_losses)
     return loss
+
+
+def get_config(
+        config=os.path.join(CONFIG_DIR, 'baseline.json'),
+        **kwargs
+):
+    """
+    Retrieve the configuration dictionary for model training.
+
+    Parameters:
+    - config (dict or None): A dictionary containing configuration parameters. If None, the default configuration will be loaded.
+    - **kwargs: Additional keyword arguments that override the values in the config dictionary.
+
+    Returns:
+    - dict: Merged dictionary containing the configuration parameters.
+
+    Notes:
+    - If `config` is None, the function will load the default configuration from a JSON file.
+    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
+    - If both `config` and `kwargs` contain the same key, the value from `kwargs` will take precedence.
+
+    Examples:
+    # Example 1: Read from default config file
+    config = get_config()
+
+    # Example 2: Read from a custom config file
+    config = get_config(config="path/to/custom/config.json")
+
+    # Example 3: Provide config as a dictionary
+    custom_config = {
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "num_epochs": 500
+    }
+    config = get_config(config=custom_config)
+
+    # Example 4: Provide config as a dictionary and additional keyword arguments
+    config = get_config(config=custom_config, num_epochs=1000, batch_size=32)
+    """
+    # Load config from JSON file or YAML file
+    default_config = {
+        "activity": "xc50",
+        "batch_size": 128,
+        "dropout": 0.1,
+        "early_stop": 100,
+        "input_dim": 2048,
+        "hidden_dim_1": 1024,
+        "hidden_dim_2": 512,
+        "hidden_dim_3": 256,
+        "learning_rate": 0.01,
+        "loss": "huber",
+        "lr_factor": 0.5,
+        "lr_patience": 20,
+        "num_epochs": 3000,
+        "num_tasks": 20,
+        "optimizer": "sgd",
+        "output_dim": 20,
+        "weight_decay": 0.001,
+        "seed": 42,
+        "split": "scaffold",
+        "ensemble_size": 10
+    }
+
+    if config is None:
+        config = default_config
+
+    elif os.path.isfile(config):
+        if config.endswith('.json'):
+            with open(config, 'r') as f:
+                config = json.load(f)
+        elif config.endswith('.yaml'):
+            with open(config, 'r') as f:
+                config = yaml.safe_load(f)
+        else:
+            raise ValueError("Unsupported config file format. Please use JSON or YAML.")
+    elif isinstance(config, dict):
+        pass
+    else:
+        raise ValueError("Invalid config. Please provide a valid config file path or a dictionary.")
+
+    if kwargs:
+        config.update(kwargs)
+
+    config = default_config.update(config)
+
+    return config
+
+
+def get_sweep_config(
+        config=os.path.join(CONFIG_DIR, 'baseline_sweep.json'),
+        **kwargs
+):
+    """
+    Retrieve the sweep configuration for hyperparameter tuning.
+
+    Parameters:
+    -----------
+    - config (dict, str, or None): A dictionary containing sweep configuration parameters, a path to a YAML or JSON config file, or None to use the default configuration.
+    - **kwargs: Additional keyword arguments that override the values in the 'parameters' dictionary.
+
+    Returns:
+    --------
+    - dict: Merged dictionary containing the sweep configuration parameters.
+
+    Notes:
+    ------
+    - If `config` is None, the function will return the default sweep configuration.
+    - If `config` is a path to a YAML or JSON file, the function will load the configuration from the file.
+    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
+    - If both `config` and `kwargs` contain the same key in the 'parameters' dictionary, the value from `kwargs` will take precedence.
+    """
+    # Load config from JSON file or YAML file
+    default_sweep_config = {
+        'method': 'random',
+        'metric': {
+            'name': 'val_rmse',  # 'val_loss',
+            'goal': 'minimize'
+        },
+        'parameters': {
+            'input_dim': {
+                'values': [1024, 2048]
+            },
+            'hidden_dim_1': {
+                'values': [512, 1024, 2048]
+            },
+            'hidden_dim_2': {
+                'values': [256, 512]
+            },
+            'hidden_dim_3': {
+                'values': [128, 256]
+            },
+            'num_tasks': {
+                'value': 20
+            },
+            'batch_size': {
+                'values': [64, 128, 256]
+            },
+            'loss': {
+                'values': ['huber', 'mse']
+            },
+            'learning_rate': {
+                'values': [0.001, 0.01]
+            },
+            'ensemble_size': {
+                'value': 100
+            },
+            'weight_decay': {
+                'value': 0.001
+            },
+            'dropout': {
+                'values': [0.1, 0.2]
+            },
+            'lr_factor': {
+                'value': 0.5
+            },
+            'lr_patience': {
+                'value': 20
+            },
+            'num_epochs': {
+                'value': 3000
+            },
+            'early_stop': {
+                'value': 100
+            },
+            'optimizer': {
+                'values': ['adamw', 'sgd']
+            },
+            'output_dim': {
+                'value': 20
+            },
+            'activity': {
+                'value': "xc50"
+            },
+            'split': {
+                'value': "scaffold"
+            },
+        },
+    }
+
+    if config is None:
+        config = default_sweep_config
+
+    elif os.path.isfile(config):
+        if config.endswith('.json'):
+            with open(config, 'r') as f:
+                config = json.load(f)
+        elif config.endswith('.yaml'):
+            with open(config, 'r') as f:
+                config = yaml.safe_load(f)
+        else:
+            raise ValueError("Unsupported config file format. Please use JSON or YAML.")
+    elif isinstance(config, dict):
+        pass
+    else:
+        raise ValueError("Invalid config. Please provide a valid config file path or a dictionary.")
+
+    if kwargs:
+        # Update the 'parameters' dictionary with kwargs
+        for key, value in kwargs.items():
+            if isinstance(value, list):
+                config['parameters'][key] = {'values': value}
+            else:
+                config['parameters'][key] = {'value': value}
+
+    config = default_sweep_config.update(config)
+
+    return config
+
+
+def set_seed(seed=42):
+    """
+    Set the random seed for reproducible results.
+
+    Parameters:
+    -----------
+    - seed (int): The random seed to use.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+

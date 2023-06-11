@@ -17,6 +17,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Define the paths to different directories
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+CONFIG_DIR = os.path.join(BASE_DIR, 'config')
 SCRIPTS_DIR = os.path.join(BASE_DIR, 'run_scripts')
 MODELS_DIR = os.path.join(BASE_DIR, 'models')
 
@@ -28,12 +29,13 @@ MODELS_DIR = os.path.join(BASE_DIR, 'models')
 os.environ['BASE_DIR'] = BASE_DIR
 os.environ['DATA_DIR'] = DATA_DIR
 os.environ['LOGS_DIR'] = LOGS_DIR
+os.environ['CONFIG_DIR'] = CONFIG_DIR
 os.environ['SCRIPTS_DIR'] = SCRIPTS_DIR
 os.environ['MODELS_DIR'] = MODELS_DIR
 # os.environ['CONFIG_FILE'] = CONFIG_FILE
 # os.environ['REQUIREMENTS_FILE'] = REQUIREMENTS_FILE
 
-__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'SCRIPTS_DIR', 'MODELS_DIR',
+__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'CONFIG_DIR', 'SCRIPTS_DIR', 'MODELS_DIR',
            # 'models', 'papyrus', 'run_scripts'
            ]
 
