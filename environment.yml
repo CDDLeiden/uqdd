@@ -8,26 +8,24 @@ channels:
 dependencies:
   - python>=3.8
   - pip
-  - notebook
-  - jupyterlab
-  - pandas
-  - numpy
-  - scipy
-  - scikit-learn
-  - matplotlib
-  - seaborn
-  - plotly
+  - jupyterlab=4.0.1
+  - pandas=2.0.2
+  - numpy=1.24.3
+  - scipy=1.10.1
+  - scikit-learn=1.2.2
+  - matplotlib=3.7.1
+  - seaborn=0.12.2
+  - plotly=5.14.1
   - pytorch=1.13.1
   - torchvision=0.14.1
   - pytorch-cuda=11.7
-  - tensorboard
-  - tqdm
-  - rdkit
-  - ignite
+  - tqdm=4.65.0
+  - rdkit=2023.3.1
   - pip:
       - chembl_webresource_client
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
-      - uncertainty-toolbox
-      - wandb
-      - gpustat
-      - onnx
+      - uncertainty-toolbox==0.1.1
+      - wandb==0.15.4
+      - gpustat==1.1
+      - onnx==1.14.0
+      - torchensemble==0.1.9
