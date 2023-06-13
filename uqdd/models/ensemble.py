@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from uqdd.models.models_utils import get_config, set_seed, build_loader, build_optimizer, build_loss, save_models, \
-    calc_loss_notnan, calc_regr_metrics, get_datasets
+    calc_loss_notnan, calc_regr_metrics, get_datasets, MultiTaskLoss
 from uqdd.models.baselines import BaselineDNN, train, evaluate
 
 from torchensemble import FusionRegressor, VotingRegressor, BaggingRegressor, GradientBoostingRegressor, \
@@ -37,7 +37,7 @@ print(torch.version.cuda) if device == 'cuda' else None
 LOG_DIR = os.environ.get('LOG_DIR')
 DATA_DIR = os.environ.get('DATA_DIR')
 DATASET_DIR = os.path.join(DATA_DIR, 'dataset')
-
+CONFIG_DIR = os.environ.get('CONFIG_DIR')
 wandb_mode = 'online'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 
 methods = {
@@ -80,10 +80,11 @@ def build_ensemble(config=wandb.config):
 
 def run_ensemble(
         datasets=None,
-        config=None,
+        config='uqdd/config/ensemble/ensemble.json',
         activity='xc50',
         split='random',
         ensemble_size=100,
+        ensemble_method='fusion',
         wandb_project_name='multitask-learning-ensemble',
         seed=42,
         **kwargs
@@ -97,6 +98,7 @@ def run_ensemble(
     if datasets is None:
         datasets = get_datasets(activity=activity, split=split)
 
+
     # Initialize wandb for the ensemble models
     with wandb.init(
             dir=LOG_DIR,
@@ -104,68 +106,116 @@ def run_ensemble(
             project=wandb_project_name,
             config=config
     ):
-        # Define the ensemble models
-        ensemble_models = build_ensemble(config)
+        config = wandb.config
 
         # Define the data loaders
-        # train_loader, val_loader, test_loader = build_loader(config)
         train_loader, val_loader, test_loader = build_loader(datasets, config.batch_size, config.input_dim)
+        # Define the ensemble models
+        model = BaselineDNN(
+            config.input_dim,
+            config.hidden_dim_1,
+            config.hidden_dim_2,
+            config.hidden_dim_3,
+            config.output_dim,
+            config.dropout
+        )
+        model.to(device)
+        # Get the ensemble method
+        ensemble_method = methods[ensemble_method]
+        ensemble_model = ensemble_method(
+            model,
+            n_estimators=config.ensemble_size,
+            cuda=torch.cuda.is_available(),
+        )
+        # Define the loss function
+        loss_fn = MultiTaskLoss(
+            loss_type=config.loss,
+            reduction='none',
+        )
 
-        for i in tqdm(range(config.ensemble_size), desc='Ensemble models'):
-            # Get the model
-            model = ensemble_models[i]
-            model.to(device)
+        # test_loader
+        ensemble_model.set_criterion(loss_fn)
 
-            # Define the loss function
-            loss_fn = build_loss(config.loss, reduction='none')
-            # Define the optimizer with weight decay and learning rate scheduler
-            optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+        # Define the optimizer with weight decay and learning rate scheduler
+        ensemble_model.set_optimizer(config.optimizer, lr=config.learning_rate, weight_decay=config.weight_decay)
 
-        # Define the learning rate scheduler
-        scheduler = ReduceLROnPlateau(
-            optimizer,
+        ensemble_model.set_scheduler(
+            config.lr_scheduler,
             mode='min',
             factor=config.lr_factor,
             patience=config.lr_patience,
             verbose=True
         )
 
-        # Train the model
-        best_val_loss = float('inf')
-        early_stop_counter = 0
-        for epoch in tqdm(range(config.num_epochs + 1)):
-
-            if epoch == 0:
-                # epoch_0_eval(model, train_loader, val_loader, loss_fn,)
-                continue
-
-            # Training
-            train_loss = train(model, train_loader, optimizer, loss_fn)
-            # Validation
-            val_loss, val_rmse, val_r2, val_evs =  evaluate(model, val_loader, loss_fn)
-            # Log the metrics
-            wandb.log(
-                data={
-                    'epoch': epoch,
-                    'train_loss': train_loss,
-                    'val_loss': val_loss,
-                    'val_rmse': val_rmse,
-                    'val_r2': val_r2,
-                    'val_evs': val_evs
-                }
-            )
-
-            # Update the learning rate
-
-
-
-        # Train the model
-        train_loss = train(
-            model,
-            train_loader,
-
-            return_model=True
+        ensemble_model.fit(
+            train_loader=train_loader,
+            epochs=config.num_epochs,
+            test_loader=val_loader,
+            save_model=True,
+            save_dir=LOG_DIR
         )
+
+        # Evaluate the model
+        test_loss = ensemble_model.evaluate(test_loader)
+        test_predictions = ensemble_model.predict(test_loader)
+
+        return test_loss, test_predictions
+
+        # for i in tqdm(range(config.ensemble_size), desc='Ensemble models'):
+        #     # Get the model
+        #     model = ensemble_models[i]
+        #     model.to(device)
+        #
+        #     # Define the loss function
+        #     loss_fn = build_loss(config.loss, reduction='none')
+        #     # Define the optimizer with weight decay and learning rate scheduler
+        #     optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+        #
+        # # Define the learning rate scheduler
+        # scheduler = ReduceLROnPlateau(
+        #     optimizer,
+        #     mode='min',
+        #     factor=config.lr_factor,
+        #     patience=config.lr_patience,
+        #     verbose=True
+        # )
+        #
+        # # Train the model
+        # best_val_loss = float('inf')
+        # early_stop_counter = 0
+        # for epoch in tqdm(range(config.num_epochs + 1)):
+        #
+        #     if epoch == 0:
+        #         # epoch_0_eval(model, train_loader, val_loader, loss_fn,)
+        #         continue
+        #
+        #     # Training
+        #     train_loss = train(model, train_loader, optimizer, loss_fn)
+        #     # Validation
+        #     val_loss, val_rmse, val_r2, val_evs =  evaluate(model, val_loader, loss_fn)
+        #     # Log the metrics
+        #     wandb.log(
+        #         data={
+        #             'epoch': epoch,
+        #             'train_loss': train_loss,
+        #             'val_loss': val_loss,
+        #             'val_rmse': val_rmse,
+        #             'val_r2': val_r2,
+        #             'val_evs': val_evs
+        #         }
+        #     )
+        #
+        #     # Update the learning rate
+        #
+        #
+        #
+        # # Train the model
+        # train_loss = train(
+        #     model,
+        #     train_loader,
+        #
+        #     return_model=True
+        # )
 
 
 
@@ -385,7 +435,20 @@ def ensemble_pipeline(config=wandb.config, wandb_project_name="test-project"):
         return test_loss, test_rmse, test_r2, test_evs
 
 
+if __name__ == '__main__':
+    # datasets = get_datasets('xc50', 'random')
+    test_loss, test_predictions = run_ensemble(
+        config=os.path.join(CONFIG_DIR, 'ensemble/ensemble.json'),
+        activity='xc50',
+        split='random',
+        ensemble_size=100,
+        ensemble_method='fusion',
+        wandb_project_name='mtl-ensemble-test',
+        seed=42,
+    )
 
+    print(test_loss)
+    print(test_predictions)
 
 
 # class EnsembleDNN(nn.Module):

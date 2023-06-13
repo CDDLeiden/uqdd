@@ -369,9 +369,9 @@ def get_config(
     if kwargs:
         config.update(kwargs)
 
-    config = default_config.update(config)
+    default_config.update(config)
 
-    return config
+    return default_config
 
 
 def get_sweep_config(
@@ -507,4 +507,18 @@ def set_seed(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+### Custom Loss Functions ###
+class MultiTaskLoss(nn.Module):
+    def __init__(self, loss_type='huber', reduction='mean'):
+        super(MultiTaskLoss, self).__init__()
+        self.loss_type = loss_type
+        self.loss_fn = build_loss(loss_type, reduction=reduction)
+
+    def forward(self, outputs, targets):
+        nan_mask = torch.isnan(targets)
+        # loss
+        loss = calc_loss_notnan(outputs, targets, nan_mask, self.loss_fn)
+        return loss
 
