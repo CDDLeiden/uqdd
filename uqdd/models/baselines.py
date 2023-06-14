@@ -9,7 +9,9 @@ __status__ = "Development"
 
 # get today's date as yyyy/mm/dd format
 import os
-import sys; sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys;
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from datetime import date
 from functools import partial
 
@@ -19,7 +21,7 @@ import wandb
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 from uqdd.models.models_utils import get_datasets, get_config, get_sweep_config, build_loader, build_optimizer, \
-    build_loss, save_models, calc_loss_notnan, calc_regr_metrics, set_seed
+    build_loss, save_models, calc_loss_notnan, calc_regr_metrics, set_seed, MultiTaskLoss
 
 today = date.today()
 today = today.strftime("%Y%m%d")
@@ -33,6 +35,8 @@ DATA_DIR = os.environ.get('DATA_DIR')
 
 # wandb_dir = '../logs/'
 wandb_mode = 'online'  # 'offline'
+
+
 # data_dir = 'data/' # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 # dataset_dir = 'data/dataset/'
 
@@ -149,6 +153,7 @@ class BaselineDNN(nn.Module):
                  hidden_dim_3=None,
                  num_tasks=1,
                  dropout=0.2,
+                 device=None
                  ):
         if hidden_dim_2 is None:
             hidden_dim_2 = hidden_dim_1
@@ -168,6 +173,10 @@ class BaselineDNN(nn.Module):
         )
         self.task_specific = nn.Linear(hidden_dim_3, num_tasks)
         self.apply(self.init_wt)
+        # if device is None:
+        #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = device
+        # self.to(self.device)
 
     @staticmethod
     def init_wt(module):
@@ -178,6 +187,55 @@ class BaselineDNN(nn.Module):
         features = self.feature_extractor(x)
         outputs = self.task_specific(features)
         return outputs
+
+    # def train_model(self, train_loader, optimizer, loss_fn):
+    #     self.train()
+    #     total_loss = 0.0
+    #     for i, (inputs, targets) in enumerate(train_loader):
+    #         inputs, targets = inputs.to(self.device), targets.to(self.device)
+    #         # Zero the parameter gradients
+    #         optimizer.zero_grad()
+    #         # ➡ Forward pass
+    #         outputs = self(inputs)
+    #         # ⬅ Backward pass + weight update
+    #         loss = loss_fn(outputs, targets)
+    #         loss.backward()
+    #         optimizer.step()
+    #         total_loss += loss.item()
+    #
+    #     return total_loss / len(train_loader)
+    #
+    # def eval_model(self, val_loader, loss_fn, metric_fns):
+    #     if not isinstance(metric_fns, list):
+    #         metric_fns = [metric_fns]
+    #
+    #     self.eval()
+    #     val_loss = 0.0
+    #     total = 0
+    #     metrics = [0.0] * len(metric_fns)
+    #     with torch.no_grad():
+    #         for i, (inputs, targets) in enumerate(val_loader):
+    #             inputs, targets = inputs.to(self.device), targets.to(self.device)
+    #             outputs = self(inputs)
+    #             loss = loss_fn(outputs, targets)
+    #             val_loss += loss.item()
+    #             for i, metric_fn in enumerate(metric_fns):
+    #                 metric = metric_fn(outputs, targets)
+    #                 metrics[i] += metric.item()
+    #             total += targets.size(0)
+    #
+    #     return total_loss / len(val_loader)
+    #
+    # def predict(self, test_loader):
+    #     self.eval()
+    #     with torch.no_grad():
+    #         for i, (inputs, targets) in enumerate(test_loader):
+    #             inputs, targets = inputs.to(self.device), targets.to(self.device)
+    #             outputs = self(inputs)
+    #     return outputs #.cpu().numpy()
+    #
+    # def save_model(self, path):
+    #     torch.save(self.state_dict(), path)
 
 
 def train(
@@ -190,19 +248,23 @@ def train(
     total_loss = 0.0
     for i, (inputs, targets) in enumerate(dataloader):
         inputs, targets = inputs.to(device), targets.to(device)
-        
+
         # Zero the parameter gradients
         optimizer.zero_grad()
         # ➡ Forward pass
         outputs = model(inputs)
+
+        # loss calculation
+        loss = loss_fn(outputs, targets)
+
         # Create a mask for Nan targets
-        nan_mask = torch.isnan(targets)
+        # nan_mask = torch.isnan(targets)
         # Loss calculation without nan in the mean
-        loss = calc_loss_notnan(outputs, targets, nan_mask, loss_fn)
+        # loss = calc_loss_notnan(outputs, targets, nan_mask, loss_fn)
         # ⬅ Backward pass + weight update
         loss.backward()
         optimizer.step()
-        
+
         total_loss += loss.item()
         # if i % 100 == 0:
         #     # Log the loss in your run history
@@ -221,16 +283,18 @@ def evaluate(
     total_loss = 0.0
     targets_all = []
     outputs_all = []
+    # metrics = [0] * 3
     # nan_masks_all = []
 
     with torch.no_grad():
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
+            loss = loss_fn(outputs, targets)
             # Create a mask for Nan targets
-            nan_mask = torch.isnan(targets)
+            # nan_mask = torch.isnan(targets)
             # Loss calculation without nan in the mean
-            loss = calc_loss_notnan(outputs, targets, nan_mask, loss_fn)
+            # loss = calc_loss_notnan(outputs, targets, nan_mask, loss_fn)
             # TODO : Exchange loss_fn with an implemented LossWrapper class
             total_loss += loss.item()
 
@@ -249,20 +313,31 @@ def evaluate(
     return total_loss, rmse, r2, evs
 
 
+def predict(
+        model,
+        loader,
+        return_targets=False,
+):
+    model.eval()
+    outputs_all = []
+    targets_all = []
+    with torch.no_grad():
+        for inputs, targets in loader:
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            outputs_all.append(outputs)
+            if return_targets:
+                targets_all.append(targets)
+    outputs_all = torch.cat(outputs_all, dim=0)
+    if return_targets:
+        targets_all = torch.cat(targets_all, dim=0)
+        return outputs_all, targets_all
+    return outputs_all
+
+
 def initial_evaluation(model, train_loader, val_loader, loss_fn):
     val_loss, val_rmse, val_r2, val_evs = evaluate(model, val_loader, loss_fn)
     train_loss, _, _, _ = evaluate(model, train_loader, loss_fn)
-    # # Log the metrics
-    # wandb.log(
-    #     data={
-    #         'epoch': 0,
-    #         'train_loss': train_loss,
-    #         'val_loss': val_loss,
-    #         'val_rmse': val_rmse,
-    #         'val_r2': val_r2,
-    #         'val_evs': val_evs
-    #     }
-    # )
     return train_loss, val_loss, val_rmse, val_r2, val_evs
 
 
@@ -332,7 +407,8 @@ def train_model(
         best_model = model
 
         # Define the loss function
-        loss_fn = build_loss(config.loss, reduction='none')
+        # loss_fn = build_loss(config.loss, reduction='none')
+        loss_fn = MultiTaskLoss(loss_type=config.loss, reduction='none')
 
         # Define the optimizer with weight decay and learning rate scheduler
         optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
@@ -418,82 +494,82 @@ def train_model(
 #         return test_loss, test_rmse, test_r2, test_evs
 
 
-        #
-        #
-        #
-        #
-        #
-        # # set a random seed for reproducibility
-        # try:
-        #     seed = config.seed
-        # except AttributeError:
-        #     seed = 42
-        # # seed = 42 if not config.seed else config.seed
-        # torch.manual_seed(seed)
-        # # deterministic cuda algorithms
-        # torch.backends.cudnn.deterministic = True
-        # # torch.use_deterministic_algorithms(True)
-        #
-        # # Load the model
-        # model = BaselineDNN(
-        #     input_dim=config.input_dim,
-        #     hidden_dim_1=config.hidden_dim_1,
-        #     hidden_dim_2=config.hidden_dim_2,
-        #     hidden_dim_3=config.hidden_dim_3,
-        #     num_tasks=config.num_tasks,
-        #     dropout=config.dropout
-        # )
-        # model = model.to(device)
-        #
-        # # Define the loss function
-        # loss_fn = build_loss(config.loss, reduction='none')
-        #
-        # # Define the optimizer with weight decay and learning rate scheduler
-        # optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
-        #
-        # # Define Learning rate scheduler
-        # lr_scheduler = ReduceLROnPlateau(
-        #     optimizer,
-        #     mode='min',
-        #     factor=config.lr_factor,
-        #     patience=config.lr_patience,
-        #     verbose=True
-        # )
-        #
-        # # Train the model
-        # best_val_loss = float('inf')
-        # early_stop_counter = 0
-        # for epoch in tqdm(range(config.num_epochs+1)):
-        #
-        #     val_loss = run_epoch(model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler, epoch=epoch)
-        #
-        #     # Early stopping
-        #     if val_loss < best_val_loss:
-        #         best_val_loss = val_loss
-        #         early_stop_counter = 0
-        #         # Save the best model - dropped to avoid memory issues
-        #         # Update the best model and its performance
-        #         best_model = model
-        #
-        #     else:
-        #         early_stop_counter += 1
-        #         if early_stop_counter > config.early_stop:
-        #             break
-        #
-        # # Save the best model
-        # save_models(config, best_model)
-        #
-        # # Test
-        # test_loss, test_rmse, test_r2, test_evs = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
-        # # Log the final test metrics
-        # wandb.log({
-        #     'test_loss': test_loss,
-        #     'test_rmse': test_rmse,
-        #     'test_r2': test_r2,
-        #     'test_evs': test_evs
-        # })
-        #
-        # return test_loss, test_rmse, test_r2, test_evs
+#
+#
+#
+#
+#
+# # set a random seed for reproducibility
+# try:
+#     seed = config.seed
+# except AttributeError:
+#     seed = 42
+# # seed = 42 if not config.seed else config.seed
+# torch.manual_seed(seed)
+# # deterministic cuda algorithms
+# torch.backends.cudnn.deterministic = True
+# # torch.use_deterministic_algorithms(True)
+#
+# # Load the model
+# model = BaselineDNN(
+#     input_dim=config.input_dim,
+#     hidden_dim_1=config.hidden_dim_1,
+#     hidden_dim_2=config.hidden_dim_2,
+#     hidden_dim_3=config.hidden_dim_3,
+#     num_tasks=config.num_tasks,
+#     dropout=config.dropout
+# )
+# model = model.to(device)
+#
+# # Define the loss function
+# loss_fn = build_loss(config.loss, reduction='none')
+#
+# # Define the optimizer with weight decay and learning rate scheduler
+# optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+#
+# # Define Learning rate scheduler
+# lr_scheduler = ReduceLROnPlateau(
+#     optimizer,
+#     mode='min',
+#     factor=config.lr_factor,
+#     patience=config.lr_patience,
+#     verbose=True
+# )
+#
+# # Train the model
+# best_val_loss = float('inf')
+# early_stop_counter = 0
+# for epoch in tqdm(range(config.num_epochs+1)):
+#
+#     val_loss = run_epoch(model, train_loader, val_loader, loss_fn, optimizer, lr_scheduler, epoch=epoch)
+#
+#     # Early stopping
+#     if val_loss < best_val_loss:
+#         best_val_loss = val_loss
+#         early_stop_counter = 0
+#         # Save the best model - dropped to avoid memory issues
+#         # Update the best model and its performance
+#         best_model = model
+#
+#     else:
+#         early_stop_counter += 1
+#         if early_stop_counter > config.early_stop:
+#             break
+#
+# # Save the best model
+# save_models(config, best_model)
+#
+# # Test
+# test_loss, test_rmse, test_r2, test_evs = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
+# # Log the final test metrics
+# wandb.log({
+#     'test_loss': test_loss,
+#     'test_rmse': test_rmse,
+#     'test_r2': test_r2,
+#     'test_evs': test_evs
+# })
+#
+# return test_loss, test_rmse, test_r2, test_evs
 
 
 def run_baseline(
@@ -512,14 +588,12 @@ def run_baseline(
     if datasets is None:
         datasets = get_datasets(activity=activity, split=split)
 
-
     with wandb.init(
             dir=LOG_DIR,
             mode=wandb_mode,
             project=wandb_project_name,
             config=config
     ):
-
         config = wandb.config
         # Load the dataset
         train_loader, val_loader, test_loader = build_loader(datasets, config.batch_size, config.input_dim)

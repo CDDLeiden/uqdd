@@ -20,10 +20,7 @@ LOGS_DIR = os.path.join(BASE_DIR, 'logs')
 CONFIG_DIR = os.path.join(BASE_DIR, 'config')
 SCRIPTS_DIR = os.path.join(BASE_DIR, 'run_scripts')
 MODELS_DIR = os.path.join(BASE_DIR, 'models')
-
-# Define the paths to different files
-# CONFIG_FILE = os.path.join(BASE_DIR, 'config.yaml')
-# REQUIREMENTS_FILE = os.path.join(BASE_DIR, 'requirements.txt')
+FIGS_DIR = os.path.join(BASE_DIR, 'figures')
 
 # Export the paths as variables for easy access in other modules
 os.environ['BASE_DIR'] = BASE_DIR
@@ -32,10 +29,8 @@ os.environ['LOGS_DIR'] = LOGS_DIR
 os.environ['CONFIG_DIR'] = CONFIG_DIR
 os.environ['SCRIPTS_DIR'] = SCRIPTS_DIR
 os.environ['MODELS_DIR'] = MODELS_DIR
-# os.environ['CONFIG_FILE'] = CONFIG_FILE
-# os.environ['REQUIREMENTS_FILE'] = REQUIREMENTS_FILE
+os.environ['FIGS_DIR'] = FIGS_DIR
 
-__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'CONFIG_DIR', 'SCRIPTS_DIR', 'MODELS_DIR',
-           # 'models', 'papyrus', 'run_scripts'
-           ]
+
+__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'CONFIG_DIR', 'SCRIPTS_DIR', 'MODELS_DIR', 'FIGS_DIR']
 

@@ -7,16 +7,20 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
+import json
 import os
-# import sys; sys.path.append()
-from datetime import date
-import json, yaml
+import pickle
 import random
+import yaml
+from datetime import date
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import uncertainty_toolbox as uct
 import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 from torch.utils.data import DataLoader
@@ -69,6 +73,18 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     dataframe = pd.DataFrame.from_records(data)
     table = wandb.Table(dataframe=dataframe)
     wandb.log({"mols_table": table}, commit=False)
+
+
+def get_tasks(activity, split):
+    try:
+        d_dir = os.path.join(dataset_dir, activity, split)
+        target_col_path = os.path.join(d_dir, "target_col.pkl")
+        with open(target_col_path, 'rb') as file:
+            target_col = pickle.load(file)
+        return target_col
+    except Exception as e:
+        # print("Error loading data")
+        raise Exception(f"Error: couldn't retrieve tasks list: {e}")
 
 
 def get_datasets(activity, split):
@@ -351,8 +367,9 @@ def get_config(
 
     if config is None:
         config = default_config
-
-    elif os.path.isfile(config):
+    elif isinstance(config, dict):
+        pass
+    elif isinstance(config, str) and os.path.isfile(config):
         if config.endswith('.json'):
             with open(config, 'r') as f:
                 config = json.load(f)
@@ -361,8 +378,6 @@ def get_config(
                 config = yaml.safe_load(f)
         else:
             raise ValueError("Unsupported config file format. Please use JSON or YAML.")
-    elif isinstance(config, dict):
-        pass
     else:
         raise ValueError("Invalid config. Please provide a valid config file path or a dictionary.")
 
@@ -522,3 +537,120 @@ class MultiTaskLoss(nn.Module):
         loss = calc_loss_notnan(outputs, targets, nan_mask, self.loss_fn)
         return loss
 
+
+def make_uct_plots(
+        y_preds,
+        y_std,
+        y_true,
+        task_name=None,
+        n_subset=100,
+        ylims=(-3, 3),
+        num_stds_confidence_bound=2, #TODO: or 1.96 for 95% confidence interval for normal distribution
+        plot_save_str="row",
+        savefig=True
+):
+
+    """
+    Make set of plots.
+    Adapted from https://github.com/uncertainty-toolbox/uncertainty-toolbox/blob/main/examples/viz_readme_figures.py
+    """
+
+    # ylims = [-3, 3]
+    # n_subset = 2
+
+    fig, axs = plt.subplots(1, 5, figsize=(25,5)) # (28, 8)
+
+
+    # Make ordered intervals plot
+    # axs[0] = uct.plot_intervals_ordered(
+    #     y_preds, y_std, y_true, n_subset=n_subset, ylims=ylims, num_stds_confidence_bound=num_stds_confidence_bound, ax=axs[0]
+    # )
+    axs[0] = uct.plot_intervals(
+        y_preds, y_std, y_true, n_subset=n_subset, ylims=ylims, num_stds_confidence_bound=num_stds_confidence_bound, ax=axs[0]
+    )
+    axs[0].set_title('Prediction Intervals - {}'.format(task_name))
+    # calculate RMSE and add it to the plot left upper corner
+    rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
+    axs[0].text(0.05, 0.95, 'RMSE: {:.2f}'.format(rmse), transform=axs[0].transAxes)
+
+    # Make calibration plot
+    axs[1] = uct.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
+    axs[1].set_title('Average Calibration - {}'.format(task_name))
+
+    # Make adversarial group calibration plot
+    axs[2] = uct.plot_adversarial_group_calibration(
+        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
+    )
+    axs[2].set_title('Adversarial Group Calibration - {}'.format(task_name))
+
+    # Make sharpness plot
+    axs[3] = uct.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
+    axs[3].set_title('Sharpness - {}'.format(task_name))
+
+    # Make residual vs stds plot
+    axs[4] = uct.plot_residuals_vs_stds(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4])
+    axs[4].set_title('Residuals vs. Predictive Std - {}'.format(task_name))
+
+    # Adjust subplots spacing
+    fig.subplots_adjust(wspace=0.5)
+    # Adjust the spacing between subplots
+    plt.tight_layout()
+
+    # Save figure
+    if savefig:
+        uct.viz.save_figure(plot_save_str, ext_list=["png", "svg"], white_background=True)
+        # print("Saved uct plots to {}".format(plot_save_str))
+
+    return fig
+
+
+def make_true_vs_preds_plot(
+        y_preds,
+        y_true,
+        task_name,
+        save_path=None,
+):
+    # Sort the values based on y_true
+    sorted_indices = np.argsort(y_true)
+    sorted_y_true = y_true[sorted_indices]
+    sorted_y_preds = y_preds[sorted_indices]
+
+    # Plot the graph
+    fig, ax = plt.subplots()
+    ax.plot(sorted_y_true, sorted_y_preds, 'o', label='Predictions')
+    ax.set_xlabel('True Values')
+    ax.set_ylabel('Predicted Values')
+    ax.set_title('True vs. Predicted Values - {}'.format(task_name))
+
+    # Calculate the best-fitting line
+    best_fit_coeffs = np.polyfit(sorted_y_true, sorted_y_preds, deg=1)
+    best_fit_line = np.poly1d(best_fit_coeffs)
+    ax.plot(sorted_y_true, best_fit_line(sorted_y_true), color='red', label='Best Fit Line')
+
+    # Calculate the distances of each point to the best-fitted line
+    distances = np.abs(best_fit_line(sorted_y_true) - sorted_y_preds)
+    normalized_distances = distances / np.max(distances)
+    ax.plot(sorted_y_true, sorted_y_preds, color='gray', alpha=0.2)
+    # for i in range(len(sorted_y_true)):
+    #     ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
+    #              color='gray', alpha=normalized_distances[i])
+    # Plot the grey lines between dots and best fit line
+    for i in range(len(sorted_y_true)):
+        ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
+                color='gray', alpha=0.2)
+
+    # Calculate and display the RMSE
+    rmse = np.sqrt(np.mean((sorted_y_preds - best_fit_line(sorted_y_true)) ** 2))
+    # ax.text(0.05, 0.9, f'RMSE: {rmse:.2f}', transform=plt.gca().transAxes)
+    ax.text(0.95, 0.05, f'RMSE: {rmse:.2f}', transform=ax.transAxes, ha='right', va='bottom')
+
+    # Show the legend and display/save the graph
+    ax.legend(loc='upper left')
+
+    if save_path is not None:
+        fig.savefig(save_path)
+        print(f"Saved true_vs_preds_plot to {save_path}")
+    else:
+        plt.show()
+
+    return fig
