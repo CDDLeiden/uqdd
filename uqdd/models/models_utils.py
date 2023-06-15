@@ -31,6 +31,7 @@ from uqdd.models.papyrus import PapyrusDataset
 DATA_DIR = os.environ.get('DATA_DIR')
 LOGS_DIR = os.environ.get('LOGS_DIR')
 CONFIG_DIR = os.environ.get('CONFIG_DIR')
+MODELS_DIR = os.environ.get('MODELS_DIR')
 
 # wandb_dir = LOGS_DIR  # 'logs/'
 wandb_mode = 'online'
@@ -183,27 +184,42 @@ def build_loss(loss, reduction='none'):
     return loss_fn
 
 
-def save_models(config, model):
+def save_models(config, model, model_name=None, onnx=True):
     try:
-        model_dir = os.path.join('', 'models/saved_models', config.activity, config.split)
-        os.makedirs(model_dir, exist_ok=True)
-        model_path = os.path.join(model_dir, f"{today}-{wandb.run.name}-best-model")
-        pt_path = model_path + ".pt"
-        onnx_path = model_path + ".onnx"
+        if model is None:
+            print(f"No model to save - {model=}")
+            return None
 
-        dummy_input = torch.zeros(
-            (config.batch_size, config.input_dim),
-            dtype=torch.float32,
-            device=device,
-            requires_grad=False
-        )
-        torch.onnx.export(model, dummy_input, onnx_path)
+        model_dir = os.path.join(MODELS_DIR, 'saved_models', config.activity, config.split)
+        os.makedirs(model_dir, exist_ok=True)
+        if model_name is None:
+            model_name = f"{today}-{wandb.run.name}-best-model" # {'ENS'+str(model_idx) if model_idx is not None else ''}
+
+        model_path = os.path.join(model_dir, model_name)
+        pt_path = model_path + ".pt"
         torch.save(model.state_dict(), pt_path)
-        # ONNX saving
-        wandb.save(onnx_path)
+        wandb_model_path = pt_path
+
+        if onnx:
+            onnx_path = model_path + ".onnx"
+
+            dummy_input = torch.zeros(
+                (config.batch_size, config.input_dim),
+                dtype=torch.float32,
+                device=device,
+                requires_grad=False
+            )
+            torch.onnx.export(model, dummy_input, onnx_path)
+            wandb_model_path = onnx_path
+
+        # Model logging
+        wandb.save(wandb_model_path)
 
     except Exception as e:
         print("Error saving models: " + str(e))
+
+
+
 
 
 def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
@@ -634,4 +650,6 @@ def make_true_vs_preds_plot(
         plt.show()
 
     return fig
+
+
 
