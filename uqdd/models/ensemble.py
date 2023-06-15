@@ -10,10 +10,10 @@ __status__ = "Development"
 # get today's date as yyyy/mm/dd format
 import os
 import pickle
+from matplotlib import pyplot as plt
 import sys;sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import wandb
 from tqdm import tqdm
-import concurrent.futures
 
 import torch
 import torch.nn as nn
@@ -74,8 +74,10 @@ def train_model(
         ensemble_models,
         train_loader,
         val_loader,
+        test_loader,
         config,
         **kwargs
+        # config=None,
 ):
     """
     Train a single model from the ensemble.
@@ -90,6 +92,8 @@ def train_model(
         Training data loader.
     val_loader : torch.utils.data.DataLoader
         Validation data loader.
+    test_loader : torch.utils.data.DataLoader
+        Test data loader.
     config : wandb.config
         Configuration object containing hyperparameters and settings.
     **kwargs : dict, optional
@@ -100,7 +104,7 @@ def train_model(
     best_model : torch.nn.Module
         Best trained model based on validation loss.
     """
-    config = wandb.config if config is None else config
+    # config = wandb.config if config is None else config
 
     # Get the model for the given model_idx
     model = ensemble_models[model_idx]
@@ -128,7 +132,7 @@ def train_model(
             )
             wandb.log(
                 data={
-                    f'model{model_idx}/epoch': epoch,
+                    f'epoch': epoch,
                     f'model{model_idx}/train_loss': train_loss,
                     f'model{model_idx}/val_loss': val_loss,
                     f'model{model_idx}/val_rmse': val_rmse,
@@ -156,7 +160,9 @@ def train_model(
         # Save the best model
         # save_models(config, best_model, model_idx)
 
-    return best_model
+    predictions = predict(best_model, test_loader, return_targets=False)
+
+    return best_model, predictions
 
 
 def calculate_metrics(y_pred, y_std, y_true, task_name, activity, split):
@@ -266,6 +272,7 @@ def uct_metrics_logger(
         metrics["scoring_rule"]["interval"],
         img
     )
+    plt.close()
 
 
 def process_ensemble_preds(
@@ -362,22 +369,91 @@ def run_ensemble(
         #
         best_models = []
         predictions = []
+        # Initialize a list to store the results
+        # results = []
+        _, targets = predict(ensemble_models[0].to(device), test_loader, return_targets=True)
+        # Create a process pool with the desired number of processes (GPUs)
+        # num_gpus = torch.cuda.device_count()
+        # print(f"Using {num_gpus} GPUs")
+
+        # ### POOL MULTIPROCESSING ###
+        # # Create a process pool with the desired number of processes (GPUs)
+        # pool = multiprocessing.Pool(processes=num_gpus)
+        #
+        # # Submit training tasks to the process pool
+        # for model_idx in range(len(ensemble_models)):
+        #     result = pool.apply_async(
+        #         train_model, args= (
+        #                     model_idx,
+        #                     ensemble_models,
+        #                     train_loader,
+        #                     val_loader,
+        #                     test_loader,
+        #                     config.num_epochs,
+        #                     config.learning_rate,
+        #                     config.loss,
+        #                     config.optimizer,
+        #                     config.weight_decay,
+        #                     config.lr_factor,
+        #                     config.lr_patience,
+        #                     config.early_stop
+        #                     )
+        #     )
+        #         #(
+        #          #   model_idx, ensemble_models, train_loader, val_loader, test_loader, None # ) #, None
+        #
+        #     results.append(result)
+        #
+        # # Wait for the training tasks to complete
+        # pool.close()
+        # # pool.join()
+        #
+        # # Wait for all the tasks to complete and retrieve the results
+        # results = [result.get() for result in tqdm(results, total=len(results), desc='Ensemble models')]
+        # # Sort the results based on the model_idx to maintain the original order
+        # results.sort(key=lambda x: x[0])
+        # # Extract the predictions and best models from the results
+        # best_models = [result[1] for result in results]
+        # predictions = [result[2] for result in results]
+        #
+
+        ### CONCURRENT METHOD ###
+        # with concurrent.futures.ProcessPoolExecutor(max_workers=num_gpus) as executor:
+        #     # Submit training tasks to the process pool
+        #     futures = [executor.submit(
+        #         train_model, model_idx, ensemble_models, train_loader, val_loader, test_loader, None #, config
+        #     ) for model_idx in range(len(ensemble_models))]
+        #     # Wait for the training tasks to complete
+        #     # Iterate over the completed futures
+        #     for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc='Ensemble models'):
+        #         # Get the result of the completed future
+        #         result = future.result()
+        #         # Append the result to the list
+        #         results.append(result)
+        #
+        # # Sort the results based on the model_idx to maintain the original order
+        # results.sort(key=lambda x: x[0])
+        # # Extract the predictions and best models from the results
+        # best_models = [result[0] for result in results]
+        # predictions = [result[1] for result in results]
+
         for model_idx in tqdm(range(len(ensemble_models)), desc='Ensemble models'):
             # Train the model
-            best_model = train_model(
+            best_model, preds = train_model(
                 model_idx,
                 ensemble_models,
                 train_loader,
                 val_loader,
+                test_loader,
                 config
             )
             # Test the model
-            if model_idx == 0:
-                model_y_preds, targets = predict(best_model, test_loader, return_targets=True)
-            else:
-                model_y_preds = predict(best_model, test_loader, return_targets=False)
+            # if model_idx == 0:
+            #     predictions, targets = predict(best_model, test_loader, return_targets=True)
+            # else:
+            #     predictions = predict(best_model, test_loader, return_targets=False)
 
-            predictions.append(model_y_preds)
+            predictions.append(preds)
             best_models.append(best_model)
 
         # Save Best Ensemble Models
@@ -425,6 +501,7 @@ def run_ensemble(
         )
 
 
+
 if __name__ == '__main__':
     # datasets = get_datasets('xc50', 'random')
     test_config = {
@@ -451,7 +528,8 @@ if __name__ == '__main__':
         "ensemble_size": 3
     }
 
-    test_loss, test_predictions = run_ensemble(
+    # test_loss, test_predictions = \
+    run_ensemble(
         config=test_config,  # os.path.join(CONFIG_DIR, 'ensemble/ensemble.json'),
         activity='xc50',
         split='random',
@@ -460,6 +538,6 @@ if __name__ == '__main__':
         wandb_project_name='mtl-ensemble-test',
         seed=42,
     )
-
-    print(test_loss)
-    print(test_predictions)
+    #
+    # print(test_loss)
+    # print(test_predictions)
