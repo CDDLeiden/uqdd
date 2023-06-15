@@ -7,11 +7,12 @@ __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
 
-
 # get today's date as yyyy/mm/dd format
 import os
 import pickle
-import sys; sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys;
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import wandb
 from tqdm import tqdm
 
@@ -105,6 +106,8 @@ def run_ensemble(
         uct_metrics_table = wandb.Table(
             columns=[
                 "Target",
+                "Activity",
+                "Split",
                 "RMSE",
                 "R2",
                 "MAE",
@@ -345,17 +348,82 @@ def run_ensemble(
 
         # Ensemble the predictions
         ensemble_predictions = torch.stack(predictions, dim=2)  # torch.Size([datapoints, tasks, ensemble_size])
-        # wandb.plot_table()
         # Ensemble the predictions
         ensemble_predictions_mu = ensemble_predictions.mean(dim=2)  # torch.Size([datapoints, tasks])
         ensemble_predictions_std = ensemble_predictions.std(dim=2)  # torch.Size([datapoints, tasks])
-        # ensemble_predictions_var = ensemble_predictions.var(dim=2)  # NOT IMPORTANT ?
-        #
-        # lower_quantile = ensemble_predictions_mu - 1.96 * ensemble_predictions_std
-        # upper_quantile = ensemble_predictions_mu + 1.96 * ensemble_predictions_std
+        # over all tasks metrics
+        # Reshape the tensor to stack the tasks on top of each other
+        alltasks_preds_mu = torch.flatten(ensemble_predictions_mu.transpose(0, 1))
+            # ensemble_predictions_mu.reshape(-1, ensemble_predictions_mu.size(
+            # 2))  # torch.Size([datapoints*tasks, features])
+        alltasks_preds_std = torch.flatten(ensemble_predictions_std.transpose(0, 1))
+        alltasks_targets = torch.flatten(targets.transpose(0, 1))
+            # targets.repeat(1, ensemble_predictions_mu.size(1)).reshape(-1, targets.size(
+            # 1))  # torch.Size([datapoints*tasks, features])
+        # Calculate the metrics
+        alltasks_nanmask = ~torch.isnan(alltasks_targets)
+        alltasks_y_true = alltasks_targets[alltasks_nanmask]
+        alltasks_y_preds = alltasks_preds_mu[alltasks_nanmask]
+        alltasks_y_std = alltasks_preds_std[alltasks_nanmask]
+        n_subset = 500 if len(alltasks_y_true) > 500 else len(alltasks_y_true)
+        task_name = "All 20 Targets"
 
+        alltasks_y_preds = alltasks_y_preds.cpu().numpy()
+        alltasks_y_std = alltasks_y_std.cpu().numpy()
+        alltasks_y_true = alltasks_y_true.cpu().numpy()
+
+        # Calculate the metrics
+        alltasks_metrics = get_all_metrics(
+            y_pred=alltasks_y_preds,  # : np.ndarray,
+            y_std=alltasks_y_std,  # : np.ndarray,
+            y_true=alltasks_y_true,  # : np.ndarray,
+            num_bins=100,
+            resolution=99,
+            scaled=True,
+            verbose=False,
+        )
+
+        # Plot the metrics
         figures_path = os.path.join(FIGS_DIR, 'ensemble', activity, split)
         os.makedirs(figures_path, exist_ok=True)
+
+        metrics_filepath = os.path.join(figures_path, f'{task_name}_metrics.pkl')
+        with open(metrics_filepath, 'wb') as file:
+            pickle.dump(alltasks_metrics, file)
+
+        fig = make_uct_plots(
+            alltasks_y_preds,
+            alltasks_y_std,
+            alltasks_y_true,
+            task_name=task_name,
+            n_subset=n_subset,  # 100,
+            ylims=None,  # (-3, 3),
+            num_stds_confidence_bound=1.96,
+            plot_save_str=os.path.join(figures_path, f'{task_name}_uct'),
+            savefig=True,
+        )
+        img = wandb.Image(fig)
+
+        uct_metrics_table.add_data(
+            task_name,
+            config.activity,
+            config.split,
+            alltasks_metrics["accuracy"]["rmse"],
+            alltasks_metrics["accuracy"]["r2"],
+            alltasks_metrics["accuracy"]["mae"],
+            alltasks_metrics["accuracy"]["mdae"],
+            alltasks_metrics["accuracy"]["marpd"],
+            alltasks_metrics["accuracy"]["corr"],
+            alltasks_metrics["avg_calibration"]["rms_cal"],
+            alltasks_metrics["avg_calibration"]["ma_cal"],
+            alltasks_metrics["avg_calibration"]["miscal_area"],
+            alltasks_metrics["sharpness"]["sharp"],
+            alltasks_metrics["scoring_rule"]["nll"],
+            alltasks_metrics["scoring_rule"]["crps"],
+            alltasks_metrics["scoring_rule"]["check"],
+            alltasks_metrics["scoring_rule"]["interval"],
+            img
+        )
 
         for task_idx in range(len(tasks)):
             task_y_true = targets[:, task_idx]  # (datapoints,)
@@ -386,32 +454,14 @@ def run_ensemble(
             metrics_filepath = os.path.join(figures_path, f'{task_name}_metrics.pkl')
             with open(metrics_filepath, 'wb') as file:
                 pickle.dump(task_metrics, file)
-                # json.dump(task_metrics, file)
-
-            # wandb.log(
-            #     data={
-            #         f'ensemble/mu/{tasks[task_idx]}': ensemble_predictions_mu[:, task_idx],
-            #         f'ensemble/std/{tasks[task_idx]}': ensemble_predictions_std[:, task_idx],
-            #         f'ensemble/var/{tasks[task_idx]}': ensemble_predictions_var[:, task_idx],
-            #         f'ensemble/lower_quantile/{tasks[task_idx]}': lower_quantile[:, task_idx],
-            #         f'ensemble/upper_quantile/{tasks[task_idx]}': upper_quantile[:, task_idx],
-            #     }
-            # )
-
-            # create task-specific plots
-            # fig1 = make_true_vs_preds_plot(
-            #     task_y_preds,
-            #     task_y_true,
-            #     task_name,
-            #     save_path=os.path.join(figures_path, f'{task_name}_true_vs_preds.png')
-            # )
 
             fig = make_uct_plots(
                 task_y_preds,
                 task_y_std,
                 task_y_true,
-                n_subset=n_subset, #100,
-                ylims=None, #(-3, 3),
+                task_name=task_name,
+                n_subset=n_subset,  # 100,
+                ylims=None,  # (-3, 3),
                 num_stds_confidence_bound=1.96,
                 plot_save_str=os.path.join(figures_path, f'{task_name}_uct'),
                 savefig=True,
@@ -420,6 +470,8 @@ def run_ensemble(
 
             uct_metrics_table.add_data(
                 task_name,
+                config.activity,
+                config.split,
                 task_metrics["accuracy"]["rmse"],
                 task_metrics["accuracy"]["r2"],
                 task_metrics["accuracy"]["mae"],
@@ -436,27 +488,12 @@ def run_ensemble(
                 task_metrics["scoring_rule"]["interval"],
                 img
             )
-            # Log the metrics and plots
-            # wandb.log(
-            #     data={
-            # #         f'ensemble/metrics/{task_name}': task_metrics,
-            # #         f'ensemble/plots/{task_name}_preds_v_true':  fig1,
-            #         f'ensemble/plots/{task_name}_uct': ,
-            #     }
-            # )
+
         wandb.log(
             data={
                 f'uct_metrics': uct_metrics_table,
             }
         )
-        # Log the metrics
-        # wandb.log(
-        #     data={
-        #         f'ensemble/mu': ensemble_predictions_mu,
-        #         f'ensemble/std': ensemble_predictions_std,
-        #         f'ensemble/var': ensemble_predictions_var,
-        #     }
-        # )
 
 
 ############## UCT PLOTS #####################
@@ -785,7 +822,7 @@ if __name__ == '__main__':
         config=test_config,  # os.path.join(CONFIG_DIR, 'ensemble/ensemble.json'),
         activity='xc50',
         split='random',
-        ensemble_size=100,
+        ensemble_size=5,
         # ensemble_method='fusion',
         wandb_project_name='mtl-ensemble-test',
         seed=42,

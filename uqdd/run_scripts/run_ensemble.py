@@ -18,7 +18,6 @@ def main():
     parser.add_argument('--ensemble-size', type=int, default=5, help='Ensemble size argument')
     # parser.add_argument('--config', type=str, default='config/ensemble.json', help='Config argument')
     # parser.add_argument('--ensemble-method', type=str, default='bagging', choices=['bagging', 'boosting'], help='Ensemble method argument')
-
     # parser.add_argument('--sweep-count', type=int, default=250, help='Sweep count argument')
     # group = parser.add_mutually_exclusive_group()
     # group.add_argument('--baseline', action='store_true', help='Run baseline')
@@ -47,13 +46,13 @@ def main():
             verbose_files=True
         )
 
-    config_path = os.path.join(CONFIG_DIR, f'baseline_{args.activity}_{args.split}_best.json')
+    config_path = os.path.join(CONFIG_DIR, 'baseline', f'baseline_{args.activity}_{args.split}_best.json')
 
     run_ensemble(
         config=config_path,
         activity=args.activity,
         split=args.split,
-        wandb_project_name=f'{today}-{args.wandb_project_name}',
+        wandb_project_name=args.wandb_project_name,
         ensemble_size=args.ensemble_size,
     )
 

@@ -272,25 +272,6 @@ def calc_regr_metrics(targets, outputs):
 
     return rmse, r2, evs
 
-    # multioutput='raw_values'
-    # rmse = calc_nanaware_metrics(
-    #     tensor=torch.from_numpy(rmse),
-    #     nan_mask=torch.from_numpy(nan_mask),
-    #     all_tasks_agg='mean'
-    # )
-
-    # r2 = calc_nanaware_metrics(
-    #     tensor=torch.from_numpy(r2),
-    #     nan_mask=torch.from_numpy(nan_mask),
-    #     all_tasks_agg='mean'
-    # )
-
-    # evs = calc_nanaware_metrics(
-    #     tensor=torch.from_numpy(evs),
-    #     nan_mask=torch.from_numpy(nan_mask),
-    #     all_tasks_agg='mean'
-    # )
-
 
 def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
     targets[nan_mask], outputs[nan_mask] = 0.0, 0.0
@@ -369,7 +350,7 @@ def get_config(
         config = default_config
     elif isinstance(config, dict):
         pass
-    elif isinstance(config, str) and os.path.isfile(config):
+    elif os.path.isfile(config): #  isinstance(config, str) and
         if config.endswith('.json'):
             with open(config, 'r') as f:
                 config = json.load(f)
@@ -379,7 +360,7 @@ def get_config(
         else:
             raise ValueError("Unsupported config file format. Please use JSON or YAML.")
     else:
-        raise ValueError("Invalid config. Please provide a valid config file path or a dictionary.")
+        raise ValueError(f"Invalid config {config}. Please provide a valid config file path or a dictionary.")
 
     if kwargs:
         config.update(kwargs)
@@ -482,8 +463,9 @@ def get_sweep_config(
 
     if config is None:
         config = default_sweep_config
-
-    elif os.path.isfile(config):
+    elif isinstance(config, dict):
+        pass
+    elif os.path.isfile(config):  # isinstance(config, str) and
         if config.endswith('.json'):
             with open(config, 'r') as f:
                 config = json.load(f)
@@ -492,10 +474,8 @@ def get_sweep_config(
                 config = yaml.safe_load(f)
         else:
             raise ValueError("Unsupported config file format. Please use JSON or YAML.")
-    elif isinstance(config, dict):
-        pass
     else:
-        raise ValueError("Invalid config. Please provide a valid config file path or a dictionary.")
+        raise ValueError(f"Invalid config {config}. Please provide a valid config file path or a dictionary.")
 
     if kwargs:
         # Update the 'parameters' dictionary with kwargs
@@ -654,3 +634,4 @@ def make_true_vs_preds_plot(
         plt.show()
 
     return fig
+
