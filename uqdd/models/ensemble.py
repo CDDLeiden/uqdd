@@ -1,17 +1,10 @@
-__author__ = "Bola Khalil"
-__supervisor__ = "Kajetan Schweighofer"
-__copyright__ = "Copyright 2022, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__license__ = "All rights reserved, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__version__ = "0.0.1"
-__maintainer__ = "Bola Khalil"
-__email__ = "bkhalil@its.jnj.com"
-__status__ = "Development"
-
 # get today's date as yyyy/mm/dd format
 import os
 import pickle
 from matplotlib import pyplot as plt
-import sys;sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys;
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import wandb
 from tqdm import tqdm
 
@@ -280,7 +273,6 @@ def process_ensemble_preds(
         targets,
         task_idx=None
 ):
-
     # Get the predictions mean and std
     ensemble_preds_mu = ensemble_preds.mean(dim=2)
     ensemble_preds_std = ensemble_preds.std(dim=2)
@@ -499,7 +491,6 @@ def run_ensemble(
                 f'uct_metrics': uct_metrics_table,
             }
         )
-
 
 
 if __name__ == '__main__':

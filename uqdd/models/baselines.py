@@ -1,17 +1,6 @@
-__author__ = "Bola Khalil"
-__supervisor__ = "Kajetan Schweighofer"
-__copyright__ = "Copyright 2022, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__license__ = "All rights reserved, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__version__ = "0.0.1"
-__maintainer__ = "Bola Khalil"
-__email__ = "bkhalil@its.jnj.com"
-__status__ = "Development"
-
 # get today's date as yyyy/mm/dd format
 import os
-import sys;
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys; sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from datetime import date
 from functools import partial
 

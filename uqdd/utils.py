@@ -1,11 +1,3 @@
-__author__ = "Bola Khalil"
-__copyright__ = "Copyright 2022, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__license__ = "All rights reserved, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__version__ = "0.0.1"
-__maintainer__ = "Bola Khalil"
-__email__ = "bkhalil@its.jnj.com"
-__status__ = "Development"
-
 from typing import List, Union, Tuple  # , List, Tuple, Any, Set, Dict
 
 import numpy as np

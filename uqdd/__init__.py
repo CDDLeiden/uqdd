@@ -34,3 +34,12 @@ os.environ['FIGS_DIR'] = FIGS_DIR
 
 __all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'CONFIG_DIR', 'SCRIPTS_DIR', 'MODELS_DIR', 'FIGS_DIR']
 
+__author__ = "Bola Khalil"
+__supervisor__ = "Kajetan Schweighofer"
+__contributer__ = "Natalia Dyubankova"
+__copyright__ = "Copyright 2023, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
+__license__ = "All rights reserved, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
+__version__ = "0.0.1"
+__maintainer__ = "Bola Khalil"
+__email__ = "bkhalil@its.jnj.com"
+__status__ = "Development"
