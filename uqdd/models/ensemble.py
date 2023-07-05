@@ -1,10 +1,7 @@
 # get today's date as yyyy/mm/dd format
 import os
-import pickle
-from matplotlib import pyplot as plt
-import sys;
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from typing import Union
+import sys; sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import wandb
 from tqdm import tqdm
 
@@ -13,10 +10,9 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from uqdd.models.models_utils import set_seed, get_config, get_datasets, get_tasks
 from uqdd.models.models_utils import build_loader, build_optimizer, MultiTaskLoss, save_models
-from uqdd.models.models_utils import make_uct_plots
+from uqdd.models.models_utils import UCTMetricsTable, process_preds
 
 from uqdd.models.baselines import BaselineDNN, run_epoch, predict
-from uncertainty_toolbox.metrics import get_all_metrics
 
 # get today's date as yyyy/mm/dd format
 from datetime import date
@@ -32,7 +28,6 @@ LOG_DIR = os.environ.get('LOG_DIR')
 DATA_DIR = os.environ.get('DATA_DIR')
 DATASET_DIR = os.path.join(DATA_DIR, 'dataset')
 CONFIG_DIR = os.environ.get('CONFIG_DIR')
-FIGS_DIR = os.environ.get('FIGS_DIR')
 
 wandb_mode = 'online'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 
@@ -158,166 +153,22 @@ def train_model(
     return best_model, predictions
 
 
-def calculate_metrics(y_pred, y_std, y_true, task_name, activity, split):
-    """
-    Calculate metrics for the predictions.
-
-    Parameters
-    ----------
-    y_pred : ndarray
-        (Mean of) Predicted values.
-    y_std : ndarray
-        Standard deviation of predicted values.
-    y_true : ndarray
-        True values.
-    task_name : str
-        Name of the task.
-    activity : str
-        Activity name.
-    split : str
-        Split name.
-
-    Returns
-    -------
-    metrics : dict
-        Dictionary containing calculated metrics.
-    img     : wandb.Image
-        Image of the UCT plot - ready for logging
-    """
-    metrics = get_all_metrics(
-        y_pred=y_pred,
-        y_std=y_std,
-        y_true=y_true,
-        num_bins=100,
-        resolution=99,
-        scaled=True,
-        verbose=False,
-    )
-
-    figures_path = os.path.join(FIGS_DIR, "ensemble", activity, split)
-    os.makedirs(figures_path, exist_ok=True)
-
-    metrics_filepath = os.path.join(figures_path, f"{task_name}_metrics.pkl")
-    with open(metrics_filepath, "wb") as file:
-        pickle.dump(metrics, file)
-
-    fig = make_uct_plots(
-        y_pred,
-        y_std,
-        y_true,
-        task_name=task_name,
-        n_subset=min(500, len(y_true)),
-        ylims=None,
-        num_stds_confidence_bound=1.96,
-        plot_save_str=os.path.join(figures_path, f"{task_name}_uct"),
-        savefig=True,
-    )
-
-    img = wandb.Image(fig)
-
-    return metrics, img
-
-
-def uct_metrics_logger(
-        uct_metrics_table,
-        task_name,
-        config,
-        metrics,
-        img
-):
-    """
-    Log UCT metrics to the UCT metrics table.
-
-    Parameters
-    ----------
-    uct_metrics_table : UCTMetricsTable
-        UCT metrics table object for logging.
-    task_name : str
-        Name of the task.
-    config : wandb.config
-        Configuration object.
-    metrics : dict
-        Dictionary containing calculated metrics.
-    img : wandb.Image
-        Image of the UCT plot.
-
-    Returns
-    -------
-    None
-    """
-    uct_metrics_table.add_data(
-        task_name,
-        config.activity,
-        config.split,
-        metrics["accuracy"]["rmse"],
-        metrics["accuracy"]["r2"],
-        metrics["accuracy"]["mae"],
-        metrics["accuracy"]["mdae"],
-        metrics["accuracy"]["marpd"],
-        metrics["accuracy"]["corr"],
-        metrics["avg_calibration"]["rms_cal"],
-        metrics["avg_calibration"]["ma_cal"],
-        metrics["avg_calibration"]["miscal_area"],
-        metrics["sharpness"]["sharp"],
-        metrics["scoring_rule"]["nll"],
-        metrics["scoring_rule"]["crps"],
-        metrics["scoring_rule"]["check"],
-        metrics["scoring_rule"]["interval"],
-        img
-    )
-    plt.close()
-
-
-def process_ensemble_preds(
-        ensemble_preds,
-        targets,
-        task_idx=None
-):
-    # Get the predictions mean and std
-    ensemble_preds_mu = ensemble_preds.mean(dim=2)
-    ensemble_preds_std = ensemble_preds.std(dim=2)
-
-    if task_idx is not None:
-        ensemble_preds_mu = ensemble_preds_mu[:, task_idx]
-        ensemble_preds_std = ensemble_preds_std[:, task_idx]
-        targets = targets[:, task_idx]
-    else:
-        # flatten
-        ensemble_preds_mu = torch.flatten(ensemble_preds_mu.transpose(0, 1))
-        ensemble_preds_std = torch.flatten(ensemble_preds_std.transpose(0, 1))
-        targets = torch.flatten(targets.transpose(0, 1))
-
-    # nan mask filter
-    nan_mask = ~torch.isnan(targets)
-    ensemble_preds_mu = ensemble_preds_mu[nan_mask]
-    ensemble_preds_std = ensemble_preds_std[nan_mask]
-    targets = targets[nan_mask]
-
-    # convert to numpy and to cpu
-    y_pred = ensemble_preds_mu.cpu().numpy()
-    y_std = ensemble_preds_std.cpu().numpy()
-    y_true = targets.cpu().numpy()
-
-    return y_pred, y_std, y_true
-
 
 def run_ensemble(
         datasets=None,
-        config='uqdd/config/ensemble/ensemble.json',
-        activity='xc50',
-        split='random',
-        wandb_project_name='multitask-learning-ensemble',
-        ensemble_size=100,
-        seed=42,
+        config: Union[str, dict] = 'uqdd/config/ensemble/ensemble.json',
+        activity: str = 'xc50',
+        split: str = 'random',
+        wandb_project_name: str = 'multitask-learning-ensemble',
+        ensemble_size: int = 100,
+        seed: int = 42,
         **kwargs
 ):
     # Load the config
-    config = get_config(config=config, activity=activity, split=split, ensemble_size=ensemble_size, **kwargs)  #
-
+    config = get_config(config=config, activity=activity, split=split, ensemble_size=ensemble_size, **kwargs)
     # Load the dataset
     if datasets is None:
         datasets = get_datasets(activity=activity, split=split)
-
     # Get tasks names:
     tasks = get_tasks(activity=activity, split=split)
 
@@ -329,106 +180,21 @@ def run_ensemble(
             config=config,
             name=f"{today}_ensemble_{activity}_{split}",
     ):
-        uct_metrics_table = wandb.Table(
-            columns=[
-                "Target",
-                "Activity",
-                "Split",
-                "RMSE",
-                "R2",
-                "MAE",
-                "MADAE",
-                "MARPD",
-                "Correlation",
-                "RMS Calibration",
-                "MA Calibration",
-                "Miscalibration Area",
-                "Sharpness",
-                "NLL",
-                "CRPS",
-                "Check",
-                "Interval",
-                "UCT plots"
-            ])
+        # Initialize the table to store the metrics
+        uct_metrics_logger = UCTMetricsTable(model_type="ensemble", config=config)
 
         config = wandb.config
-
         # Define the data loaders
         train_loader, val_loader, test_loader = build_loader(datasets, config.batch_size, config.input_dim)
         # Define the ensemble models
         config.seed = seed  # TODO FIX THIS
         ensemble_models = build_ensemble(config=config)
-        #
+        # Initialize lists to store the results
         best_models = []
         predictions = []
-        # Initialize a list to store the results
         # results = []
         _, targets = predict(ensemble_models[0].to(device), test_loader, return_targets=True)
-        # Create a process pool with the desired number of processes (GPUs)
-        # num_gpus = torch.cuda.device_count()
-        # print(f"Using {num_gpus} GPUs")
-
-        # ### POOL MULTIPROCESSING ###
-        # # Create a process pool with the desired number of processes (GPUs)
-        # pool = multiprocessing.Pool(processes=num_gpus)
-        #
-        # # Submit training tasks to the process pool
-        # for model_idx in range(len(ensemble_models)):
-        #     result = pool.apply_async(
-        #         train_model, args= (
-        #                     model_idx,
-        #                     ensemble_models,
-        #                     train_loader,
-        #                     val_loader,
-        #                     test_loader,
-        #                     config.num_epochs,
-        #                     config.learning_rate,
-        #                     config.loss,
-        #                     config.optimizer,
-        #                     config.weight_decay,
-        #                     config.lr_factor,
-        #                     config.lr_patience,
-        #                     config.early_stop
-        #                     )
-        #     )
-        #         #(
-        #          #   model_idx, ensemble_models, train_loader, val_loader, test_loader, None # ) #, None
-        #
-        #     results.append(result)
-        #
-        # # Wait for the training tasks to complete
-        # pool.close()
-        # # pool.join()
-        #
-        # # Wait for all the tasks to complete and retrieve the results
-        # results = [result.get() for result in tqdm(results, total=len(results), desc='Ensemble models')]
-        # # Sort the results based on the model_idx to maintain the original order
-        # results.sort(key=lambda x: x[0])
-        # # Extract the predictions and best models from the results
-        # best_models = [result[1] for result in results]
-        # predictions = [result[2] for result in results]
-        #
-
-        ### CONCURRENT METHOD ###
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=num_gpus) as executor:
-        #     # Submit training tasks to the process pool
-        #     futures = [executor.submit(
-        #         train_model, model_idx, ensemble_models, train_loader, val_loader, test_loader, None #, config
-        #     ) for model_idx in range(len(ensemble_models))]
-        #     # Wait for the training tasks to complete
-        #     # Iterate over the completed futures
-        #     for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc='Ensemble models'):
-        #         # Get the result of the completed future
-        #         result = future.result()
-        #         # Append the result to the list
-        #         results.append(result)
-        #
-        # # Sort the results based on the model_idx to maintain the original order
-        # results.sort(key=lambda x: x[0])
-        # # Extract the predictions and best models from the results
-        # best_models = [result[0] for result in results]
-        # predictions = [result[1] for result in results]
-
+        # Train the ensemble models
         for model_idx in tqdm(range(len(ensemble_models)), desc='Ensemble models'):
             # Train the model
             best_model, preds = train_model(
@@ -439,12 +205,7 @@ def run_ensemble(
                 test_loader,
                 config
             )
-            # Test the model
-            # if model_idx == 0:
-            #     predictions, targets = predict(best_model, test_loader, return_targets=True)
-            # else:
-            #     predictions = predict(best_model, test_loader, return_targets=False)
-
+            # Store the results of the model
             predictions.append(preds)
             best_models.append(best_model)
 
@@ -453,44 +214,31 @@ def run_ensemble(
         save_models(config, best_models, f"{wandb.run.name}_ensemble_model", onnx=False)
 
         # Ensemble the predictions
-        ensemble_preds = torch.stack(predictions, dim=2)  # torch.Size([datapoints, tasks, ensemble_size])
-
+        ensemble_preds = torch.stack(predictions, dim=2)
         # Process ensemble predictions
-        task_name = "All 20 Targets"
-        y_pred, y_std, y_true = process_ensemble_preds(ensemble_preds, targets, None)
+        y_pred, y_std, y_true = process_preds(ensemble_preds, targets, None)
 
-        # Calculate the metrics
-        metrics, img = calculate_metrics(
+        # Calculate and log the metrics
+        # task_name =
+        metrics = uct_metrics_logger(
             y_pred=y_pred,
             y_std=y_std,
             y_true=y_true,
-            task_name=task_name,
-            activity=activity,
-            split=split
+            task_name="All 20 Targets"
         )
-
-        uct_metrics_logger(uct_metrics_table, task_name, config, metrics, img)
-
         for task_idx in range(len(tasks)):
-            task_name = tasks[task_idx]
-            task_y_pred, task_y_std, task_y_true = process_ensemble_preds(ensemble_preds, targets, task_idx=task_idx)
+            task_y_pred, task_y_std, task_y_true = process_preds(ensemble_preds, targets, task_idx=task_idx)
 
-            # Calculate the metrics
-            metrics, img = calculate_metrics(
+            # Calculate and log the metrics
+            task_name = tasks[task_idx]
+            metrics = uct_metrics_logger(
                 y_pred=task_y_pred,
                 y_std=task_y_std,
                 y_true=task_y_true,
-                task_name=task_name,
-                activity=activity,
-                split=split
+                task_name=task_name
             )
-            uct_metrics_logger(uct_metrics_table, task_name, config, metrics, img)
 
-        wandb.log(
-            data={
-                f'uct_metrics': uct_metrics_table,
-            }
-        )
+        uct_metrics_logger.wandb_log()
 
 
 if __name__ == '__main__':

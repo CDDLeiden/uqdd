@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import uncertainty_toolbox as uct
+from uncertainty_toolbox.metrics import get_all_metrics
 import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 from torch.utils.data import DataLoader
@@ -23,6 +24,7 @@ DATA_DIR = os.environ.get('DATA_DIR')
 LOGS_DIR = os.environ.get('LOGS_DIR')
 CONFIG_DIR = os.environ.get('CONFIG_DIR')
 MODELS_DIR = os.environ.get('MODELS_DIR')
+FIGS_DIR = os.environ.get('FIGS_DIR')
 
 # wandb_dir = LOGS_DIR  # 'logs/'
 wandb_mode = 'online'
@@ -32,39 +34,23 @@ dataset_dir = os.path.join(DATA_DIR, 'dataset/')  # 'data/dataset/'
 today = date.today()
 today = today.strftime("%Y%m%d")
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # print("Device: " + str(device))
 # print(torch.version.cuda) if device == 'cuda' else None
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def log_mol_table(smiles, inputs, targets, outputs, targets_names):
-    # targets_cols = targets.columns()
-    # table_cols = ['smiles', 'mol', 'mol_2D', 'ECFP', 'fp_length']
-    # for t in targets_cols:
-    #     table_cols.append(f'{t}_label')
-    #     table_cols.append(f'{t}_predicted')
-    # table = wandb.Table(columns=table_cols)
-    # with wandb.init(dir=wandb_dir, mode=wandb_mode):
-    data = []
-    for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
-        row = {
-            "smiles": smi,
-            "molecule": wandb.Molecule.from_smiles(smi),
-            "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
-            "ECFP": inp,
-            "fp_length": len(inp),
-        }
+def set_seed(seed=42):
+    """
+    Set the random seed for reproducible results.
 
-        # Iterate over each pair of output and target
-        for targetName, target, output in zip(targets_names, tar, out):
-            row[f'{targetName}_label'] = target.item()
-            row[f'{targetName}_predicted'] = output.item()
-
-        data.append(row)
-
-    dataframe = pd.DataFrame.from_records(data)
-    table = wandb.Table(dataframe=dataframe)
-    wandb.log({"mols_table": table}, commit=False)
+    Parameters:
+    -----------
+    - seed (int): The random seed to use.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def get_tasks(activity, split):
@@ -175,6 +161,20 @@ def build_loss(loss, reduction='none'):
     return loss_fn
 
 
+### Custom Loss Functions ###
+class MultiTaskLoss(nn.Module):
+    def __init__(self, loss_type='huber', reduction='mean'):
+        super(MultiTaskLoss, self).__init__()
+        self.loss_type = loss_type
+        self.loss_fn = build_loss(loss_type, reduction=reduction)
+
+    def forward(self, outputs, targets):
+        nan_mask = torch.isnan(targets)
+        # loss
+        loss = calc_loss_notnan(outputs, targets, nan_mask, self.loss_fn)
+        return loss
+
+
 def save_models(config, model, model_name=None, onnx=True):
     try:
         if model is None:
@@ -208,9 +208,6 @@ def save_models(config, model, model_name=None, onnx=True):
 
     except Exception as e:
         print("Error saving models: " + str(e))
-
-
-
 
 
 def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
@@ -467,7 +464,6 @@ def get_sweep_config(
             },
         },
     }
-
     if config is None:
         config = default_sweep_config
     elif isinstance(config, dict):
@@ -497,32 +493,37 @@ def get_sweep_config(
     return config
 
 
-def set_seed(seed=42):
-    """
-    Set the random seed for reproducible results.
+def process_preds(
+        predictions,
+        targets,
+        task_idx=None
+):
+    # Get the predictions mean and std
+    preds_mu = predictions.mean(dim=2)
+    preds_std = predictions.std(dim=2)
 
-    Parameters:
-    -----------
-    - seed (int): The random seed to use.
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if task_idx is not None:
+        preds_mu = preds_mu[:, task_idx]
+        preds_std = preds_std[:, task_idx]
+        targets = targets[:, task_idx]
+    else:
+        # flatten
+        preds_mu = torch.flatten(preds_mu.transpose(0, 1))
+        preds_std = torch.flatten(preds_std.transpose(0, 1))
+        targets = torch.flatten(targets.transpose(0, 1))
 
+    # nan mask filter
+    nan_mask = ~torch.isnan(targets)
+    preds_mu = preds_mu[nan_mask]
+    preds_std = preds_std[nan_mask]
+    targets = targets[nan_mask]
 
-### Custom Loss Functions ###
-class MultiTaskLoss(nn.Module):
-    def __init__(self, loss_type='huber', reduction='mean'):
-        super(MultiTaskLoss, self).__init__()
-        self.loss_type = loss_type
-        self.loss_fn = build_loss(loss_type, reduction=reduction)
+    # convert to numpy and to cpu
+    y_pred = preds_mu.cpu().numpy()
+    y_std = preds_std.cpu().numpy()
+    y_true = targets.cpu().numpy()
 
-    def forward(self, outputs, targets):
-        nan_mask = torch.isnan(targets)
-        # loss
-        loss = calc_loss_notnan(outputs, targets, nan_mask, self.loss_fn)
-        return loss
+    return y_pred, y_std, y_true
 
 
 def make_uct_plots(
@@ -643,4 +644,287 @@ def make_true_vs_preds_plot(
     return fig
 
 
+def calculate_uct_metrics(y_pred, y_std, y_true, task_name, activity, split, model_type="ensemble"):
+    """
+    Calculate metrics for the predictions.
+
+    Parameters
+    ----------
+    y_pred : ndarray
+        (Mean of) Predicted values.
+    y_std : ndarray
+        Standard deviation of predicted values.
+    y_true : ndarray
+        True values.
+    task_name : str
+        Name of the task.
+    activity : str
+        Activity name.
+    split : str
+        Split name.
+    model_type : str, optional
+        Type of the model. The default is "ensemble".
+
+    Returns
+    -------
+    metrics : dict
+        Dictionary containing calculated metrics.
+    img     : wandb.Image
+        Image of the UCT plot - ready for logging
+    """
+    metrics = get_all_metrics(
+        y_pred=y_pred,
+        y_std=y_std,
+        y_true=y_true,
+        num_bins=100,
+        resolution=99,
+        scaled=True,
+        verbose=False,
+    )
+
+    figures_path = os.path.join(FIGS_DIR, model_type, activity, split)
+    os.makedirs(figures_path, exist_ok=True)
+
+    metrics_filepath = os.path.join(figures_path, f"{task_name}_metrics.pkl")
+    with open(metrics_filepath, "wb") as file:
+        pickle.dump(metrics, file)
+
+    fig = make_uct_plots(
+        y_pred,
+        y_std,
+        y_true,
+        task_name=task_name,
+        n_subset=min(500, len(y_true)),
+        ylims=None,
+        num_stds_confidence_bound=1.96,
+        plot_save_str=os.path.join(figures_path, f"{task_name}_uct"),
+        savefig=True,
+    )
+
+    img = wandb.Image(fig)
+
+    return metrics, img
+
+
+class UCTMetricsTable:
+    def __init__(self, model_type=None, config=None):
+        """
+        Initialize the UCT metrics table.
+
+        Returns:
+        --------
+        None
+        """
+        cols = []
+        # self.task_name = task_name
+        self.config = config
+        self.model_type = model_type
+        if model_type is not None:
+            cols = ['Model type']
+
+        cols.extend([
+            "Target",
+            "Activity",
+            "Split",
+            "RMSE",
+            "R2",
+            "MAE",
+            "MADAE",
+            "MARPD",
+            "Correlation",
+            "RMS Calibration",
+            "MA Calibration",
+            "Miscalibration Area",
+            "Sharpness",
+            "NLL",
+            "CRPS",
+            "Check",
+            "Interval",
+            "UCT plots"
+        ])
+        self.table = wandb.Table(
+            columns=cols
+        )
+
+    def __call__(self, y_pred, y_std, y_true, task_name=None):
+        """
+        Calculate metrics and add them to the table.
+
+        Parameters
+        ----------
+        y_pred : ndarray
+            (Mean of) Predicted values.
+        y_std : ndarray
+            Standard deviation of predicted values.
+        y_true : ndarray
+            True values.
+        task_name : str, optional
+            Name of the task. The default is None.
+
+        Returns
+        -------
+        metrics : dict
+            Dictionary containing calculated metrics.
+        """
+        metrics, img = self.calculate_metrics(
+            y_pred=y_pred,
+            y_std=y_std,
+            y_true=y_true,
+            task_name=task_name
+        )
+        self.add_data(
+            task_name=task_name,
+            config=self.config,
+            metrics=metrics,
+            img=img
+        )
+
+        return metrics
+
+    def calculate_metrics(self, y_pred, y_std, y_true, task_name=None):
+        metrics, img = calculate_uct_metrics(
+            y_pred=y_pred,
+            y_std=y_std,
+            y_true=y_true,
+            task_name=task_name,
+            activity=self.config.activity,
+            split=self.config.split,
+            model_type=self.model_type
+        )
+        return metrics, img
+
+    def add_data(
+            self,
+            task_name,
+            config,
+            metrics,
+            img
+    ):
+        """
+        Add data to the UCT metrics table.
+
+        Parameters
+        ----------
+        task_name : str
+            Name of the task.
+        config : wandb.config
+            Configuration object.
+        metrics : dict
+            Dictionary containing calculated metrics.
+        img : wandb.Image
+            Image of the UCT plot.
+
+        Returns
+        -------
+        None
+        """
+        vals = [self.model_type] if self.model_type is not None else []
+        vals.extend([
+            task_name,
+            config.activity,
+            config.split,
+            metrics["accuracy"]["rmse"],
+            metrics["accuracy"]["r2"],
+            metrics["accuracy"]["mae"],
+            metrics["accuracy"]["mdae"],
+            metrics["accuracy"]["marpd"],
+            metrics["accuracy"]["corr"],
+            metrics["avg_calibration"]["rms_cal"],
+            metrics["avg_calibration"]["ma_cal"],
+            metrics["avg_calibration"]["miscal_area"],
+            metrics["sharpness"]["sharp"],
+            metrics["scoring_rule"]["nll"],
+            metrics["scoring_rule"]["crps"],
+            metrics["scoring_rule"]["check"],
+            metrics["scoring_rule"]["interval"],
+            img])
+
+        self.table.add_data(*vals)
+        plt.close()
+
+    def wandb_log(self):
+        """
+        Export the UCT metrics table to wandb.
+        """
+        wandb.log({f"UCT Metrics Table {self.model_type}": self.table})
+
+
+def uct_metrics_logger(
+        uct_metrics_table,
+        task_name,
+        config,
+        metrics,
+        img
+):
+    """
+    Log UCT metrics to the UCT metrics table.
+
+    Parameters
+    ----------
+    uct_metrics_table : UCTMetricsTable
+        UCT metrics table object for logging.
+    task_name : str
+        Name of the task.
+    config : wandb.config
+        Configuration object.
+    metrics : dict
+        Dictionary containing calculated metrics.
+    img : wandb.Image
+        Image of the UCT plot.
+
+    Returns
+    -------
+    None
+    """
+    uct_metrics_table.add_data(
+        task_name,
+        config.activity,
+        config.split,
+        metrics["accuracy"]["rmse"],
+        metrics["accuracy"]["r2"],
+        metrics["accuracy"]["mae"],
+        metrics["accuracy"]["mdae"],
+        metrics["accuracy"]["marpd"],
+        metrics["accuracy"]["corr"],
+        metrics["avg_calibration"]["rms_cal"],
+        metrics["avg_calibration"]["ma_cal"],
+        metrics["avg_calibration"]["miscal_area"],
+        metrics["sharpness"]["sharp"],
+        metrics["scoring_rule"]["nll"],
+        metrics["scoring_rule"]["crps"],
+        metrics["scoring_rule"]["check"],
+        metrics["scoring_rule"]["interval"],
+        img
+    )
+    plt.close()
+
+
+def log_mol_table(smiles, inputs, targets, outputs, targets_names):
+    # targets_cols = targets.columns()
+    # table_cols = ['smiles', 'mol', 'mol_2D', 'ECFP', 'fp_length']
+    # for t in targets_cols:
+    #     table_cols.append(f'{t}_label')
+    #     table_cols.append(f'{t}_predicted')
+    # table = wandb.Table(columns=table_cols)
+    # with wandb.init(dir=wandb_dir, mode=wandb_mode):
+    data = []
+    for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
+        row = {
+            "smiles": smi,
+            "molecule": wandb.Molecule.from_smiles(smi),
+            "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
+            "ECFP": inp,
+            "fp_length": len(inp),
+        }
+
+        # Iterate over each pair of output and target
+        for targetName, target, output in zip(targets_names, tar, out):
+            row[f'{targetName}_label'] = target.item()
+            row[f'{targetName}_predicted'] = output.item()
+
+        data.append(row)
+
+    dataframe = pd.DataFrame.from_records(data)
+    table = wandb.Table(dataframe=dataframe)
+    wandb.log({"mols_table": table}, commit=False)
 

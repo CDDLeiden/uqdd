@@ -18,8 +18,8 @@ def main():
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--baseline', action='store_true', help='Run baseline')
     group.add_argument('--hyperparam', action='store_true', help='Run hyperparameter search')
-
     parser.add_argument('--prepare-dataset', action='store_true', help='Flag Prepare dataset')
+
     args = parser.parse_args()
 
     today = date.today()
@@ -29,7 +29,6 @@ def main():
 
     if args.prepare_dataset:
         output_path = os.path.join(DATA_DIR, 'dataset', args.activity, args.split)
-            # f'data/dataset/{args.activity}/{args.split}/'
         _, _, _, _ = data_preparation(
             papyrus_path=DATA_DIR,
             activity=args.activity,
