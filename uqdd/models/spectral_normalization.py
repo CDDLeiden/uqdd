@@ -317,3 +317,5 @@ def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
 
 if __name__ == "__main__":
     test = spectral_norm(torch.nn.Linear(3, 3), n_power_iterations=1, norm_bound=0.95)
+
+
