@@ -9,6 +9,7 @@ import torch
 
 from tdc.benchmark_group import dti_dg_group
 from tdc.multi_pred import DTI
+from tdc.chem_utils import MolConvert
 from uqdd.chemutils import scaffold_split, standardize_df, generate_ecfp
 from uqdd.utils import create_logger
 
@@ -116,9 +117,6 @@ class TDC_DTI:
                 df_dup.to_csv(os.path.join(DATA_DIR, f"{today}_tdc_{self.name}_02_dup_smiles.csv"))
                 df_nan.to_csv(os.path.join(DATA_DIR, f"{today}_tdc_{self.name}_03_NaN_smiles.csv"))
 
-    def reader(self):
-        pass
-
     def get_drug_df(self, df: pd.DataFrame, smiles_col: str = "Drug"):
         return df[[smiles_col]].drop_duplicates(subset=[smiles_col], ignore_index=True)
 
@@ -127,15 +125,19 @@ class TDC_DTI:
 
     def molecular_desc(self, df: pd.DataFrame, smiles_col: str, desc_type: str = "ecfp"):
         drugs_df = self.get_drug_df(df, smiles_col=smiles_col)
+        desc_type = desc_type.lower()
 
         if desc_type == "ecfp":
             drugs_df = self.generate_ecfp(drugs_df)
-        elif desc_type == "rdkit":
-            pass
-        elif desc_type == "mordred":
-            pass
-        elif desc_type == "all":
-            pass
+        elif desc_type == "pyg":
+            convert = MolConvert(src="SMILES", dst="PyG")
+            drugs_df["pyg"] = drugs_df["Drug"].apply(lambda x: convert(x))
+        elif desc_type == "dgl":
+            convert = MolConvert(src="SMILES", dst="DGL")
+            drugs_df["dgl"] = drugs_df["Drug"].apply(lambda x: convert(x))
+        elif desc_type == "graph2d":
+            convert = MolConvert(src="SMILES", dst="Graph2D")
+            drugs_df["graph2d"] = drugs_df["Drug"].apply(lambda x: convert(x))
         else:
             raise ValueError(f"Descriptor type {desc_type} not supported")
 
@@ -144,6 +146,9 @@ class TDC_DTI:
         return drugs_df
 
     def protein_desc(self):
+        # TODO : create language embedder here - ProteinBERT, BioGPT, other protein sequence descriptors
+
+
 
         pass
 
@@ -153,15 +158,19 @@ class TDC_DTI:
         drugs_df = generate_ecfp(drugs_df, 4, 2048, False, False, smiles_col="Drug")
         return drugs_df
 
-    def pickle_data(self, data: Union[pd.DataFrame, torch.Tensor, dict, List], name: str, output_path=os.path.join(DATA_DIR, "tdc")):
-        train_path = os.path.join(output_path, "train.pkl")
-        val_path = os.path.join(output_path, "val.pkl")
-        test_path = os.path.join(output_path, "test.pkl")
-        for file_path, data in zip(
-                [train_path, val_path, test_path, f"{output_path}/{name}.pkl"],
-                [train_data, val_data, test_data, df]):
-            with open(file_path, 'wb') as file:
-                pickle.dump(data, file)
+    def pickle_data(
+            self,
+            output_path=None,
+            name="BindingDB_IC50",
+            **kwargs):
+        if output_path is None:
+            output_path = os.path.join(DATA_DIR, "dataset", "tdc", name)
+            os.makedirs(output_path, exist_ok=True)
+
+        for k, v in kwargs.items():
+            with open(os.path.join(output_path, f"{k}.pkl"), "wb") as file:
+                self.log.info(f"Pickling {k} to {output_path}")
+                pickle.dump(v, file)
 
 
 

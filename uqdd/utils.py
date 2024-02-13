@@ -1,5 +1,6 @@
+import os
 from typing import List, Union, Tuple  # , List, Tuple, Any, Set, Dict
-
+import logging
 import numpy as np
 import pandas as pd
 # noinspection PyUnresolvedReferences
@@ -8,7 +9,39 @@ from rdkit.Chem.rdchem import Mol as RdkitMol
 string_types = (type(b""), type(""))
 
 
-########### PANDAS UTILS ###############
+def create_logger(name="logger", file_level="debug", stream_level="info"):
+    levels = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+        "critical": logging.CRITICAL,
+    }
+    file_level = levels.get(file_level.lower(), logging.DEBUG)
+    stream_level = levels.get(stream_level.lower(), logging.INFO)
+
+    logs_dir = os.environ.get("LOGS_DIR", "logs")
+    log = logging.getLogger(name)
+    # log.setLevel(file_level)
+    formatter = logging.Formatter(
+        fmt="%(asctime)s:%(levelname)s:%(name)s:%(message)s:%(relativeCreated)d",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    out_log = os.path.join(logs_dir, f"{name}.log")
+    file_handler = logging.FileHandler(out_log, mode="w")
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(file_level)
+    log.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(stream_level)
+    log.addHandler(stream_handler)
+
+    log.debug(f"Logger {name} initialized")
+    return log
+
+
 # Define a custom function to aggregate the columns
 def custom_agg(x):
     if len(x) > 1:
