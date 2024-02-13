@@ -70,19 +70,18 @@ class Papyrus:
 
         self.keep_accession = accession
         activity_type = activity_type.lower()
-        if type(activity_type)==str and activity_type in ["xc50", "kx"]:
+        if isinstance(activity_type, str) and activity_type in ["xc50", "kx"]:
             act_dict = {
                 "xc50": ["IC50", "EC50"],
                 "kx": ["Ki", "Kd"]}
 
             self.activity_key = activity_type
             activity_type = act_dict[activity_type]
-            # self.activity_type = activity_type
-        elif type(activity_type)==str and activity_type in ["ic50", "ec50", "kd", "ki"]:
+        elif isinstance(activity_type, str) and activity_type in ["ic50", "ec50", "kd", "ki"]:
             self.activity_key = activity_type
 
-        elif type(activity_type)==list:
-            self.activity_key = activity_type.join("_")
+        elif isinstance(activity_type, list):
+            self.activity_key = "_".join(activity_type)
 
         self.keep_type = activity_type
         self.keep_organism = organism

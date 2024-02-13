@@ -5,9 +5,7 @@ from typing import Union, List, Tuple
 import numpy as np
 import pandas as pd
 import rdkit
-# import rdkit.Chem as Chem
 from rdkit import Chem, RDLogger
-# from rdkit.Chem import Draw
 from rdkit.Chem import Draw, AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
@@ -16,7 +14,7 @@ from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculat
 from uqdd.utils import check_nan_duplicated, custom_agg
 
 RDLogger.DisableLog('rdApp.info')
-print(rdkit.__version__)
+print(f"rdkit {rdkit.__version__}")
 
 
 def standardize(smi, logger=None, suppress_exception=False):
@@ -288,14 +286,14 @@ def ECFP_from_smiles(
     return np.array(feature_list)
 
 
-def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chirality=False):
+def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chirality=False, smiles_col='smiles'):
     """
     Generates ECFP fingerprints from the 'smiles' column of a pandas dataframe.
 
     Parameters:
     -----------
     df : pandas.DataFrame
-        The input dataframe, which should contain a 'smiles' column.
+        The input dataframe.
     radius : int, optional
         The radius of the circular substructure (in bonds) to use when generating the fingerprint.
         Default is 2.
@@ -306,7 +304,8 @@ def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chiralit
         Default is False (i.e., use circular fingerprints).
     use_chirality : bool, optional
         Whether to include chirality information in the fingerprint. Default is False.
-
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings to generate fingerprints from. Default is 'smiles'.
     Returns:
     --------
     pandas.DataFrame
@@ -321,7 +320,7 @@ def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chiralit
     # Generate ECFP fingerprints
     # for length in [2 ** i for i in range(5, 12)]:
 
-    df[f'ecfp{length}'] = df['smiles'].apply(lambda x: ECFP_from_smiles(x, radius=radius,
+    df[f'ecfp{length}'] = df[smiles_col].apply(lambda x: ECFP_from_smiles(x, radius=radius,
                                                                         length=length,
                                                                         use_features=use_features,
                                                                         use_chirality=use_chirality))  # df[f'ECFP-{radius}-{length}']
@@ -533,7 +532,7 @@ def generate_scaffold(smiles, include_chirality=False):
     return scaffold
 
 
-def scaffold_split(df, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42):
+def scaffold_split(df, smiles_col='smiles', train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42):
     """
     Splits dataframe into scaffold splits.
 
@@ -541,6 +540,8 @@ def scaffold_split(df, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42):
     ----------
     df : pandas.DataFrame
         The input dataframe.
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings. Default is 'smiles'.
     train_frac : float, optional
         The fraction of the data to use for training. Default is 0.7.
     val_frac : float, optional
@@ -564,16 +565,16 @@ def scaffold_split(df, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42):
     np.random.seed(seed)
 
     # calculate scaffolds for each smiles string
-    df['scaffold'] = df['smiles'].apply(generate_scaffold)
+    df['scaffold'] = df[smiles_col].apply(generate_scaffold)
 
     # get unique scaffolds
     scaffolds = list(df['scaffold'].unique())
-    np.random.shuffle(scaffolds)
+    rng = np.random.default_rng(seed=seed)
+    rng.shuffle(scaffolds)
     len_scaffolds = len(scaffolds)
     # calculate number of compounds for each split
     num_train = int(train_frac * len_scaffolds)
     num_val = int(val_frac * len_scaffolds)
-    # num_test = int(test_frac * len_scaffolds)
 
     # split scaffolds
     scaffold_train = scaffolds[:num_train]
