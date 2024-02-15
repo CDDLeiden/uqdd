@@ -11,7 +11,7 @@ from tdc.benchmark_group import dti_dg_group
 from tdc.multi_pred import DTI
 from tdc.chem_utils import MolConvert
 from uqdd.chemutils import scaffold_split, standardize_df, generate_ecfp
-from uqdd.utils import create_logger
+from uqdd.utils import create_logger, transformer_featurizer
 
 DATA_DIR = os.environ.get("DATA_DIR")
 default_path = os.path.join(DATA_DIR, "tdc/")
@@ -145,9 +145,28 @@ class TDC_DTI:
 
         return drugs_df
 
-    def protein_desc(self):
-        # TODO : create language embedder here - ProteinBERT, BioGPT, other protein sequence descriptors
+    def protein_desc(
+            self,
+            df: pd.DataFrame,
+            target_col: str = "Target",
+            desc_type: str = "language",
 
+    ):
+        # TODO : create language embedder here - ProteinBERT, BioGPT, other protein sequence descriptors
+        emb_model = {
+            "biobert": "dmis-lab/biobert-v1.1",
+            "protbert": "Rostlab/prot_bert",
+            "biogpt": ""
+         }
+        prot_df = self.get_protein_df(df, target_col=target_col)
+        desc_type = desc_type.lower()
+
+        if desc_type in emb_model.keys():
+            prot_df["biobert"] = prot_df[target_col].apply(transformer_featurizer, model_name=emb_model[desc_type])
+            prot_
+        # BioProt?
+        # DescribePROT
+        #
 
 
         pass
