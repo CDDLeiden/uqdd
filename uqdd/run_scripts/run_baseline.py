@@ -52,7 +52,7 @@ def main():
         run_baseline_hyperparam(
             activity=args.activity,
             split=args.split,
-            wandb_project_name=f'{today}-{args.wandb_project_name}',
+            wandb_project_name=f"{today}-{args.wandb_project_name}",
             sweep_count=args.sweep_count
         )
 

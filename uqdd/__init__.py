@@ -1,45 +1,37 @@
-# from .models import *
-# from .papyrus import *
-# from .run_scripts import *
+from pathlib import Path
+from datetime import date
+import torch
 
-# from .utils import *
-# from .chemutils import *
-# from .papyrus import *
-# from .baselines import *
-# from .models import *
-# from .run_scripts import *
+# Define the global device setting
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Device: " + str(DEVICE))
+print(torch.version.cuda) if DEVICE == 'cuda' else None
 
-import os
+# Define the base directory as the parent of this file
+BASE_DIR = Path(__file__).resolve().parent
 
-# Get the absolute path to the project's root directory
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Define paths using pathlib
+DATA_DIR = BASE_DIR / 'data'
+LOGS_DIR = BASE_DIR / 'logs'
+CONFIG_DIR = BASE_DIR / 'config'
+SCRIPTS_DIR = BASE_DIR / 'run_scripts'
+MODELS_DIR = BASE_DIR / 'models'
+FIGS_DIR = BASE_DIR / 'figures'
 
-# Define the paths to different directories
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-LOGS_DIR = os.path.join(BASE_DIR, 'logs')
-CONFIG_DIR = os.path.join(BASE_DIR, 'config')
-SCRIPTS_DIR = os.path.join(BASE_DIR, 'run_scripts')
-MODELS_DIR = os.path.join(BASE_DIR, 'models')
-FIGS_DIR = os.path.join(BASE_DIR, 'figures')
-
-# Export the paths as variables for easy access in other modules
-os.environ['BASE_DIR'] = BASE_DIR
-os.environ['DATA_DIR'] = DATA_DIR
-os.environ['LOGS_DIR'] = LOGS_DIR
-os.environ['CONFIG_DIR'] = CONFIG_DIR
-os.environ['SCRIPTS_DIR'] = SCRIPTS_DIR
-os.environ['MODELS_DIR'] = MODELS_DIR
-os.environ['FIGS_DIR'] = FIGS_DIR
+# Date variable
+TODAY = date.today().strftime("%Y%m%d")
 
 
-__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'CONFIG_DIR', 'SCRIPTS_DIR', 'MODELS_DIR', 'FIGS_DIR']
+WANDB_MODE = 'online'  # 'offline'
+
+__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'CONFIG_DIR', 'SCRIPTS_DIR', 'MODELS_DIR', 'FIGS_DIR', 'TODAY', 'DEVICE', 'WANDB_MODE']
 
 __author__ = "Bola Khalil"
 __supervisor__ = "Kajetan Schweighofer"
 __contributer__ = "Natalia Dyubankova"
-__copyright__ = "Copyright 2023, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__license__ = "All rights reserved, Janssen Pharmaceutica NV & Johannes-Kepler Universität Linz"
-__version__ = "0.0.1"
+__copyright__ = "Copyright 2023-2024, Johnson & Johnson and Johannes-Kepler Universität Linz"
+__license__ = "All rights reserved, Johnson & Johnson & Johannes-Kepler Universität Linz"
+__version__ = "0.0.2"
 __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"

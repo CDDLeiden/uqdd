@@ -1,28 +1,14 @@
-# get today's date as yyyy/mm/dd format
-import os
-import sys; sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from datetime import date
 from functools import partial
 
+import wandb
 import torch
 import torch.nn as nn
-import wandb
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 from uqdd.models.models_utils import get_datasets, get_config, get_sweep_config, build_loader, build_optimizer, \
     save_models, calc_regr_metrics, set_seed, MultiTaskLoss
 
-today = date.today()
-today = today.strftime("%Y%m%d")
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Device: " + str(device))
-print(torch.version.cuda) if device == 'cuda' else None
-
-LOG_DIR = os.environ.get('LOG_DIR')
-DATA_DIR = os.environ.get('DATA_DIR')
-
-wandb_mode = 'online'  # 'offline'
+from uqdd import TODAY, DEVICE, LOGS_DIR, WANDB_MODE
 
 
 class BaselineDNN(nn.Module):
@@ -33,8 +19,7 @@ class BaselineDNN(nn.Module):
             hidden_dim_2=None,
             hidden_dim_3=None,
             num_tasks=1,
-            dropout=0.2,
-            # device=None
+            dropout=0.2
     ):
         if hidden_dim_2 is None:
             hidden_dim_2 = hidden_dim_1
@@ -54,7 +39,6 @@ class BaselineDNN(nn.Module):
         )
         self.task_specific = nn.Linear(hidden_dim_3, num_tasks)
         self.apply(self.init_wt)
-        # self.device = device
 
     @staticmethod
     def init_wt(module):
@@ -69,14 +53,14 @@ class BaselineDNN(nn.Module):
 
 def train(
         model,
-        dataloader,
+        loader,
         optimizer,
         loss_fn,
 ):
     model.train()
     total_loss = 0.0
-    for i, (inputs, targets) in enumerate(dataloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+    for i, (inputs, targets) in enumerate(loader):
+        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 
         # Zero the parameter gradients
         optimizer.zero_grad()
@@ -92,7 +76,7 @@ def train(
 
         total_loss += loss.item()
 
-    total_loss /= len(dataloader)
+    total_loss /= len(loader)
     return total_loss
 
 
@@ -108,7 +92,7 @@ def evaluate(
 
     with torch.no_grad():
         for inputs, targets in loader:
-            inputs, targets = inputs.to(device), targets.to(device)
+            inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
             total_loss += loss.item()
@@ -135,7 +119,7 @@ def predict(
     targets_all = []
     with torch.no_grad():
         for inputs, targets in loader:
-            inputs = inputs.to(device)
+            inputs = inputs.to(DEVICE)
             outputs = model(inputs)
             outputs_all.append(outputs)
             if return_targets:
@@ -200,7 +184,8 @@ def train_model(
 ):
     try:
         # set a random seed for reproducibility
-        torch.manual_seed(seed)
+        # torch.manual_seed(seed)
+        set_seed(seed)
         # deterministic cuda algorithms
         torch.backends.cudnn.deterministic = True
 
@@ -213,7 +198,7 @@ def train_model(
             num_tasks=config.num_tasks,
             dropout=config.dropout
         )
-        model = model.to(device)
+        model = model.to(DEVICE)
 
         # Temporarily initialize best_model
         best_model = model
@@ -266,7 +251,7 @@ def train_model(
                         break
 
             except Exception as e:
-                raise Exception(f"The following exception occurred inside the epoch loop {e}")
+                raise RuntimeError(f"The following exception occurred inside the epoch loop {e}")
 
         # Save the best model
         save_models(config, best_model)
@@ -281,7 +266,7 @@ def run_baseline(
         config=None,
         activity="xc50",
         split="random",
-        wandb_project_name=f"{today}-baseline",
+        wandb_project_name=f"{TODAY}-baseline",
         seed=42,
         **kwargs
 ):
@@ -293,8 +278,8 @@ def run_baseline(
         datasets = get_datasets(activity=activity, split=split)
 
     with wandb.init(
-            dir=LOG_DIR,
-            mode=wandb_mode,
+            dir=LOGS_DIR,
+            mode=WANDB_MODE,
             project=wandb_project_name,
             config=config
     ):
@@ -321,7 +306,7 @@ def run_baseline_hyperparam(
         config=None,
         activity="xc50",
         split="random",
-        wandb_project_name=f"{today}-baseline-hyperparam",
+        wandb_project_name=f"{TODAY}-baseline-hyperparam",
         sweep_count=1,
         seed=42,
         **kwargs
