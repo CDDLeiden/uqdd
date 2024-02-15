@@ -1,4 +1,8 @@
+from typing import List
 import torch.nn as nn
+# from torch.nn.utils import spectral_norm
+from torch.nn.utils.parametrizations import spectral_norm
+
 import gpytorch
 from gpytorch.models import ExactGP, VariationalGP, ApproximateGP
 from gpytorch.likelihoods import GaussianLikelihood
@@ -41,15 +45,18 @@ class MultitaskGP(ExactGP):
 # TODO using SVGP? --> it is stochastic - with batches
 #  https://docs.gpytorch.ai/en/stable/examples/04_Variational_and_Approximate_GPs/SVGP_Regression_CUDA.html
 class MultitaskSVGP(ApproximateGP):
-    def __init__(self, inducing_points, num_tasks, rank=1):
+    def __init__(self, inducing_points, num_tasks, mean_kernel=None, covar_kernel=None, rank=1):
         variational_distribution = CholeskyVariationalDistribution(inducing_points.size(0))
         variational_strategy = VariationalStrategy(self, inducing_points, variational_distribution, learn_inducing_locations=True)
         super(MultitaskSVGP, self).__init__(variational_strategy)
+
+        mean_kernel = gpytorch.means.ConstantMean() if mean_kernel is None else mean_kernel
+        covar_kernel = gpytorch.kernels.RBFKernel() if covar_kernel is None else covar_kernel
         self.mean_module = gpytorch.means.MultitaskMean(
-            gpytorch.means.ConstantMean(), num_tasks=num_tasks
+            mean_kernel, num_tasks=num_tasks
         )
         self.covar_module = gpytorch.kernels.MultitaskKernel(
-            gpytorch.kernels.RBFKernel(), num_tasks=num_tasks, rank=rank
+            covar_kernel, num_tasks=num_tasks, rank=rank
         )
 
     def forward(self, x):
@@ -59,19 +66,26 @@ class MultitaskSVGP(ApproximateGP):
 
 
 class BaselineDNNwithGP(nn.Module):
-    def __init__(self, input_dim, hidden_dims, output_dim, use_spectral_normalization=False):
+    def __init__(
+            self,
+            inducing_points:torch.Tensor,
+            mean_kernel:Kernel=None,
+            covar_kernel:Kernel=None,
+            input_dim:int=2048,
+            hidden_dims:List[int]=[2048, 256, 256],
+            num_tasks:int=20,
+            use_spectral_norm:bool=False
+    ):
         super(BaselineDNNwithGP, self).__init__()
         # Define the DNN part
-        baseline_dnn = BaselineDNN(input_dim=2048, hidden_dim_1=2048, hidden_dim_2=256, hidden_dim_3=256)
-        self.feature_extractor = baseline_dnn.feature_extractor # Your existing DNN architecture without the last layer
-        self.spectral_normalization = None
-        if use_spectral_normalization:
-            self.spectral_normalization = SpectralNormalization()
-
-            # Apply spectral normalization to layers if required
-            # pass
+        baseline_dnn = BaselineDNN(input_dim=input_dim, hidden_dim_1=hidden_dims[0], hidden_dim_2=hidden_dims[1], hidden_dim_3=hidden_dims[2])
+        self.feature_extractor = baseline_dnn.feature_extractor # existing DNN architecture without the last layer
         # Define the GP part
-        self.gp_layer = GaussianProcessLayer(input_dim=hidden_dims[-1], output_dim=output_dim)
+        self.gp_layer = MultitaskSVGP(inducing_points, num_tasks, mean_kernel=mean_kernel, covar_kernel=covar_kernel)
+
+        if use_spectral_norm:
+            # self.feature_extractor = spectral_norm(self.feature_extractor)
+            self.gp_layer = spectral_norm(self.gp_layer)
 
     def forward(self, x):
         features = self.feature_extractor(x)

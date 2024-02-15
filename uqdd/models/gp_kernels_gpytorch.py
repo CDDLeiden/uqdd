@@ -16,6 +16,21 @@ class TanimotoKernel(gpytorch.kernels.Kernel):
 
         return tanimoto_distance if diag else tanimoto_distance.diag()
 
+# Implementing the Tanimoto distance Kernel
+class TanimotoKernel(Kernel):
+    def __init__(self, **kwargs):
+        super(TanimotoKernel, self).__init__(has_lengthscale=False, **kwargs)
+
+    def forward(self, x1, x2, **params):
+        x1_ = x1.unsqueeze(-2)
+        x2_ = x2.unsqueeze(-3)
+        num = (x1_ * x2_).sum(dim=-1)
+        denom = (x1_**2).sum(dim=-1) + (x2_**2).sum(dim=-1) - num
+        return num / denom
+
+    def num_outputs_per_input(self, x1, x2):
+        return 1
+
 #
 # class _TanimotoKernel(gpytorch.kernels.Kernel):
 #     has_lengthscale = False

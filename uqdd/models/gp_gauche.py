@@ -6,7 +6,7 @@ import warnings
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
-warnings.filterwarnings("ignore") # Turn off Graphein warnings
+warnings.filterwarnings("ignore")  # Turn off Graphein warnings
 
 from botorch import fit_gpytorch_model
 from typing import List, Union
@@ -19,11 +19,18 @@ from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood, VariationalELBO
 from gpytorch.variational import CholeskyVariationalDistribution, VariationalStrategy
 
-from gpytorch.kernels import RBFKernel, Kernel, SpectralDeltaKernel, SpectralMixtureKernel
+from gpytorch.kernels import (
+    RBFKernel,
+    Kernel,
+    SpectralDeltaKernel,
+    SpectralMixtureKernel,
+)
 
 from gauche.kernels.fingerprint_kernels.braun_blanquet_kernel import BraunBlanquetKernel
 from gauche.kernels.fingerprint_kernels.dice_kernel import DiceKernel
-from gauche.kernels.fingerprint_kernels.rogers_tanimoto_kernel import RogersTanimotoKernel
+from gauche.kernels.fingerprint_kernels.rogers_tanimoto_kernel import (
+    RogersTanimotoKernel,
+)
 from gauche.kernels.fingerprint_kernels.sokal_sneath_kernel import SokalSneathKernel
 from gauche.kernels.fingerprint_kernels.tanimoto_kernel import TanimotoKernel
 
@@ -36,15 +43,29 @@ import wandb
 from gauche.dataloader import MolPropLoader
 from gauche.dataloader.data_utils import transform_data
 from uqdd.models.baselines import BaselineDNN
-from uqdd.models.models_utils import get_datasets, get_config, get_sweep_config, build_loader, build_optimizer, \
-    save_models, calc_regr_metrics, set_seed, MultiTaskLoss
+from uqdd.models.models_utils import (
+    get_datasets,
+    get_config,
+    get_sweep_config,
+    build_loader,
+    build_optimizer,
+    save_models,
+    calc_regr_metrics,
+    set_seed,
+    MultiTaskLoss,
+)
 
 from uqdd.models.models_utils import set_seed, get_config, get_datasets, get_tasks
-from uqdd.models.models_utils import build_loader, build_optimizer, MultiTaskLoss, save_models
+from uqdd.models.models_utils import (
+    build_loader,
+    build_optimizer,
+    MultiTaskLoss,
+    save_models,
+)
 from uqdd.models.models_utils import UCTMetricsTable, process_preds
 from uqdd.models.baselines import train_model
 
-num_tasks = 20 # number of tasks i.e. labels
+num_tasks = 20  # number of tasks i.e. labels
 # rank = 1 # increasing the rank hyperparameter allows the model to learn more expressive
 # correlations between objectives at the expense of increasing the number of
 # model hyperparameters and potentially overfitting.
@@ -58,25 +79,37 @@ today = today.strftime("%Y%m%d")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
-print(torch.version.cuda) if device == 'cuda' else None
+print(torch.version.cuda) if device == "cuda" else None
 
-LOG_DIR = os.environ.get('LOG_DIR')
-DATA_DIR = os.environ.get('DATA_DIR')
-DATASET_DIR = os.path.join(DATA_DIR, 'dataset')
-CONFIG_DIR = os.environ.get('CONFIG_DIR')
-FIGS_DIR = os.environ.get('FIGS_DIR')
+LOG_DIR = os.environ.get("LOG_DIR")
+DATA_DIR = os.environ.get("DATA_DIR")
+DATASET_DIR = os.path.join(DATA_DIR, "dataset")
+CONFIG_DIR = os.environ.get("CONFIG_DIR")
+FIGS_DIR = os.environ.get("FIGS_DIR")
 
 
 class MultitaskExactGP(ExactGP):
-    def __init__(self, train_x, train_y, likelihood, num_tasks=20, rank=1, mean_kernel=None, covar_kernel=None):
-
+    def __init__(
+        self,
+        train_x,
+        train_y,
+        likelihood,
+        num_tasks=20,
+        rank=1,
+        mean_kernel=None,
+        covar_kernel=None,
+    ):
         super(MultitaskExactGP, self).__init__(train_x, train_y, likelihood)
-        self.mean_module = gpytorch.means.ConstantMean() if mean_kernel is None else mean_kernel
+        self.mean_module = (
+            gpytorch.means.ConstantMean() if mean_kernel is None else mean_kernel
+        )
         self.covar_module = TanimotoKernel() if covar_kernel is None else covar_kernel
 
         # If We learn an IndexKernel for 4 tasks
         # (so we'll actually learn 4x4=16 tasks with correlations)
-        self.task_covar_module = gpytorch.kernels.IndexKernel(num_tasks=num_tasks, rank=rank)
+        self.task_covar_module = gpytorch.kernels.IndexKernel(
+            num_tasks=num_tasks, rank=rank
+        )
 
     def forward(self, x, i):
         mean_x = self.mean_module(x)
@@ -92,13 +125,23 @@ class MultitaskExactGP(ExactGP):
 
 
 class MultitaskSVGP(ApproximateGP):
-    def __init__(self, inducing_points, num_tasks, rank=1, mean_kernel=None, covar_kernel=None):
-
-        variational_distribution = CholeskyVariationalDistribution(inducing_points.size(0))
-        variational_strategy = VariationalStrategy(self, inducing_points, variational_distribution, learn_inducing_locations=True)
+    def __init__(
+        self, inducing_points, num_tasks, rank=1, mean_kernel=None, covar_kernel=None
+    ):
+        variational_distribution = CholeskyVariationalDistribution(
+            inducing_points.size(0)
+        )
+        variational_strategy = VariationalStrategy(
+            self,
+            inducing_points,
+            variational_distribution,
+            learn_inducing_locations=True,
+        )
         super(MultitaskSVGP, self).__init__(variational_strategy)
 
-        mean_kernel = gpytorch.means.ConstantMean() if mean_kernel is None else mean_kernel
+        mean_kernel = (
+            gpytorch.means.ConstantMean() if mean_kernel is None else mean_kernel
+        )
         covar_kernel = TanimotoKernel() if covar_kernel is None else covar_kernel
 
         self.mean_module = gpytorch.means.MultitaskMean(
@@ -116,23 +159,35 @@ class MultitaskSVGP(ApproximateGP):
 
 class BaselineDNNwithGP(nn.Module):
     def __init__(
-            self,
-            inducing_points: torch.Tensor,
-            mean_kernel: Kernel=None,
-            covar_kernel: Kernel=None,
-            input_dim: int =2048,
-            hidden_dims: List[int]=[2048, 256, 256],
-            num_tasks: int=20,
-            use_spectral_norm: bool=False
+        self,
+        inducing_points: torch.Tensor,
+        mean_kernel: Kernel = None,
+        covar_kernel: Kernel = None,
+        input_dim: int = 2048,
+        hidden_dims: List[int] = [2048, 256, 256],
+        num_tasks: int = 20,
+        use_spectral_norm: bool = False,
     ):
         super(BaselineDNNwithGP, self).__init__()
         # TODO: make sure hidden_dims have the correct length
 
         # Define the DNN part
-        baseline_dnn = BaselineDNN(input_dim=input_dim, hidden_dim_1=hidden_dims[0], hidden_dim_2=hidden_dims[1], hidden_dim_3=hidden_dims[2])
-        self.feature_extractor = baseline_dnn.feature_extractor # existing DNN architecture without the last layer
+        baseline_dnn = BaselineDNN(
+            input_dim=input_dim,
+            hidden_dim_1=hidden_dims[0],
+            hidden_dim_2=hidden_dims[1],
+            hidden_dim_3=hidden_dims[2],
+        )
+        self.feature_extractor = (
+            baseline_dnn.feature_extractor
+        )  # existing DNN architecture without the last layer
         # Define the GP part
-        self.gp_layer = MultitaskSVGP(inducing_points, num_tasks, mean_kernel=mean_kernel, covar_kernel=covar_kernel)
+        self.gp_layer = MultitaskSVGP(
+            inducing_points,
+            num_tasks,
+            mean_kernel=mean_kernel,
+            covar_kernel=covar_kernel,
+        )
 
         if use_spectral_norm:
             self.gp_layer = spectral_norm(self.gp_layer)
@@ -160,10 +215,12 @@ def get_mll(model, likelihood, loader=None, gp_type="exact", dnn_featurizer=Fals
 
 def get_kernel(kernel_name: str, config=None):
     kernels_dict = {
-        "mean": gpytorch.means.ConstantMean(batch_shape=torch.Size([config.batch_size])),
+        "mean": gpytorch.means.ConstantMean(
+            batch_shape=torch.Size([config.batch_size])
+        ),
         "linear_mean": gpytorch.means.LinearMean(
-            input_size=config.input_dim,
-            batch_shape=torch.Size([config.batch_size])), # TODO: Fix BAtch shape Size
+            input_size=config.input_dim, batch_shape=torch.Size([config.batch_size])
+        ),  # TODO: Fix BAtch shape Size
         "braun_blanquet": BraunBlanquetKernel(),
         "dice": DiceKernel(),
         "rbf": RBFKernel(),
@@ -178,12 +235,50 @@ def get_kernel(kernel_name: str, config=None):
         raise ValueError(f"Unknown kernel: {kernel_name}")
 
 
+def get_gp_model(config, train_loader, likelihood):
+    # Initialize the GP model
+    model_kwargs = dict(
+        mean_kernel=get_kernel(config.mean_kernel),
+        covar_kernel=get_kernel(config.covar_kernel),
+        num_tasks=config.num_tasks,
+        rank=config.rank,
+        use_spectral_norm=config.use_spectral_norm,
+    )
+
+    if config.gp_type.lower() == "exact":
+        model = MultitaskExactGP(
+            train_loader.dataset.x_data,
+            train_loader.dataset.y_data,
+            likelihood,
+            **model_kwargs,
+        )
+
+    elif config.gp_type.lower() == "variational":
+        model = MultitaskSVGP(
+            train_loader.dataset.x_data[: config.num_inducing_points],
+            num_tasks=config.num_tasks,
+            **model_kwargs,
+        )
+
+    else:
+        raise ValueError(f"Unknown type: {config.gp_type}")
+
+    return model
+
+
 # Train the model
-def train(model, likelihood, loader, optimizer, gp_type="exact", dnn_featurizer=False):
+def train(model, likelihood, loader, optimizer, config):
+    # , gp_type="exact", dnn_featurizer=False):
     # Get into training mode
     model.train()
     likelihood.train()
-    mll = get_mll(model, likelihood, loader=loader, gp_type=gp_type, dnn_featurizer=dnn_featurizer)
+    mll = get_mll(
+        model,
+        likelihood,
+        loader=loader,
+        gp_type=config.gp_type,
+        dnn_featurizer=config.dnn_featurizer,
+    )
     total_loss = 0.0
     for inputs, targets in loader:
         inputs, targets = inputs.to(device), targets.to(device)
@@ -202,11 +297,25 @@ def train(model, likelihood, loader, optimizer, gp_type="exact", dnn_featurizer=
 
 
 # Evaluation loop
-def evaluate(model, likelihood, loader, gp_type="exact", dnn_featurizer=False, return_targets=False):
+def evaluate(
+    model,
+    likelihood,
+    loader,
+    config=wandb.config,
+    # gp_type="exact",
+    # dnn_featurizer=False,
+    return_targets=False,
+):
     # Get into evaluation (predictive posterior) mode
     model.eval()
     likelihood.eval()
-    mll = get_mll(model, likelihood, loader=loader, gp_type=gp_type, dnn_featurizer=dnn_featurizer)
+    mll = get_mll(
+        model,
+        likelihood,
+        loader=loader,
+        gp_type=config.gp_type,
+        dnn_featurizer=config.dnn_featurizer,
+    )
     total_loss = 0.0
     outputs_all = []
     targets_all = []
@@ -219,7 +328,7 @@ def evaluate(model, likelihood, loader, gp_type="exact", dnn_featurizer=False, r
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = likelihood(model(inputs))
-            loss = - mll(outputs, targets)
+            loss = -mll(outputs, targets)
             total_loss += loss.item()
             means = outputs.mean
             lower, upper = outputs.confidence_region()
@@ -240,16 +349,26 @@ def evaluate(model, likelihood, loader, gp_type="exact", dnn_featurizer=False, r
 
     if return_targets:
         targets_all = torch.cat(targets_all, dim=0)
-        return total_loss, rmse, r2, evs, outputs_all, means_all, lowers_all, uppers_all, targets_all
+        return (
+            total_loss,
+            rmse,
+            r2,
+            evs,
+            outputs_all,
+            means_all,
+            lowers_all,
+            uppers_all,
+            targets_all,
+        )
 
     return total_loss, rmse, r2, evs, outputs_all, means_all, lowers_all, uppers_all
 
 
 def predict(
-        model,
-        likelihood,
-        loader,
-        return_targets=False,
+    model,
+    likelihood,
+    loader,
+    return_targets=False,
 ):
     model.eval()
     likelihood.eval()
@@ -283,38 +402,53 @@ def predict(
 
 
 def initial_evaluation(
-        model,
-        likelihood,
-        train_loader,
-        val_loader,
-        gp_type="exact",
-        dnn_featurizer=False,
-        # return_targets=False
+    model,
+    likelihood,
+    train_loader,
+    val_loader,
+    config=wandb.config,
+    # gp_type="exact",
+    # dnn_featurizer=False,
+    # return_targets=False
 ):
-    val_loss, val_rmse, val_r2, val_evs, outputs_all, means_all, lowers_all, uppers_all = evaluate(model, likelihood, val_loader, gp_type, dnn_featurizer)
-    train_loss, _, _, _, _, _, _, _ = evaluate(model, likelihood, train_loader, gp_type, dnn_featurizer)
+    (
+        val_loss,
+        val_rmse,
+        val_r2,
+        val_evs,
+        outputs_all,
+        means_all,
+        lowers_all,
+        uppers_all,
+    ) = evaluate(model, likelihood, val_loader, config)
+    train_loss, _, _, _, _, _, _, _ = evaluate(model, likelihood, train_loader, config)
     return train_loss, val_loss, val_rmse, val_r2, val_evs
     # return train_loss, val_loss, val_rmse, val_r2, val_evs
 
 
 def run_epoch(
-        model,
-        likelihood,
-        train_loader,
-        val_loader,
-        optimizer,
-        lr_scheduler=None,
-        epoch=0,
-        gp_type="exact",
-        dnn_featurizer=False,
+    model,
+    likelihood,
+    train_loader,
+    val_loader,
+    optimizer,
+    lr_scheduler=None,
+    epoch=0,
+    config=wandb.config,
+    # gp_type="exact",
+    # dnn_featurizer=False,
 ):
     if epoch == 0:
         # Perform evaluation before training starts (epoch 0)
-        train_loss, val_loss, val_rmse, val_r2, val_evs = initial_evaluation(model, likelihood, train_loader, val_loader, gp_type, dnn_featurizer)
+        train_loss, val_loss, val_rmse, val_r2, val_evs = initial_evaluation(
+            model, likelihood, train_loader, val_loader, config
+        )
 
     else:
-        train_loss = train(model, likelihood, train_loader, optimizer, gp_type, dnn_featurizer)
-        val_loss, val_rmse, val_r2, val_evs, _, _, _, _ = evaluate(model, likelihood, val_loader, gp_type, dnn_featurizer)
+        train_loss = train(model, likelihood, train_loader, optimizer, config)
+        val_loss, val_rmse, val_r2, val_evs, _, _, _, _ = evaluate(
+            model, likelihood, val_loader, config
+        )
         if lr_scheduler is not None:
             # Update the learning rate
             lr_scheduler.step(val_loss)
@@ -323,18 +457,108 @@ def run_epoch(
 
 
 def train_gp_model(
-        datasets=None,
-        config: Union[str, dict] = 'uqdd/config/gp/gp.json',
-        activity: str = 'xc50',
-        split: str = 'random',
-        wandb_project_name: str = 'gp-test',
-        gp_type: str = 'exact',
-        dnn_featurizer: bool = False,
-        seed: int = 42,
-        **kwargs
+    train_loader,
+    val_loader,
+    config=wandb.config,
+):
+    try:
+        set_seed(config.seed)
+        # deterministic cuda algorithms
+        torch.backends.cudnn.deterministic = True
+
+        likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
+            num_tasks=num_tasks
+        )
+
+        model = get_gp_model(config, train_loader, likelihood)
+
+        # move them to device
+        model = model.to(device)
+        likelihood = likelihood.to(device)
+        # Temporarily initialize best_model
+        best_model = model
+
+        # Initialize the optimizer
+        optimizer = build_optimizer(
+            model, config.optimizer, config.learning_rate, config.weight_decay
+        )
+
+        # Define Learning rate scheduler
+        lr_scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=config.lr_factor,
+            patience=config.lr_patience,
+            verbose=True,
+        )
+
+        # Train the model
+        best_val_loss = float("inf")
+        early_stop_counter = 0
+
+        for epoch in tqdm(range(config.num_epochs + 1)):
+            try:
+                epoch, train_loss, val_loss, val_rmse, val_r2, val_evs = run_epoch(
+                    model,
+                    likelihood,
+                    train_loader,
+                    val_loader,
+                    optimizer,
+                    lr_scheduler,
+                    epoch=epoch,
+                    config=config,
+                )
+
+                # Log the metrics
+                wandb.log(
+                    data={
+                        "epoch": epoch,
+                        "train/loss": train_loss,
+                        "val/loss": val_loss,
+                        "val/rmse": val_rmse,
+                        "val/r2": val_r2,
+                    }
+                )
+                # Early stopping
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    early_stop_counter = 0
+                    # Save the best model - dropped to avoid memory issues
+                    # Update the best model and its performance
+                    best_model = model
+                else:
+                    early_stop_counter += 1
+                    if early_stop_counter > config.early_stop:
+                        break
+            except Exception as e:
+                raise RuntimeError(
+                    f"The following exception occurred inside the epoch loop {e}"
+                )
+
+        # Save the best model
+        save_models(config, best_model, None, onnx=True)
+
+        return best_model, likelihood
+
+    except Exception as e:
+        raise RuntimeError(f"The following exception occurred in train_model {e}")
+
+
+def run_gp_model(
+    datasets=None,
+    config=None,
+    activity="xc50",
+    split="random",
+    wandb_project_name=f"{today}-gp-test",
+    **kwargs,
 ):
     # Load the config
-    config = get_config(config=config, activity=activity, split=split, gp_type=gp_type, dnn_featurizer=dnn_featurizer, **kwargs)
+    config = get_config(
+        config=config,
+        activity=activity,
+        split=split,
+        **kwargs,
+    )
 
     # Load the dataset
     if datasets is None:
@@ -345,53 +569,143 @@ def train_gp_model(
 
     # Initialize wandb
     with wandb.init(
-            dir=LOG_DIR,
-            project=f'{wandb_project_name}',
+        dir=LOG_DIR,
+        project=f"{wandb_project_name}",
+        config=config,
+        reinit=True,
+        save_code=True,
+    ) as run:
+        config = wandb.config
+        run.tags = (
+            [
+                f"{activity}",
+                f"{split}",
+                f"{config.gp_type}",
+                f"featurizer_{'with_dnn' if config.dnn_featurizer else 'gp_direct'}",
+            ],
+        )
+        run.name = (
+            f"{today}_gp_{config.gp_type}-{'with_dnn' if config.dnn_featurizer else ''}_{activity}_{split}_{wandb_project_name}",
+        )  # group
+
+        # Initialize the table to store the metrics
+        uct_metrics_logger = UCTMetricsTable(
+            model_type="gaussian_processes", config=config
+        )
+
+        # load the data
+        train_loader, val_loader, test_loader = build_loader(
+            datasets, config.batch_size, config.input_dim
+        )
+
+        # Train the model
+        best_model, likelihood = train_gp_model(
+            train_loader,
+            val_loader,
             config=config,
-            tags=[f'{activity}', f'{split}', f'{gp_type}', f'{dnn_featurizer}'],
-            name=f"{today}_gp_{gp_type}-{'with_dnn' if dnn_featurizer else ''}_{activity}_{split}_{wandb_project_name}", # group
-            reinit=True,
-            save_code=True,
-    ): # as run:
+        )
+
+        # Testing metrics on the best model using evaluate
+        test_loss, test_rmse, test_r2, test_evs, _, _, _, _ = evaluate(
+            best_model, likelihood, test_loader, config
+        )
+
+        # Log the final test metrics
+        wandb.log(
+            {
+                "test/loss": test_loss,
+                "test/rmse": test_rmse,
+                "test/r2": test_r2,
+                "test/evs": test_evs,
+            }
+        )
+
+        # Predictions
+        gp_preds, targets = predict(
+            best_model, likelihood, test_loader, return_targets=True
+        )
+
+        y_pred, y_std, y_true = process_preds(gp_preds, targets, None)
+
+        # Calculate and log the metrics
+        metrics = uct_metrics_logger(
+            y_pred=y_pred, y_std=y_std, y_true=y_true, task_name="All 20 Targets"
+        )
+
+        for task_idx in range(len(tasks)):
+            task_y_pred, task_y_std, task_y_true = process_preds(
+                gp_preds, targets, task_idx=task_idx
+            )
+
+            # Calculate and log the metrics
+            task_name = tasks[task_idx]
+            metrics = uct_metrics_logger(
+                y_pred=task_y_pred,
+                y_std=task_y_std,
+                y_true=task_y_true,
+                task_name=task_name,
+            )
+
+        uct_metrics_logger.wandb_log()
+
+
+def _train_gp_model(
+    datasets=None,
+    config: Union[str, dict] = "uqdd/config/gp/gp.json",
+    activity: str = "xc50",
+    split: str = "random",
+    wandb_project_name: str = "gp-test",
+    gp_type: str = "exact",
+    dnn_featurizer: bool = False,
+    seed: int = 42,
+    **kwargs,
+):
+    # Load the config
+    config = get_config(
+        config=config,
+        activity=activity,
+        split=split,
+        gp_type=gp_type,
+        dnn_featurizer=dnn_featurizer,
+        **kwargs,
+    )
+
+    # Load the dataset
+    if datasets is None:
+        datasets = get_datasets(activity=activity, split=split)
+
+    # Get tasks names:
+    tasks = get_tasks(activity=activity, split=split)
+
+    # Initialize wandb
+    with wandb.init(
+        dir=LOG_DIR,
+        project=f"{wandb_project_name}",
+        config=config,
+        tags=[f"{activity}", f"{split}", f"{gp_type}", f"{dnn_featurizer}"],
+        name=f"{today}_gp_{gp_type}-{'with_dnn' if dnn_featurizer else ''}_{activity}_{split}_{wandb_project_name}",  # group
+        reinit=True,
+        save_code=True,
+    ):  # as run:
         # Set the seed
         set_seed(seed)
         config = wandb.config
 
         # Initialize the table to store the metrics
-        uct_metrics_logger = UCTMetricsTable(model_type="gaussian_process", config=config)
-
-
-        train_loader, val_loader, test_loader = build_loader(datasets, config.batch_size, config.input_dim)
-
-        likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=num_tasks)
-
-        # Initialize the GP model
-        model_kwargs = dict(
-            mean_kernel=get_kernel(config.mean_kernel),
-            covar_kernel=get_kernel(config.covar_kernel),
-            num_tasks=config.num_tasks,
-            rank=config.rank,
-            use_spectral_norm=config.use_spectral_norm
+        uct_metrics_logger = UCTMetricsTable(
+            model_type="gaussian_process", config=config
         )
 
-        if gp_type.lower() == "exact":
-            model = MultitaskExactGP(
-                train_loader.dataset.x_data,
-                train_loader.dataset.y_data,
-                likelihood,
-                **model_kwargs
-            )
-
-        elif gp_type.lower() == "variational":
-            model = MultitaskSVGP(
-                train_loader.dataset.x_data[:config.num_inducing_points],
-                num_tasks=num_tasks
-            )
-
-        else:
-            raise ValueError(f"Unknown type: {gp_type}")
+        train_loader, val_loader, test_loader = build_loader(
+            datasets, config.batch_size, config.input_dim
+        )
 
         # move them to device
+        likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(
+            num_tasks=num_tasks
+        )
+
+        model = get_gp_model(config, train_loader, likelihood)
         model = model.to(device)
         likelihood = likelihood.to(device)
 
@@ -399,19 +713,21 @@ def train_gp_model(
         best_model = model
 
         # Initialize the optimizer
-        optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+        optimizer = build_optimizer(
+            model, config.optimizer, config.learning_rate, config.weight_decay
+        )
 
         # Define Learning rate scheduler
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
-            mode='min',
+            mode="min",
             factor=config.lr_factor,
             patience=config.lr_patience,
-            verbose=True
+            verbose=True,
         )
 
         # Train the model
-        best_val_loss = float('inf')
+        best_val_loss = float("inf")
         early_stop_counter = 0
         # Train the model
         for epoch in tqdm(range(config.num_epochs + 1)):
@@ -425,16 +741,16 @@ def train_gp_model(
                     lr_scheduler,
                     epoch=epoch,
                     gp_type=config.gp_type,
-                    dnn_featurizer=config.dnn_featurizer
+                    dnn_featurizer=config.dnn_featurizer,
                 )
                 # Log the metrics
                 wandb.log(
                     data={
-                        'epoch': epoch,
-                        'train/loss': train_loss,
-                        'val/loss': val_loss,
-                        'val/rmse': val_rmse,
-                        'val/r2': val_r2,
+                        "epoch": epoch,
+                        "train/loss": train_loss,
+                        "val/loss": val_loss,
+                        "val/rmse": val_rmse,
+                        "val/r2": val_r2,
                     }
                 )
 
@@ -451,32 +767,40 @@ def train_gp_model(
                     if early_stop_counter > config.early_stop:
                         break
             except Exception as e:
-                raise RuntimeError(f"The following exception occurred inside the epoch loop {e}")
-                #
-                # # Calculate and log the metrics
-                # # task_name =
-                # metrics = uct_metrics_logger(
-                #     y_pred=y_pred,
-                #     y_std=y_std,
-                #     y_true=y_true,
-                #     task_name="All 20 Targets"
-                # )
-                # for task_idx in range(len(tasks)):
-                #     task_y_pred, task_y_std, task_y_true = process_preds(ensemble_preds, targets, task_idx=task_idx)
-                #
-                #     # Calculate and log the metrics
-                #     task_name = tasks[task_idx]
-                #     metrics = uct_metrics_logger(
-                #         y_pred=task_y_pred,
-                #         y_std=task_y_std,
-                #         y_true=task_y_true,
-                #         task_name=task_name
-                #     )
-                #
-                # uct_metrics_logger.wandb_log()
+                raise RuntimeError(
+                    f"The following exception occurred inside the epoch loop {e}"
+                )
 
+
+def run_gp():
+    pass
+
+    #
+    # # Calculate and log the metrics
+    # # task_name =
+    # metrics = uct_metrics_logger(
+    #     y_pred=y_pred,
+    #     y_std=y_std,
+    #     y_true=y_true,
+    #     task_name="All 20 Targets"
+    # )
+    # for task_idx in range(len(tasks)):
+    #     task_y_pred, task_y_std, task_y_true = process_preds(ensemble_preds, targets, task_idx=task_idx)
+    #
+    #     # Calculate and log the metrics
+    #     task_name = tasks[task_idx]
+    #     metrics = uct_metrics_logger(
+    #         y_pred=task_y_pred,
+    #         y_std=task_y_std,
+    #         y_true=task_y_true,
+    #         task_name=task_name
+    #     )
+    #
+    # uct_metrics_logger.wandb_log()
 
     # pass
+
+
 # def plot_uncertainties():
 
 
