@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 # noinspection PyUnresolvedReferences
 from rdkit.Chem.rdchem import Mol as RdkitMol
+from transformers import AutoTokenizer, AutoModel
 
 string_types = (type(b""), type(""))
 
@@ -289,6 +290,17 @@ def check_nan_duplicated(
 
     return df_filtered, df_nan, df_dup
 
+
+def transformer_featurizer(
+        input_str,
+        model_name="dmis-lab/biobert-v1.1"
+):
+    tokenizer = AutoTokenizer.from_pretrained(model_name, padding=True, truncation=True, max_length=1024)
+    model = AutoModel.from_pretrained(model_name)
+    tokens = tokenizer(input_str, return_tensors="pt")
+    outputs = model(**tokens)
+    embeddings = outputs.last_hidden_state.mean(dim=1)
+    return embeddings.detach().cpu().numpy()
 
 # def setup_primary_logging(log_file, level):
 #     log_queue = Queue(-1)

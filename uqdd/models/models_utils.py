@@ -347,10 +347,11 @@ def get_config(
         "weight_decay": 0.001,
         "seed": 42,
         "split": "scaffold",
-        "ensemble_size": 10
+        # "ensemble_size": 10
     }
 
     if config is None:
+        # TODO: This is wrong - it will only work with Ensemble that way.
         config = default_config
     elif isinstance(config, dict):
         pass
