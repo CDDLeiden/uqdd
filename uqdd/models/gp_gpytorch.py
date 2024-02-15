@@ -10,7 +10,7 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.variational import CholeskyVariationalDistribution, VariationalStrategy
 from gpytorch.kernels import RBFKernel, ScaleKernel, Kernel, MultitaskKernel, SpectralDeltaKernel, SpectralMixtureKernel
 from uqdd.models.gp_kernels_gpytorch import TanimotoKernel
-from uqdd.models.baselines import BaselineDNN
+from uqdd.models.baselines import MTBaselineDNN
 
 class GPLayer(ExactGP):
     def __init__(self, train_x, train_y, likelihood, kernel):
@@ -78,7 +78,7 @@ class BaselineDNNwithGP(nn.Module):
     ):
         super(BaselineDNNwithGP, self).__init__()
         # Define the DNN part
-        baseline_dnn = BaselineDNN(input_dim=input_dim, hidden_dim_1=hidden_dims[0], hidden_dim_2=hidden_dims[1], hidden_dim_3=hidden_dims[2])
+        baseline_dnn = MTBaselineDNN(input_dim=input_dim, hidden_dim_1=hidden_dims[0], hidden_dim_2=hidden_dims[1], hidden_dim_3=hidden_dims[2])
         self.feature_extractor = baseline_dnn.feature_extractor # existing DNN architecture without the last layer
         # Define the GP part
         self.gp_layer = MultitaskSVGP(inducing_points, num_tasks, mean_kernel=mean_kernel, covar_kernel=covar_kernel)

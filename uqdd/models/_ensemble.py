@@ -8,9 +8,9 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from uqdd.models.models_utils import get_config, set_seed, build_loader, build_optimizer, build_loss, save_models, \
+from uqdd.models.models_utils import get_model_config, set_seed, build_loader, build_optimizer, build_loss, save_models, \
     calc_loss_notnan, calc_regr_metrics, get_datasets, MultiTaskLoss
-from uqdd.models.baselines import BaselineDNN, train, evaluate
+from uqdd.models.baselines import MTBaselineDNN, train, evaluate
 
 from torchensemble import FusionRegressor, VotingRegressor, BaggingRegressor, GradientBoostingRegressor, \
     NeuralForestRegressor, SnapshotEnsembleRegressor, AdversarialTrainingRegressor, FastGeometricRegressor, \
@@ -56,7 +56,7 @@ def build_ensemble(config=wandb.config):
 
     for _ in range(config.ensemble_size):
         set_seed(seed)
-        model = BaselineDNN(
+        model = MTBaselineDNN(
             config.input_dim,
             config.hidden_dim_1,
             config.hidden_dim_2,
@@ -84,7 +84,7 @@ def run_ensemble(
         # loss_fn,
 ):
     # Load the config
-    config = get_config(config=config, activity=activity, split=split, ensemble_size=ensemble_size, **kwargs)
+    config = get_model_config(config=config, activity=activity, split=split, ensemble_size=ensemble_size, **kwargs)
 
     # Load the dataset
     if datasets is None:
@@ -103,7 +103,7 @@ def run_ensemble(
         # Define the data loaders
         train_loader, val_loader, test_loader = build_loader(datasets, config.batch_size, config.input_dim)
         # Define the ensemble models
-        model = BaselineDNN(
+        model = MTBaselineDNN(
             config.input_dim,
             config.hidden_dim_1,
             config.hidden_dim_2,
@@ -328,7 +328,7 @@ def ensemble_pipeline(config=wandb.config, wandb_project_name="test-project"):
         train_loader, val_loader, test_loader = build_loader(config)
 
         # Load the model
-        model = BaselineDNN(
+        model = MTBaselineDNN(
             input_dim=config.input_dim,
             hidden_dim_1=config.hidden_dim_1,
             hidden_dim_2=config.hidden_dim_2,

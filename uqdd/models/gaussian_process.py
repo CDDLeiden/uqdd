@@ -17,11 +17,11 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from uqdd.models.models_utils import set_seed, get_config, get_datasets, get_tasks
+from uqdd.models.models_utils import set_seed, get_model_config, get_datasets, get_tasks
 from uqdd.models.models_utils import build_loader, build_optimizer, MultiTaskLoss, save_models
 from uqdd.models.models_utils import UCTMetricsTable, process_preds
 
-from uqdd.models.baselines import BaselineDNN, run_epoch, predict
+from uqdd.models.baselines import MTBaselineDNN, run_epoch, predict
 
 # get today's date as yyyy/mm/dd format
 from datetime import date

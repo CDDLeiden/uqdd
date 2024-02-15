@@ -2,8 +2,10 @@ import copy
 import time
 from typing import Union, List, Tuple
 
+from PIL import Image
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 import rdkit
 from rdkit import Chem, RDLogger
 from rdkit.Chem import Draw, AllChem
@@ -51,13 +53,16 @@ def standardize(smi, logger=None, suppress_exception=False):
     ------
     This function applies the following standardization steps to the input SMILES string:
 
-    1. Functional Groups Normalization: The input SMILES string is converted to a molecule object, and any functional groups present are normalized to a standard representation.
-    2. Sanitization: The molecule is sanitized, which involves performing various checks and corrections to ensure that it is well-formed.
+    1. Functional Groups Normalization: The input SMILES string is converted to a molecule object,
+    and any functional groups present are normalized to a standard representation.
+    2. Sanitization: The molecule is sanitized, which involves performing various checks
+    and corrections to ensure that it is well-formed.
     3. Neutralization: Any charges on the molecule are neutralized.
     4. Parent Tautomer: The canonical tautomer of the molecule is determined.
 
     This function uses the RDKit library for performing standardization.
-    implementation source: https://github.com/greglandrum/RSC_OpenScience_Standardization_202104/blob/main/MolStandardize%20pieces.ipynb
+    implementation source:
+    https://github.com/greglandrum/RSC_OpenScience_Standardization_202104/blob/main/MolStandardize%20pieces.ipynb
     """
     if smi is None:
         return None
@@ -73,10 +78,6 @@ def standardize(smi, logger=None, suppress_exception=False):
         uncharger = rdMolStandardize.Uncharger()
         mol = uncharger.uncharge(rdMolStandardize.FragmentParent(mol))
 
-        # # Parent Tautomer
-        # tautomer = rdMolStandardize.TautomerEnumerator()
-        # mol = tautomer.Canonicalize(mol)
-
     except Exception as e:
         if logger:
             logger.error(f"StandardizationError: {e} for {og_smiles}")
@@ -86,12 +87,6 @@ def standardize(smi, logger=None, suppress_exception=False):
             return None
 
     return Chem.MolToSmiles(mol)
-
-    # m = Chem.MolFromSmiles(smi, sanitize=False)
-    # m.UpdatePropertyCache(strict=False)
-    # Chem.SanitizeMol(m, sanitizeOps=(Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES))
-    # cm = rdMolStandardize.Normalize(m)
-    # ms.extend([m, cm])
 
 
 def standardize_df(
@@ -146,7 +141,8 @@ def standardize_df(
 
     Notes:
     ------
-    This function applies the `standardize` function to each SMILES string in the 'smiles' column of the input dataframe,
+    This function applies the `standardize` function to each SMILES string in the 'smiles' column
+    of the input dataframe,
     and replaces the column with the standardized versions.
     """
     aggregate = None
@@ -159,10 +155,6 @@ def standardize_df(
         cols_dup = [smiles_col, *other_dup_col]
     else:
         cols_dup = smiles_col
-    #
-    # orig_df = (
-    #     df.copy()
-    # )  # having access to original df for retrieving the original SMILES
 
     # checking NaN & duplicate before standardization
     df_filtered, df_nan_before, df_dup_before = check_nan_duplicated(
@@ -226,10 +218,6 @@ def standardize_df(
     # concat the nan and dup dataframes
     df_nan = pd.concat([df_nan_before, df_nan_after])
     df_dup = pd.concat([df_dup_before, df_dup_after])
-    #
-    # if retrieve_original_smiles:
-    #     df_nan["original_smiles"] = orig_df.loc[df_nan.index, smiles_col]
-    #     df_dup["original_smiles"] = orig_df.loc[df_dup.index, smiles_col]
 
     if aggregate:
         # aggregate the duplicates
@@ -241,7 +229,7 @@ def standardize_df(
 
 
 # define function that transforms SMILES strings into ECFPs
-def ECFP_from_smiles(
+def ecfp_from_smiles(
         smiles,
         radius=2,
         length=2 ** 10,
@@ -274,15 +262,18 @@ def ECFP_from_smiles(
     Notes:
     ------
     This function uses the RDKit library for generating ECFP fingerprints.
-    source: https://www.blopig.com/blog/2022/11/how-to-turn-a-smiles-string-into-an-extended-connectivity-fingerprint-using-rdkit/
+    source:
+    https://www.blopig.com/blog/2022/11/how-to-turn-a-smiles-string-into-an-extended-connectivity-fingerprint-using-rdkit/
     """
 
     molecule = AllChem.MolFromSmiles(smiles)
-    feature_list = AllChem.GetMorganFingerprintAsBitVect(molecule,
-                                                         radius=radius,
-                                                         nBits=length,
-                                                         useFeatures=use_features,
-                                                         useChirality=use_chirality)
+    feature_list = AllChem.GetMorganFingerprintAsBitVect(
+        molecule,
+        radius=radius,
+        nBits=length,
+        useFeatures=use_features,
+        useChirality=use_chirality
+    )
     return np.array(feature_list)
 
 
@@ -313,56 +304,60 @@ def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chiralit
 
     Notes:
     ------
-    This function applies the `ECFP_from_smiles` function to each SMILES string in the 'smiles' column of the input dataframe,
-    and generates ECFP fingerprints with the specified radius, length, and optional parameters. The resulting fingerprints
-    are stored in columns named 'ECFP-{length}', where {length} is the specified fingerprint length.
+    This function applies the `ECFP_from_smiles` function to each
+    SMILES string in the 'smiles' column of the input dataframe,
+    and generates ECFP fingerprints with the specified radius, length,
+    and optional parameters. The resulting fingerprints are stored in columns named 'ECFP-{length}',
+    where {length} is the specified fingerprint length.
     """
     # Generate ECFP fingerprints
     # for length in [2 ** i for i in range(5, 12)]:
 
-    df[f'ecfp{length}'] = df[smiles_col].apply(lambda x: ECFP_from_smiles(x, radius=radius,
-                                                                        length=length,
-                                                                        use_features=use_features,
-                                                                        use_chirality=use_chirality))  # df[f'ECFP-{radius}-{length}']
+    df[f'ecfp{length}'] = df[smiles_col].apply(
+        lambda x: ecfp_from_smiles(
+            x, radius=radius, length=length, use_features=use_features, use_chirality=use_chirality
+        ))
 
     return df
 
 
-descriptors = ['BalabanJ', 'BertzCT', 'Chi0', 'Chi0n', 'Chi0v', 'Chi1', 'Chi1n', 'Chi1v', 'Chi2n', 'Chi2v',
-               'Chi3n', 'Chi3v', 'Chi4n', 'Chi4v', 'EState_VSA1', 'EState_VSA10', 'EState_VSA11',
-               'EState_VSA2', 'EState_VSA3', 'EState_VSA4', 'EState_VSA5', 'EState_VSA6', 'EState_VSA7',
-               'EState_VSA8', 'EState_VSA9', 'ExactMolWt', 'FpDensityMorgan1', 'FpDensityMorgan2',
-               'FpDensityMorgan3', 'FractionCSP3', 'HallKierAlpha', 'HeavyAtomCount', 'HeavyAtomMolWt',
-               'Ipc', 'Kappa1', 'Kappa2', 'Kappa3', 'LabuteASA', 'MaxAbsEStateIndex',
-               'MaxAbsPartialCharge',
-               'MaxEStateIndex', 'MaxPartialCharge', 'MinAbsEStateIndex', 'MinAbsPartialCharge',
-               'MinEStateIndex', 'MinPartialCharge', 'MolLogP', 'MolMR', 'MolWt', 'NHOHCount', 'NOCount',
-               'NumAliphaticCarbocycles', 'NumAliphaticHeterocycles', 'NumAliphaticRings',
-               'NumAromaticCarbocycles', 'NumAromaticHeterocycles', 'NumAromaticRings', 'NumHAcceptors',
-               'NumHDonors', 'NumHeteroatoms', 'NumRadicalElectrons', 'NumRotatableBonds',
-               'NumSaturatedCarbocycles', 'NumSaturatedHeterocycles', 'NumSaturatedRings',
-               'NumValenceElectrons', 'PEOE_VSA1', 'PEOE_VSA10', 'PEOE_VSA11', 'PEOE_VSA12', 'PEOE_VSA13',
-               'PEOE_VSA14', 'PEOE_VSA2', 'PEOE_VSA3', 'PEOE_VSA4', 'PEOE_VSA5', 'PEOE_VSA6', 'PEOE_VSA7',
-               'PEOE_VSA8', 'PEOE_VSA9', 'RingCount', 'SMR_VSA1', 'SMR_VSA10', 'SMR_VSA2', 'SMR_VSA3',
-               'SMR_VSA4', 'SMR_VSA5', 'SMR_VSA6', 'SMR_VSA7', 'SMR_VSA8', 'SMR_VSA9', 'SlogP_VSA1',
-               'SlogP_VSA10', 'SlogP_VSA11', 'SlogP_VSA12', 'SlogP_VSA2', 'SlogP_VSA3', 'SlogP_VSA4',
-               'SlogP_VSA5', 'SlogP_VSA6', 'SlogP_VSA7', 'SlogP_VSA8', 'SlogP_VSA9', 'TPSA', 'VSA_EState1',
-               'VSA_EState10', 'VSA_EState2', 'VSA_EState3', 'VSA_EState4', 'VSA_EState5', 'VSA_EState6',
-               'VSA_EState7', 'VSA_EState8', 'VSA_EState9', 'fr_Al_COO', 'fr_Al_OH', 'fr_Al_OH_noTert',
-               'fr_ArN', 'fr_Ar_COO', 'fr_Ar_N', 'fr_Ar_NH', 'fr_Ar_OH', 'fr_COO', 'fr_COO2', 'fr_C_O',
-               'fr_C_O_noCOO', 'fr_C_S', 'fr_HOCCN', 'fr_Imine', 'fr_NH0', 'fr_NH1', 'fr_NH2', 'fr_N_O',
-               'fr_Ndealkylation1', 'fr_Ndealkylation2', 'fr_Nhpyrrole', 'fr_SH', 'fr_aldehyde',
-               'fr_alkyl_carbamate', 'fr_alkyl_halide', 'fr_allylic_oxid', 'fr_amide', 'fr_amidine',
-               'fr_aniline', 'fr_aryl_methyl', 'fr_azide', 'fr_azo', 'fr_barbitur', 'fr_benzene',
-               'fr_benzodiazepine', 'fr_bicyclic', 'fr_diazo', 'fr_dihydropyridine', 'fr_epoxide',
-               'fr_ester', 'fr_ether', 'fr_furan', 'fr_guanido', 'fr_halogen', 'fr_hdrzine', 'fr_hdrzone',
-               'fr_imidazole', 'fr_imide', 'fr_isocyan', 'fr_isothiocyan', 'fr_ketone', 'fr_ketone_Topliss',
-               'fr_lactam', 'fr_lactone', 'fr_methoxy', 'fr_morpholine', 'fr_nitrile', 'fr_nitro',
-               'fr_nitro_arom', 'fr_nitro_arom_nonortho', 'fr_nitroso', 'fr_oxazole', 'fr_oxime',
-               'fr_para_hydroxylation', 'fr_phenol', 'fr_phenol_noOrthoHbond', 'fr_phos_acid',
-               'fr_phos_ester', 'fr_piperdine', 'fr_piperzine', 'fr_priamide', 'fr_prisulfonamd',
-               'fr_pyridine', 'fr_quatN', 'fr_sulfide', 'fr_sulfonamd', 'fr_sulfone', 'fr_term_acetylene',
-               'fr_tetrazole', 'fr_thiazole', 'fr_thiocyan', 'fr_thiophene', 'fr_unbrch_alkane', 'fr_urea', 'qed']
+descriptors = [
+    'BalabanJ', 'BertzCT', 'Chi0', 'Chi0n', 'Chi0v', 'Chi1', 'Chi1n', 'Chi1v', 'Chi2n', 'Chi2v',
+    'Chi3n', 'Chi3v', 'Chi4n', 'Chi4v', 'EState_VSA1', 'EState_VSA10', 'EState_VSA11',
+    'EState_VSA2', 'EState_VSA3', 'EState_VSA4', 'EState_VSA5', 'EState_VSA6', 'EState_VSA7',
+    'EState_VSA8', 'EState_VSA9', 'ExactMolWt', 'FpDensityMorgan1', 'FpDensityMorgan2',
+    'FpDensityMorgan3', 'FractionCSP3', 'HallKierAlpha', 'HeavyAtomCount', 'HeavyAtomMolWt',
+    'Ipc', 'Kappa1', 'Kappa2', 'Kappa3', 'LabuteASA', 'MaxAbsEStateIndex',
+    'MaxAbsPartialCharge',
+    'MaxEStateIndex', 'MaxPartialCharge', 'MinAbsEStateIndex', 'MinAbsPartialCharge',
+    'MinEStateIndex', 'MinPartialCharge', 'MolLogP', 'MolMR', 'MolWt', 'NHOHCount', 'NOCount',
+    'NumAliphaticCarbocycles', 'NumAliphaticHeterocycles', 'NumAliphaticRings',
+    'NumAromaticCarbocycles', 'NumAromaticHeterocycles', 'NumAromaticRings', 'NumHAcceptors',
+    'NumHDonors', 'NumHeteroatoms', 'NumRadicalElectrons', 'NumRotatableBonds',
+    'NumSaturatedCarbocycles', 'NumSaturatedHeterocycles', 'NumSaturatedRings',
+    'NumValenceElectrons', 'PEOE_VSA1', 'PEOE_VSA10', 'PEOE_VSA11', 'PEOE_VSA12', 'PEOE_VSA13',
+    'PEOE_VSA14', 'PEOE_VSA2', 'PEOE_VSA3', 'PEOE_VSA4', 'PEOE_VSA5', 'PEOE_VSA6', 'PEOE_VSA7',
+    'PEOE_VSA8', 'PEOE_VSA9', 'RingCount', 'SMR_VSA1', 'SMR_VSA10', 'SMR_VSA2', 'SMR_VSA3',
+    'SMR_VSA4', 'SMR_VSA5', 'SMR_VSA6', 'SMR_VSA7', 'SMR_VSA8', 'SMR_VSA9', 'SlogP_VSA1',
+    'SlogP_VSA10', 'SlogP_VSA11', 'SlogP_VSA12', 'SlogP_VSA2', 'SlogP_VSA3', 'SlogP_VSA4',
+    'SlogP_VSA5', 'SlogP_VSA6', 'SlogP_VSA7', 'SlogP_VSA8', 'SlogP_VSA9', 'TPSA', 'VSA_EState1',
+    'VSA_EState10', 'VSA_EState2', 'VSA_EState3', 'VSA_EState4', 'VSA_EState5', 'VSA_EState6',
+    'VSA_EState7', 'VSA_EState8', 'VSA_EState9', 'fr_Al_COO', 'fr_Al_OH', 'fr_Al_OH_noTert',
+    'fr_ArN', 'fr_Ar_COO', 'fr_Ar_N', 'fr_Ar_NH', 'fr_Ar_OH', 'fr_COO', 'fr_COO2', 'fr_C_O',
+    'fr_C_O_noCOO', 'fr_C_S', 'fr_HOCCN', 'fr_Imine', 'fr_NH0', 'fr_NH1', 'fr_NH2', 'fr_N_O',
+    'fr_Ndealkylation1', 'fr_Ndealkylation2', 'fr_Nhpyrrole', 'fr_SH', 'fr_aldehyde',
+    'fr_alkyl_carbamate', 'fr_alkyl_halide', 'fr_allylic_oxid', 'fr_amide', 'fr_amidine',
+    'fr_aniline', 'fr_aryl_methyl', 'fr_azide', 'fr_azo', 'fr_barbitur', 'fr_benzene',
+    'fr_benzodiazepine', 'fr_bicyclic', 'fr_diazo', 'fr_dihydropyridine', 'fr_epoxide',
+    'fr_ester', 'fr_ether', 'fr_furan', 'fr_guanido', 'fr_halogen', 'fr_hdrzine', 'fr_hdrzone',
+    'fr_imidazole', 'fr_imide', 'fr_isocyan', 'fr_isothiocyan', 'fr_ketone', 'fr_ketone_Topliss',
+    'fr_lactam', 'fr_lactone', 'fr_methoxy', 'fr_morpholine', 'fr_nitrile', 'fr_nitro',
+    'fr_nitro_arom', 'fr_nitro_arom_nonortho', 'fr_nitroso', 'fr_oxazole', 'fr_oxime',
+    'fr_para_hydroxylation', 'fr_phenol', 'fr_phenol_noOrthoHbond', 'fr_phos_acid',
+    'fr_phos_ester', 'fr_piperdine', 'fr_piperzine', 'fr_priamide', 'fr_prisulfonamd',
+    'fr_pyridine', 'fr_quatN', 'fr_sulfide', 'fr_sulfonamd', 'fr_sulfone', 'fr_term_acetylene',
+    'fr_tetrazole', 'fr_thiazole', 'fr_thiocyan', 'fr_thiophene', 'fr_unbrch_alkane', 'fr_urea', 'qed'
+]
 
 
 def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
@@ -383,7 +378,8 @@ def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
     list of float
         The calculated descriptor values, in the order of the chosen_descriptors list.
 
-    source: https://www.blopig.com/blog/2022/06/how-to-turn-a-molecule-into-a-vector-of-physicochemical-descriptors-using-rdkit/
+    source:
+    https://www.blopig.com/blog/2022/06/how-to-turn-a-molecule-into-a-vector-of-physicochemical-descriptors-using-rdkit/
     """
 
     # convert SMILES string to RDKit mol object
@@ -454,7 +450,7 @@ def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = N
     # return new_df
 
 
-def mol_to_pil_image(molecule: Chem.rdchem.Mol, width: int = 300, height: int = 300) -> "PIL.Image":
+def mol_to_pil_image(molecule: Chem.rdchem.Mol, width: int = 300, height: int = 300) -> Image:
     """
     Converts an RDKit molecule to a PIL image.
 
@@ -480,7 +476,7 @@ def mol_to_pil_image(molecule: Chem.rdchem.Mol, width: int = 300, height: int = 
     return pil_image
 
 
-def smi_to_pil_image(smiles: str, width: int = 300, height: int = 300) -> "PIL.Image":
+def smi_to_pil_image(smiles: str, width: int = 300, height: int = 300) -> Image:
     """
     Converts an RDKit molecule to a PIL image.
 
@@ -523,13 +519,52 @@ def generate_scaffold(smiles, include_chirality=False):
     str
         The scaffold SMILES string.
     """
-    # mol = Chem.MolFromSmiles(smiles)
     try:
         scaffold = MurckoScaffold.MurckoScaffoldSmiles(smiles=smiles, includeChirality=include_chirality)
     except Exception as e:
         scaffold = None
-        print(f"following error {e} \n occured while processing smiles: {smiles}")
+        print(f"following error {e} \n occurred while processing smiles: {smiles}")
     return scaffold
+
+
+def random_split(df: pd.DataFrame, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42):
+    """
+    Splits a DataFrame into training, validation, and test sets based on specified fractions.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        The DataFrame to be split.
+    train_frac : float
+        The fraction of the dataset to be used as the training set.
+    val_frac : float
+        The fraction of the dataset to be used as the validation set.
+    test_frac : float
+        The fraction of the dataset to be used as the test set.
+    seed : int
+        The random seed for reproducible splits.
+
+    Returns:
+    --------
+    train_df : pandas.DataFrame
+        The training dataframe.
+    val_df : pandas.DataFrame
+        The validation dataframe.
+    test_df : pandas.DataFrame
+        The testing dataframe.
+    """
+    # First split: separate the training set from the rest
+    rest_frac = val_frac + test_frac
+    train_df, temp_df = train_test_split(df, test_size=rest_frac, random_state=seed)
+
+    # Adjust the proportion for the second split
+    # The proportion of validation set out of the rest (val + test)
+    adjusted_val_frac = val_frac / rest_frac
+
+    # Second split: separate the validation set from the test set
+    val_df, test_df = train_test_split(temp_df, test_size=1 - adjusted_val_frac, random_state=seed)
+
+    return train_df, val_df, test_df
 
 
 def scaffold_split(df, smiles_col='smiles', train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42):
@@ -560,7 +595,6 @@ def scaffold_split(df, smiles_col='smiles', train_frac=0.7, val_frac=0.15, test_
     test_df : pandas.DataFrame
         The testing dataframe.
     """
-
     # set random seed
     np.random.seed(seed)
 
@@ -588,3 +622,101 @@ def scaffold_split(df, smiles_col='smiles', train_frac=0.7, val_frac=0.15, test_
 
     return train_df, val_df, test_df
 
+
+def time_split(df, time_col='year', train_frac=0.7, val_frac=0.15, test_frac=0.15):
+    """
+    Splits a DataFrame into training, validation, and test sets based on a time column.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The DataFrame to be split.
+    time_col: str
+        The name of the column containing the time information.
+    train_frac: float
+        The fraction of the dataset to be used as the training set.
+    val_frac: float
+        The fraction of the dataset to be used as the validation set.
+    test_frac: float
+        The fraction of the dataset to be used as the test set.
+
+    Returns
+    -------
+    train_df : pandas.DataFrame
+        The training dataframe.
+    val_df : pandas.DataFrame
+        The validation dataframe.
+    test_df : pandas.DataFrame
+        The testing dataframe.
+    """
+    # order df by time_col and split
+    df = df.sort_values(by=time_col)
+    train_df = df.iloc[:int(train_frac * len(df))]
+    val_df = df.iloc[int(train_frac * len(df)):int((train_frac + val_frac) * len(df))]
+    test_df = df.iloc[int((train_frac + val_frac) * len(df)):]
+
+    return train_df, val_df, test_df
+
+
+def split_data(
+        df: pd.DataFrame,
+        split_type: str = 'random',
+        smiles_col: str = 'smiles',
+        time_col: str = 'year',
+        train_frac: float = 0.7,
+        val_frac: float = 0.15,
+        test_frac: float = 0.15,
+        seed: int = 42,
+):
+    """
+    Splits a DataFrame into training, validation, and test sets based on the specified split type.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input dataframe.
+    split_type : str, optional
+        The type of split to use. Options are 'random', 'scaffold', and 'time'. Default is 'random'.
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings. Default is 'smiles'.
+    time_col : str, optional
+        The name of the column containing the time information. Default is 'year'.
+    train_frac : float, optional
+        The fraction of the data to use for training. Default is 0.7.
+    val_frac : float, optional
+        The fraction of the data to use for validation. Default is 0.15.
+    test_frac : float, optional
+        The fraction of the data to use for testing. Default is 0.15.
+    seed : int, optional
+        The random seed to use for splitting the data. Default is 42.
+
+    Returns
+    -------
+    train_df : pandas.DataFrame
+        The training dataframe.
+    val_df : pandas.DataFrame
+        The validation dataframe.
+    test_df : pandas.DataFrame
+        The testing dataframe.
+    """
+    # Validate that the fractions sum up to 1
+    total_frac = train_frac + val_frac + test_frac
+    if total_frac != 1:
+        raise ValueError("The sum of train_frac, val_frac, and test_frac must be 1.")
+
+    if split_type == 'random':
+        train_df, val_df, test_df = random_split(
+            df, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac, seed=seed
+        )
+    elif split_type == 'scaffold':
+        train_df, val_df, test_df = scaffold_split(
+            df, smiles_col=smiles_col, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac, seed=seed
+        )
+    elif split_type == 'time':
+        train_df, val_df, test_df = time_split(
+            df, time_col=time_col, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac
+        )
+    else:
+        raise ValueError("split_type must be one of 'random', 'scaffold', or 'time'.")
+
+    return train_df, val_df, test_df

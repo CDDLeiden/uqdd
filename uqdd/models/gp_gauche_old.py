@@ -5,7 +5,7 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.variational import CholeskyVariationalDistribution, VariationalStrategy
 from gpytorch.kernels import RBFKernel, ScaleKernel, Kernel, MultitaskKernel, SpectralDeltaKernel, SpectralMixtureKernel
 from uqdd.models.gp_kernels_gpytorch import TanimotoKernel
-from uqdd.models.baselines import BaselineDNN
+from uqdd.models.baselines import MTBaselineDNN
 
 from botorch import fit_gpytorch_model
 from gauche.kernels.fingerprint_kernels.tanimoto_kernel import TanimotoKernel

@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # Define paths using pathlib
 DATA_DIR = BASE_DIR / 'data'
+DATASET_DIR = DATA_DIR / 'datasets'
 LOGS_DIR = BASE_DIR / 'logs'
 CONFIG_DIR = BASE_DIR / 'config'
 SCRIPTS_DIR = BASE_DIR / 'run_scripts'
@@ -24,11 +25,23 @@ TODAY = date.today().strftime("%Y%m%d")
 
 WANDB_MODE = 'online'  # 'offline'
 
-__all__ = ['BASE_DIR', 'DATA_DIR', 'LOGS_DIR', 'CONFIG_DIR', 'SCRIPTS_DIR', 'MODELS_DIR', 'FIGS_DIR', 'TODAY', 'DEVICE', 'WANDB_MODE']
+__all__ = [
+    'BASE_DIR',
+    'DATA_DIR',
+    'DATASET_DIR',
+    'LOGS_DIR',
+    'CONFIG_DIR',
+    'SCRIPTS_DIR',
+    'MODELS_DIR',
+    'FIGS_DIR',
+    'TODAY',
+    'DEVICE',
+    'WANDB_MODE'
+]
 
 __author__ = "Bola Khalil"
 __supervisor__ = "Kajetan Schweighofer"
-__contributer__ = "Natalia Dyubankova"
+__contributor__ = "Natalia Dyubankova"
 __copyright__ = "Copyright 2023-2024, Johnson & Johnson and Johannes-Kepler Universität Linz"
 __license__ = "All rights reserved, Johnson & Johnson & Johannes-Kepler Universität Linz"
 __version__ = "0.0.2"

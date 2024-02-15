@@ -1,12 +1,9 @@
 import os
+import json
 from typing import List, Union, Tuple  # , List, Tuple, Any, Set, Dict
 import logging
-import numpy as np
 import pandas as pd
-# noinspection PyUnresolvedReferences
-from rdkit.Chem.rdchem import Mol as RdkitMol
-from transformers import AutoTokenizer, AutoModel
-
+from uqdd import CONFIG_DIR
 string_types = (type(b""), type(""))
 
 
@@ -41,6 +38,22 @@ def create_logger(name="logger", file_level="debug", stream_level="info"):
 
     log.debug(f"Logger {name} initialized")
     return log
+
+
+def get_config(config_name: str, config_dir: str = CONFIG_DIR, **kwargs):
+    config_path = os.path.join(config_dir, f"{config_name}.json")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(
+            f"Config file '{config_path}' does not exist. Ensure the file is present in '{CONFIG_DIR}'."
+        )
+
+    with open(config_path) as f:
+        config = json.load(f)
+
+    if kwargs:
+        config.update(kwargs)
+
+    return config
 
 
 # Define a custom function to aggregate the columns
@@ -86,13 +99,13 @@ def check_na(
 
     Example:
     --------
-    >>> df = pd.DataFrame({'A': [1, 2, np.nan], 'B': [np.nan, 4, 5], 'C': [7, 8, 9]})
-    >>> df_clean, df_nan = check_na(df, cols=['A', 'B'], nan_dup_source='original')
-    >>> print(df_clean)
+    # >>> df = pd.DataFrame({'A': [1, 2, np.nan], 'B': [np.nan, 4, 5], 'C': [7, 8, 9]})
+    # >>> df_clean, df_nan = check_na(df, cols=['A', 'B'], nan_dup_source='original')
+    # >>> print(df_clean)
        A    B  C
     0  1.0  4.0  7
     1  2.0  5.0  8
-    >>> print(df_nan)
+    # >>> print(df_nan)
          A   B  C nan_dup_source
     0  NaN NaN  9       original
     """
@@ -175,13 +188,13 @@ def check_duplicates(
 
         Example:
         --------
-        >>> df = pd.DataFrame({'A': [1, 2, 2], 'B': [4, 5, 4], 'C': [7, 8, 9]})
-        >>> df_clean, df_dup = check_duplicates(df, cols=['A', 'B'], keep='last')
-        >>> print(df_clean)
+        # >>> df = pd.DataFrame({'A': [1, 2, 2], 'B': [4, 5, 4], 'C': [7, 8, 9]})
+        # >>> df_clean, df_dup = check_duplicates(df, cols=['A', 'B'], keep='last')
+        # >>> print(df_clean)
            A  B  C
         0  1  4  7
         2  2  4  9
-        >>> print(df_dup)
+        # >>> print(df_dup)
            A  B  C
         1  2  5  8
         """
@@ -207,10 +220,6 @@ def check_duplicates(
         if nan_dup_source and dup_mask.sum() > 0:
             df_dup.loc[:, "nan_dup_source"] = nan_dup_source
 
-        # num_of_dups = df_dup.shape[0]
-        #
-        # if num_of_dups == 0:
-        #     return df, num_of_dups
         if sorting_col and (not df_dup.empty):
             s_cols = cols + [sorting_col]  # WRONG: s_cols = cols.append(sorting_col)
             df_dup = df_dup.sort_values(by=s_cols, ascending=True)
@@ -261,7 +270,7 @@ def check_nan_duplicated(
     nan_dup_source : str, optional
         The source of NaN or duplicated values, by default "".
     drop : bool, optional
-        Whether or not to drop the duplicated values, by default True.
+        Whether to drop the duplicated values, by default True.
     sorting_col : str, optional
         The column used for sorting in the case of duplicated values, by default "".
     keep : Union[bool, str], optional
@@ -289,37 +298,3 @@ def check_nan_duplicated(
     )
 
     return df_filtered, df_nan, df_dup
-
-
-def transformer_featurizer(
-        input_str,
-        model_name="dmis-lab/biobert-v1.1"
-):
-    tokenizer = AutoTokenizer.from_pretrained(model_name, padding=True, truncation=True, max_length=1024)
-    model = AutoModel.from_pretrained(model_name)
-    tokens = tokenizer(input_str, return_tensors="pt")
-    outputs = model(**tokens)
-    embeddings = outputs.last_hidden_state.mean(dim=1)
-    return embeddings.detach().cpu().numpy()
-
-# def setup_primary_logging(log_file, level):
-#     log_queue = Queue(-1)
-#
-#     file_handler = logging.FileHandler(filename=log_file)
-#     stream_handler = logging.StreamHandler()
-#
-#     formatter = logging.Formatter(
-#         '%(asctime)s | %(levelname)s | %(message)s',
-#         datefmt='%Y-%m-%d,%H:%M:%S')
-#
-#     file_handler.setFormatter(formatter)
-#     stream_handler.setFormatter(formatter)
-#
-#     file_handler.setLevel(level)
-#     stream_handler.setLevel(level)
-#
-#     listener = QueueListener(log_queue, file_handler, stream_handler)
-#     listener.start()
-#
-#     return log_queue
-

@@ -5,7 +5,7 @@ from datetime import date
 import torch
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from uqdd.models.models_utils import set_seed, get_config, get_datasets, get_tasks
+from uqdd.models.models_utils import set_seed, get_model_config, get_datasets, get_tasks
 from uqdd.models.models_utils import build_loader, build_optimizer, MultiTaskLoss, save_models
 from uqdd.models.models_utils import UCTMetricsTable, process_preds
 from uqdd.models.baselines import train_model
@@ -97,7 +97,7 @@ def run_mcdropout(
         **kwargs
 ):
     # load the config
-    config = get_config(config=config, activity=activity, split=split, num_samples=num_samples, **kwargs)
+    config = get_model_config(config=config, activity=activity, split=split, num_samples=num_samples, **kwargs)
     # Load the dataset
     if datasets is None:
         datasets = get_datasets(activity=activity, split=split)

@@ -3,6 +3,19 @@
 # Prottrans -> bio-embeddings
 # ESM -> bio-embeddings or Otto-KG
 import torch
+from transformers import AutoTokenizer, AutoModel
+
+
+def transformer_featurizer(
+        input_str,
+        model_name="dmis-lab/biobert-v1.1"
+):
+    tokenizer = AutoTokenizer.from_pretrained(model_name, padding=True, truncation=True, max_length=1024)
+    model = AutoModel.from_pretrained(model_name)
+    tokens = tokenizer(input_str, return_tensors="pt")
+    outputs = model(**tokens)
+    embeddings = outputs.last_hidden_state.mean(dim=1)
+    return embeddings.detach().cpu().numpy()
 
 
 class ESMProtein(torch.nn.Module):

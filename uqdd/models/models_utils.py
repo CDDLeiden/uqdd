@@ -1,11 +1,9 @@
-import json
 import os
 import pickle
 import random
-import yaml
-from datetime import date
-
+import logging
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
 import torch
@@ -17,26 +15,11 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 from torch.utils.data import DataLoader
 
-from uqdd.chemutils import smi_to_pil_image
-from uqdd.models.papyrus import PapyrusDataset
-
-DATA_DIR = os.environ.get('DATA_DIR')
-LOGS_DIR = os.environ.get('LOGS_DIR')
-CONFIG_DIR = os.environ.get('CONFIG_DIR')
-MODELS_DIR = os.environ.get('MODELS_DIR')
-FIGS_DIR = os.environ.get('FIGS_DIR')
-
-# wandb_dir = LOGS_DIR  # 'logs/'
-wandb_mode = 'online'
-# data_dir = DATA_DIR  # 'data/'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
-dataset_dir = os.path.join(DATA_DIR, 'dataset/')  # 'data/dataset/'
-
-today = date.today()
-today = today.strftime("%Y%m%d")
-
-# print("Device: " + str(device))
-# print(torch.version.cuda) if device == 'cuda' else None
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from uqdd import DATASET_DIR, CONFIG_DIR, MODELS_DIR, FIGS_DIR, TODAY, DEVICE
+from uqdd.utils import get_config
+from uqdd.chem_utils import smi_to_pil_image
+from uqdd.data.data_papyrus import PapyrusDataset
+string_types = (type(b""), type(""))
 
 
 def set_seed(seed=42):
@@ -52,84 +35,137 @@ def set_seed(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+    # Ensure that cudnn is deterministic
+    torch.backends.cudnn.deterministic = True
+
+    # Disabling the benchmark mode so that deterministic algorithms are used
+    torch.backends.cudnn.benchmark = False
+
+
+def load_pickle(filepath):
+    """Helper function to load a pickle file."""
+    try:
+        with open(filepath, 'rb') as file:
+            return pickle.load(file)
+    except FileNotFoundError:
+        logging.error(f"File not found: {filepath}")
+    except Exception as e:
+        logging.error(f"Error loading file {filepath}: {e}")
+
 
 def get_tasks(activity, split):
+    target_col_path = os.path.join(DATASET_DIR, activity, split, "target_col.pkl")
+    target_col = load_pickle(target_col_path)
+    if target_col is None:
+        raise RuntimeError(f"Error loading tasks from {target_col_path}")
+    return target_col
+
+
+def get_dataset_sizes(datasets):
+    """
+    Logs the sizes of the datasets.
+    """
+    for name, dataset in datasets.items():
+        logging.info(f"{name} set size: {len(dataset)}")
+
+
+def get_datasets(activity, split_type, device=DEVICE):
     try:
-        d_dir = os.path.join(dataset_dir, activity, split)
-        target_col_path = os.path.join(d_dir, "target_col.pkl")
-        with open(target_col_path, 'rb') as file:
-            target_col = pickle.load(file)
-        return target_col
-    except Exception as e:
-        # print("Error loading data")
-        raise Exception(f"Error: couldn't retrieve tasks list: {e}")
+        paths = {
+            split: os.path.join(DATASET_DIR, activity, split_type, f"{split}.pkl")
+            for split in ["train", "val", "test"]
+        }
+        datasets = {}
 
-
-def get_datasets(activity, split):
-    try:
-        d_dir = os.path.join(dataset_dir, activity, split)
-
-        train_path = os.path.join(d_dir, "train.pkl")
-        val_path = os.path.join(d_dir, "val.pkl")
-        test_path = os.path.join(d_dir, "test.pkl")
-
-        train_set_1024 = PapyrusDataset(train_path, input_col="ecfp1024", device=device)
-        val_set_1024 = PapyrusDataset(val_path, input_col="ecfp1024", device=device)
-        test_set_1024 = PapyrusDataset(test_path, input_col="ecfp1024", device=device)
-
-        train_set_2048 = PapyrusDataset(train_path, input_col="ecfp2048", device=device)
-        val_set_2048 = PapyrusDataset(val_path, input_col="ecfp2048", device=device)
-        test_set_2048 = PapyrusDataset(test_path, input_col="ecfp2048", device=device)
-        print("Train set size: " + str(len(train_set_1024)))
-        print("Val set size: " + str(len(val_set_1024)))
-        print("Test set size: " + str(len(test_set_1024)))
-
-        return train_set_1024, val_set_1024, test_set_1024, \
-            train_set_2048, val_set_2048, test_set_2048
+        for input_col in ["ecfp1024", "ecfp2048"]:
+            for split, dataset_path in paths.items():
+                key = f"{split}_{input_col}"
+                datasets[key] = PapyrusDataset(dataset_path, input_col=input_col, device=device)
+        return datasets
 
     except Exception as e:
-        # print("Error loading data")
-        raise Exception(f"Error building dataset with PapyrusDataset {e}")
+        raise RuntimeError(f"Error loading datasets: {e}")
+
+
+def get_model_config(
+        model_name="baseline",
+        **kwargs
+):
+    """
+    Retrieve the configuration dictionary for model training.
+
+    Parameters:
+    - config (dict or None): A dictionary containing configuration parameters. If None, the default configuration will be loaded.
+    - **kwargs: Additional keyword arguments that override the values in the config dictionary.
+
+    Returns:
+    - dict: Merged dictionary containing the configuration parameters.
+
+    Notes:
+    - If `config` is None, the function will load the default configuration from a JSON file.
+    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
+    - If both `config` and `kwargs` contain the same key, the value from `kwargs` will take precedence.
+
+    Examples:
+    # Example 1: Read from default config file
+    config = get_config()
+
+    # Example 2: Read from a custom config file
+    config = get_config(config="path/to/custom/config.json")
+
+    # Example 3: Provide config as a dictionary
+    custom_config = {
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "num_epochs": 500
+    }
+    config = get_config(config=custom_config)
+
+    # Example 4: Provide config as a dictionary and additional keyword arguments
+    config = get_config(config=custom_config, num_epochs=1000, batch_size=32)
+    """
+    assert model_name in ['baseline', 'ensemble', 'gp'], f"Invalid model name: {model_name}"
+    return get_config(config_name=model_name, config_dir=CONFIG_DIR/model_name, **kwargs)
+
+
+def get_sweep_config(
+        model_name="baseline",
+        **kwargs
+):
+    """
+    Retrieve the sweep configuration for hyperparameter tuning.
+
+    Parameters:
+    -----------
+    - config (dict, str, or None): A dictionary containing sweep configuration parameters, a path to a YAML or JSON config file, or None to use the default configuration.
+    - **kwargs: Additional keyword arguments that override the values in the 'parameters' dictionary.
+
+    Returns:
+    --------
+    - dict: Merged dictionary containing the sweep configuration parameters.
+
+    Notes:
+    ------
+    - If `config` is None, the function will return the default sweep configuration.
+    - If `config` is a path to a YAML or JSON file, the function will load the configuration from the file.
+    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
+    - If both `config` and `kwargs` contain the same key in the 'parameters' dictionary, the value from `kwargs` will take precedence.
+    """
+    assert model_name in ['baseline', 'ensemble', 'gp'], f"Invalid model name: {model_name}"
+    return get_config(config_name=f'{model_name}_sweeper', config_dir=CONFIG_DIR/model_name, **kwargs)
 
 
 def build_loader(datasets, batch_size, ecfp_size=1024):
     try:
-        train_set, val_set, test_set = datasets[:3] if ecfp_size == 1024 else datasets[3:]
-
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)  # , pin_memory=True
-        val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)  # , pin_memory=True
-        test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)  # , pin_memory=True
-        print("Data loaders created")
+        train_set = datasets[f'train_ecfp{ecfp_size}']
+        val_set = datasets[f'val_ecfp{ecfp_size}']
+        test_set = datasets[f'test_ecfp{ecfp_size}']
+        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+        test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+        logging.info("Data loaders created")
     except Exception as e:
-        # print("Error loading data")
-        raise Exception(f"Error loading data {e}")
-
-    return train_loader, val_loader, test_loader
-
-
-def _build_loader(config=wandb.config):
-    """Deprecated function"""
-    try:
-        d_dir = os.path.join(dataset_dir, config.activity, config.split)
-
-        train_path = os.path.join(d_dir, "train.pkl")
-        val_path = os.path.join(d_dir, "val.pkl")
-        test_path = os.path.join(d_dir, "test.pkl")
-        print("Loading data from: " + d_dir)
-        train_set = PapyrusDataset(train_path, input_col=f"ecfp{config.input_dim}", device=device)
-        val_set = PapyrusDataset(val_path, input_col=f"ecfp{config.input_dim}", device=device)
-        test_set = PapyrusDataset(test_path, input_col=f"ecfp{config.input_dim}", device=device)
-        print("Train set size: " + str(len(train_set)))
-        print("Val set size: " + str(len(val_set)))
-        print("Test set size: " + str(len(test_set)))
-
-        train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)  # , pin_memory=True
-        val_loader = DataLoader(val_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
-        test_loader = DataLoader(test_set, batch_size=config.batch_size, shuffle=False)  # , pin_memory=True
-        print("Data loaders created")
-
-    except Exception as e:
-        raise Exception("Error loading data: " + str(e))
+        raise RuntimeError(f"Error loading data {e}")
 
     return train_loader, val_loader, test_loader
 
@@ -163,16 +199,20 @@ def build_loss(loss, reduction='none'):
 
 ### Custom Loss Functions ###
 class MultiTaskLoss(nn.Module):
+
     def __init__(self, loss_type='huber', reduction='mean'):
         super(MultiTaskLoss, self).__init__()
         self.loss_type = loss_type
         self.loss_fn = build_loss(loss_type, reduction=reduction)
-
     def forward(self, outputs, targets):
         nan_mask = torch.isnan(targets)
         # loss
         loss = calc_loss_notnan(outputs, targets, nan_mask, self.loss_fn)
         return loss
+
+
+
+
 
 
 def save_models(config, model, model_name=None, onnx=True):
@@ -184,7 +224,7 @@ def save_models(config, model, model_name=None, onnx=True):
         model_dir = os.path.join(MODELS_DIR, 'saved_models', config.activity, config.split)
         os.makedirs(model_dir, exist_ok=True)
         if model_name is None:
-            model_name = f"{today}-{wandb.run.name}-best-model" # {'ENS'+str(model_idx) if model_idx is not None else ''}
+            model_name = f"{TODAY}-{wandb.run.name}-best-model" # {'ENS'+str(model_idx) if model_idx is not None else ''}
 
         model_path = os.path.join(model_dir, model_name)
         pt_path = model_path + ".pt"
@@ -197,7 +237,7 @@ def save_models(config, model, model_name=None, onnx=True):
             dummy_input = torch.zeros(
                 (config.batch_size, config.input_dim),
                 dtype=torch.float32,
-                device=device,
+                device=DEVICE,
                 requires_grad=False
             )
             torch.onnx.export(model, dummy_input, onnx_path)
@@ -287,211 +327,6 @@ def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
     # task_losses = torch.sum(loss_per_task, dim=1) / torch.sum(~nan_mask, dim=1)
     # loss = torch.sum(task_losses)
     return loss
-
-
-def get_config(
-        config=os.path.join(CONFIG_DIR, 'baseline.json'),
-        **kwargs
-):
-    """
-    Retrieve the configuration dictionary for model training.
-
-    Parameters:
-    - config (dict or None): A dictionary containing configuration parameters. If None, the default configuration will be loaded.
-    - **kwargs: Additional keyword arguments that override the values in the config dictionary.
-
-    Returns:
-    - dict: Merged dictionary containing the configuration parameters.
-
-    Notes:
-    - If `config` is None, the function will load the default configuration from a JSON file.
-    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
-    - If both `config` and `kwargs` contain the same key, the value from `kwargs` will take precedence.
-
-    Examples:
-    # Example 1: Read from default config file
-    config = get_config()
-
-    # Example 2: Read from a custom config file
-    config = get_config(config="path/to/custom/config.json")
-
-    # Example 3: Provide config as a dictionary
-    custom_config = {
-        "learning_rate": 0.001,
-        "batch_size": 64,
-        "num_epochs": 500
-    }
-    config = get_config(config=custom_config)
-
-    # Example 4: Provide config as a dictionary and additional keyword arguments
-    config = get_config(config=custom_config, num_epochs=1000, batch_size=32)
-    """
-    # Load config from JSON file or YAML file
-    default_config = {
-        "activity": "xc50",
-        "batch_size": 128,
-        "dropout": 0.1,
-        "early_stop": 100,
-        "input_dim": 2048,
-        "hidden_dim_1": 1024,
-        "hidden_dim_2": 512,
-        "hidden_dim_3": 256,
-        "learning_rate": 0.01,
-        "loss": "huber",
-        "lr_factor": 0.5,
-        "lr_patience": 20,
-        "num_epochs": 3000,
-        "num_tasks": 20,
-        "optimizer": "sgd",
-        "output_dim": 20,
-        "weight_decay": 0.001,
-        "seed": 42,
-        "split": "scaffold",
-        # "ensemble_size": 10
-    }
-
-    if config is None:
-        # TODO: This is wrong - it will only work with Ensemble that way.
-        config = default_config
-    elif isinstance(config, dict):
-        pass
-    elif os.path.isfile(config): #  isinstance(config, str) and
-        if config.endswith('.json'):
-            with open(config, 'r') as f:
-                config = json.load(f)
-        elif config.endswith('.yaml'):
-            with open(config, 'r') as f:
-                config = yaml.safe_load(f)
-        else:
-            raise ValueError("Unsupported config file format. Please use JSON or YAML.")
-    else:
-        raise ValueError(f"Invalid config {config}. Please provide a valid config file path or a dictionary.")
-
-    if kwargs:
-        config.update(kwargs)
-
-    default_config.update(config)
-
-    return default_config
-
-
-def get_sweep_config(
-        config=os.path.join(CONFIG_DIR, 'baseline_sweep.json'),
-        **kwargs
-):
-    """
-    Retrieve the sweep configuration for hyperparameter tuning.
-
-    Parameters:
-    -----------
-    - config (dict, str, or None): A dictionary containing sweep configuration parameters, a path to a YAML or JSON config file, or None to use the default configuration.
-    - **kwargs: Additional keyword arguments that override the values in the 'parameters' dictionary.
-
-    Returns:
-    --------
-    - dict: Merged dictionary containing the sweep configuration parameters.
-
-    Notes:
-    ------
-    - If `config` is None, the function will return the default sweep configuration.
-    - If `config` is a path to a YAML or JSON file, the function will load the configuration from the file.
-    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
-    - If both `config` and `kwargs` contain the same key in the 'parameters' dictionary, the value from `kwargs` will take precedence.
-    """
-    # Load config from JSON file or YAML file
-    default_sweep_config = {
-        'method': 'random',
-        'metric': {
-            'name': 'val_rmse',  # 'val_loss',
-            'goal': 'minimize'
-        },
-        'parameters': {
-            'input_dim': {
-                'values': [1024, 2048]
-            },
-            'hidden_dim_1': {
-                'values': [512, 1024, 2048]
-            },
-            'hidden_dim_2': {
-                'values': [256, 512]
-            },
-            'hidden_dim_3': {
-                'values': [128, 256]
-            },
-            'num_tasks': {
-                'value': 20
-            },
-            'batch_size': {
-                'values': [64, 128, 256]
-            },
-            'loss': {
-                'values': ['huber', 'mse']
-            },
-            'learning_rate': {
-                'values': [0.001, 0.01]
-            },
-            'ensemble_size': {
-                'value': 100
-            },
-            'weight_decay': {
-                'value': 0.001
-            },
-            'dropout': {
-                'values': [0.1, 0.2]
-            },
-            'lr_factor': {
-                'value': 0.5
-            },
-            'lr_patience': {
-                'value': 20
-            },
-            'num_epochs': {
-                'value': 3000
-            },
-            'early_stop': {
-                'value': 100
-            },
-            'optimizer': {
-                'values': ['adamw', 'sgd']
-            },
-            'output_dim': {
-                'value': 20
-            },
-            'activity': {
-                'value': "xc50"
-            },
-            'split': {
-                'value': "scaffold"
-            },
-        },
-    }
-    if config is None:
-        config = default_sweep_config
-    elif isinstance(config, dict):
-        pass
-    elif os.path.isfile(config):  # isinstance(config, str) and
-        if config.endswith('.json'):
-            with open(config, 'r') as f:
-                config = json.load(f)
-        elif config.endswith('.yaml'):
-            with open(config, 'r') as f:
-                config = yaml.safe_load(f)
-        else:
-            raise ValueError("Unsupported config file format. Please use JSON or YAML.")
-    else:
-        raise ValueError(f"Invalid config {config}. Please provide a valid config file path or a dictionary.")
-
-    if kwargs:
-        # Update the 'parameters' dictionary with kwargs
-        for key, value in kwargs.items():
-            if isinstance(value, list):
-                config['parameters'][key] = {'values': value}
-            else:
-                config['parameters'][key] = {'value': value}
-
-    config = default_sweep_config.update(config)
-
-    return config
 
 
 def process_preds(
