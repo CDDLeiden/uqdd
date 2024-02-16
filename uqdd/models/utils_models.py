@@ -15,10 +15,9 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 from torch.utils.data import DataLoader
 
-from uqdd import DATASET_DIR, CONFIG_DIR, MODELS_DIR, FIGS_DIR, TODAY, DEVICE
+from uqdd import CONFIG_DIR, MODELS_DIR, FIGS_DIR, TODAY, DEVICE
 from uqdd.utils import get_config
-from uqdd.chem_utils import smi_to_pil_image
-from uqdd.data.data_papyrus import PapyrusDataset
+from uqdd.utils_chem import smi_to_pil_image, generate_scaffold
 string_types = (type(b""), type(""))
 
 
@@ -40,51 +39,6 @@ def set_seed(seed=42):
 
     # Disabling the benchmark mode so that deterministic algorithms are used
     torch.backends.cudnn.benchmark = False
-
-
-def load_pickle(filepath):
-    """Helper function to load a pickle file."""
-    try:
-        with open(filepath, 'rb') as file:
-            return pickle.load(file)
-    except FileNotFoundError:
-        logging.error(f"File not found: {filepath}")
-    except Exception as e:
-        logging.error(f"Error loading file {filepath}: {e}")
-
-
-def get_tasks(activity, split):
-    target_col_path = os.path.join(DATASET_DIR, activity, split, "target_col.pkl")
-    target_col = load_pickle(target_col_path)
-    if target_col is None:
-        raise RuntimeError(f"Error loading tasks from {target_col_path}")
-    return target_col
-
-
-def get_dataset_sizes(datasets):
-    """
-    Logs the sizes of the datasets.
-    """
-    for name, dataset in datasets.items():
-        logging.info(f"{name} set size: {len(dataset)}")
-
-
-def get_datasets(activity, split_type, device=DEVICE):
-    try:
-        paths = {
-            split: os.path.join(DATASET_DIR, activity, split_type, f"{split}.pkl")
-            for split in ["train", "val", "test"]
-        }
-        datasets = {}
-
-        for input_col in ["ecfp1024", "ecfp2048"]:
-            for split, dataset_path in paths.items():
-                key = f"{split}_{input_col}"
-                datasets[key] = PapyrusDataset(dataset_path, input_col=input_col, device=device)
-        return datasets
-
-    except Exception as e:
-        raise RuntimeError(f"Error loading datasets: {e}")
 
 
 def get_model_config(
