@@ -398,7 +398,10 @@ def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
     return list_of_descriptor_vals
 
 
-def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = None):  # smiles_col: str = 'smiles',
+def generate_mol_descriptors(
+        df: pd.DataFrame,
+        smiles_col: str = 'SMILES',
+        chosen_descriptors: List[str] = None) -> pd.DataFrame:
     """
     Applies the `mol_descriptors` function to a pandas dataframe and returns a new dataframe
     with additional columns containing the calculated descriptor values.
@@ -407,6 +410,8 @@ def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = N
     ----------
     df : pandas.DataFrame
         The input dataframe.
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings to calculate descriptors for. Default is 'SMILES'.
     chosen_descriptors : list of str, optional
         The list of descriptors to calculate. If None, the default list of descriptors in
         `mol_descriptors` will be used.
@@ -423,14 +428,23 @@ def generate_mol_descriptors(df: pd.DataFrame, chosen_descriptors: List[str] = N
         chosen_descriptors = descriptors
 
     # apply mol_descriptors() to the 'smiles' column using the .apply() method
-    calc_descriptors = new_df['smiles'].apply(mol_descriptors, chosen_descriptors=chosen_descriptors)
+    calc_descriptors = new_df[smiles_col].apply(mol_descriptors, chosen_descriptors=chosen_descriptors)
 
     # convert the list of descriptor values to a DataFrame with separate columns
     descriptor_df = pd.DataFrame(calc_descriptors, columns=chosen_descriptors)  # .tolist()
 
     # concatenate the new DataFrame with the original DataFrame
-    new_df = pd.concat([new_df, descriptor_df], axis=1)
-
+    # new_df = pd.concat([new_df, descriptor_df], axis=1)
+    # merge the new DataFrame with the original DataFrame
+    new_df = pd.merge(
+        new_df,
+        descriptor_df,
+        left_index=True,
+        right_index=True,
+        how="left",
+        on=None,
+        validate="many_to_many"
+    )
     return new_df
 
     #
@@ -526,3 +540,21 @@ def generate_scaffold(smiles, include_chirality=False):
         print(f"following error {e} \n occurred while processing smiles: {smiles}")
     return scaffold
 
+
+def get_chem_desc(
+        df,
+        smiles_col: str = 'SMILES',
+        desc_chem: str = 'ecfp1024',
+        **kwargs
+):
+    desc_chem = desc_chem.lower()
+    if desc_chem == 'ecfp1024':
+        df = generate_ecfp(df, radius=2, length=1024, smiles_col=smiles_col, **kwargs)
+    elif desc_chem == 'ecfp2048':
+        df = generate_ecfp(df, radius=4, length=2048, smiles_col=smiles_col, **kwargs)
+    elif desc_chem == 'moldesc':
+        df = generate_mol_descriptors(df, smiles_col=smiles_col, **kwargs)
+    elif desc_chem == 'graph2d':
+        raise NotImplementedError
+    else:
+        raise ValueError(f"desc_mol: {desc_chem} is not a valid molecular descriptor")

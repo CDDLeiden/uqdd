@@ -1,9 +1,10 @@
 ### Here we should implement the embeddings and protein featurizers functionalities
 
 # Prottrans -> bio-embeddings
-# ESM -> bio-embeddings or Otto-KG
 import torch
 from transformers import AutoTokenizer, AutoModel
+import ankh
+from uqdd import DEVICE
 
 
 def transformer_featurizer(
@@ -18,6 +19,7 @@ def transformer_featurizer(
     return embeddings.detach().cpu().numpy()
 
 
+# ESM -> bio-embeddings or Otto-KG
 class ESMProtein(torch.nn.Module):
     def __init__(self, repo_or_dir, model, repr_layer, device='cpu'):
         super(ESMProtein, self).__init__()
@@ -53,6 +55,103 @@ class ESMProtein(torch.nn.Module):
         return torch.stack(sequence_representations)
 
 # ProteinBERT -> bio-embeddings as part of protTrans
+def get_protbert(df, sequences_col='sequence'):
+    raise NotImplementedError
+
 # MSA ->
+def get_msa(df, sequences_col='sequence'):
+    raise NotImplementedError
+
+
 # ProteinLM ->
+def get_proteinlm(df, sequences_col='sequence'):
+    raise NotImplementedError
+
+
 # TAPE ->
+def get_tape(df, sequences_col='sequence'):
+    raise NotImplementedError
+
+def get_prot_desc(
+        df,
+        sequences_col='sequence',
+        desc_prot='esm1b',
+        **kwargs
+):
+    desc_prot = desc_prot.lower()
+
+    if desc_prot.startswith('ankh'):
+        if desc_prot == 'ankh-base':
+            model, tokenizer = ankh.load_base_model()
+            model.eval()
+            model.to(DEVICE)
+            outputs = tokenizer.batch_encode_plus(
+                df[sequences_col].tolist(),
+                add_special_tokens=True,
+                padding=True,
+                is_split_into_words=True,
+                return_tensors="pt"
+            )
+
+            with torch.no_grad():
+                embeddings = model(input_ids=outputs['input_ids'], attention_mask=outputs['attention_mask'])
+
+        elif desc_prot == 'ankh-large':
+            model, tokenizer = ankh.load_large_model()
+            model.eval()
+            model.to(DEVICE)
+            outputs = tokenizer.batch_encode_plus(
+                df[sequences_col].tolist(),
+                add_special_tokens=True,
+                padding=True,
+                is_split_into_words=True,
+                return_tensors="pt"
+            )
+            with torch.no_grad():
+                embeddings = model(input_ids=outputs['input_ids'], attention_mask=outputs['attention_mask'])
+
+    elif desc_prot == 'esm1b':
+        raise NotImplementedError
+
+    elif desc_prot == 'protbert':
+        raise NotImplementedError
+
+    elif desc_prot == 'msa':
+        raise NotImplementedError
+
+    elif desc_prot == 'proteinlm':
+        raise NotImplementedError
+
+    elif desc_prot == 'tape':
+        raise NotImplementedError
+
+    elif desc_prot == 'ankh-base':
+        model, tokenizer = ankh.load_base_model()
+        model.eval()
+        model.to(DEVICE)
+        outputs = tokenizer.batch_encode_plus(
+            df[sequences_col].tolist(),
+            add_special_tokens=True,
+            padding=True,
+            is_split_into_words=True,
+            return_tensors="pt"
+        )
+
+        with torch.no_grad():
+            embeddings = model(input_ids=outputs['input_ids'], attention_mask=outputs['attention_mask'])
+
+    elif desc_prot == 'ankh-large':
+        model, tokenizer = ankh.load_large_model()
+        model.eval()
+        model.to(DEVICE)
+        outputs = tokenizer.batch_encode_plus(
+            df[sequences_col].tolist(),
+            add_special_tokens=True,
+            padding=True,
+            is_split_into_words=True,
+            return_tensors="pt"
+        )
+        with torch.no_grad():
+            embeddings = model(input_ids=outputs['input_ids'], attention_mask=outputs['attention_mask'])
+
+    return embeddings
