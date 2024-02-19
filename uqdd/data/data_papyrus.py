@@ -32,30 +32,23 @@ class Papyrus:
             self,
             accession: Union[None, str, List] = None,
             activity_type: Union[None, str, List] = None,
-            # organism: Union[None, str, List] = "Homo sapiens (Human)",
             std_smiles: bool = True,
-            add_protein_sequence: bool = False,
-            desc_mol: Union[str, List[str]] = None,
-            desc_prot: Union[str, List[str]] = None,
             verbose_files: bool = False,
     ):
-
         # LOGGING
         self.log = create_logger(name="Papyrus", file_level="debug", stream_level="info")
         self.log.info("Initializing -- PAPYRUS -- Module")
         self.config = get_config("papyrus")
 
         self.chunksize = self.config.get("chunksize", 1000000)
-        self.cols_to_keep = self.config.get("cols_to_keep", {})
+        self.cols_to_keep = self.config.get("cols_to_keep", None)
         dtypes = self.config.get("dtypes", {})
         dtypes_protein = self.config.get("dtypes_protein", {})
 
         self.keep_accession = accession
         self.activity_key, self.activity_type = self._get_activity_key(activity_type)
 
-        # self.keep_organism = organism
-
-        #### DEFINITION OF FILE PATHS ####
+        # DEFINITION OF FILE PATHS
         self.output_path = os.path.join(
             DATASET_DIR,
             "papyrus",
@@ -74,15 +67,7 @@ class Papyrus:
         self.papyrus_protein_path = os.path.join(DATASET_DIR, "papyrus", "papyrus_proteins_raw.csv")
 
         self.std_smiles = std_smiles
-        self.add_protein_sequence = add_protein_sequence
-        self.desc_prot = desc_prot
-        # "unirep", "esm", "protbert", "msa", "all"
-        self.desc_mol = desc_mol
-        # "mold2", "mordred", "cddd", "fingerprint", "moe", "all"
-
         self.verbose_files = verbose_files
-
-        # self.cols_rename_map = self.config.get("cols_rename_map", None)
 
         if self.papyrus_file:
             self.log.info("PapyrusApi processing input from previously processed files")
@@ -121,11 +106,13 @@ class Papyrus:
     def merge_descriptors(
             self,
             desc_prot,
-            desc_mol,
+            desc_chem,
             df=None,
             target_id_col="target_id",
             connectivity_col="connectivity"
     ):
+        # "unirep", "esm", "protbert", "msa", "all"
+        # "mold2", "mordred", "cddd", "fingerprint", "moe", "all"
         if df is None:
             df = self.df_filtered
 
@@ -136,11 +123,11 @@ class Papyrus:
                 desc_type=desc_prot
             )
 
-        if desc_mol:
+        if desc_chem:
             self._merge_molecular_descriptors(
                 df,
                 connectivity_id_col=connectivity_col,
-                desc_type=desc_mol
+                desc_type=desc_chem
             )
 
         return df
@@ -160,23 +147,13 @@ class Papyrus:
     def _process_papyrus(self):
         self.log.info("Processing Papyrus data ...")
 
-        if self.add_protein_sequence:
-            self.get_protein_sequence()
-
         df_nan, df_dup = None, None
         # SMILES standardization
         if self.std_smiles:
             self.df_filtered, df_nan, df_dup = self._sanitize_smiles()
 
-        # Adding descriptors
-        if self.desc_prot or self.desc_mol:
-            self.merge_descriptors(
-                desc_prot=self.desc_prot, desc_mol=self.desc_mol
-            )
-
-        # # Renaming
-        # if not self.papyrus_file:
-        #     self.df_filtered.rename(columns=self.cols_rename_map, inplace=True)
+        if self.cols_to_keep:
+            self.df_filtered = self.df_filtered[self.cols_to_keep]
 
         # Verbosing files
         if self.verbose_files:
@@ -224,7 +201,7 @@ class Papyrus:
         papyrus_data = read_papyrus(
             is3d=False,
             version="latest",
-            plusplus=False,
+            plusplus=True,
             chunksize=self.chunksize,
             source_path=self.papyrus_path,
         )
@@ -273,7 +250,6 @@ class Papyrus:
         self.log.info("Getting the protein descriptors")
         desc_type = desc_type.lower()
         target_ids = df[target_id_col].tolist()
-        # target_ids = papyrus_protein_data["target_id"].tolist()
 
         protein_descriptors = read_protein_descriptors(
             desc_type=desc_type,
@@ -282,7 +258,7 @@ class Papyrus:
             source_path=DATA_DIR,
             ids=target_ids,
             verbose=True,
-        )  # .rename(columns={"target_id": "targetIds"})
+        )
 
         protein_descriptors[desc_type] = protein_descriptors.apply(self._merge_cols, axis=1)
 
@@ -304,9 +280,9 @@ class Papyrus:
             version="latest",
             chunksize=100000,
             source_path=DATA_DIR,
-            ids=connectivity_ids,  # self.df_filtered["connectivity"].tolist(),
+            ids=connectivity_ids,
             verbose=True,
-        ) #.rename(columns={"target_id": "targetIds"})
+        )
 
         mol_descriptors[desc_type] = mol_descriptors.apply(self._merge_cols, axis=1)
 
@@ -402,74 +378,65 @@ class PapyrusDataProcessor:
             accession=None,
             activity_type=activity,
             std_smiles=self.std_smiles,
-            add_protein_sequence=False,
-            desc_prot=None,
-            desc_mol=None,
             verbose_files=self.verbose_files,
         )
         self.papyrus_df = self.papyrus_obj()
 
         self.output_path = self.papyrus_obj.output_path
-        # self.output_path = os.path.join(
-        #     DATASET_DIR,
-        #     "papyrus",
-        #     self.activity
-        # )
 
     def __call__(
             self,
             n_top: int = -1,
-            multitask: bool = True,
+            # multitask: bool = True,
             split_type: str = "random",
             desc_prot: Union[str, List[str], None] = None,
-            desc_mol: Union[str, List[str], None] = None
+            desc_chem: Union[str, List[str], None] = None
     ):
-        return self._data_preparation(n_top, multitask, split_type, desc_prot, desc_mol)
+        return self._data_preparation(
+            n_top,
+            # multitask,
+            split_type,
+            desc_prot,
+            desc_chem
+        )
 
     def _data_preparation(
             self,
             n_top=20,
-            multitask=True,
+            # multitask=True,
             split_type="random",
             desc_prot=None,
-            desc_mol=None
+            desc_chem=None
     ):
-        label_col = ["pchemblValueMean"]
+        label_col = ["pchembl_value_Mean"]
         if n_top > 0:
             df, top_targets = self._get_top_targets(self.papyrus_df, n_top)
             self.output_path = os.path.join(self.output_path, f"top{n_top}")
-            if multitask:
-                pivoted = pd.pivot_table(
-                    df,
-                    index="SMILES",
-                    columns="accession",
-                    values="pchembl_value_Mean",
-                    aggfunc="first"
-                )
-                # reset the index to make the "smiles" column a regular column
-                pivoted = pivoted.reset_index()
-                # replace any missing values with NaN
-                df = pivoted.fillna(value=np.nan)
-                label_col = list(top_targets.index)
-                if desc_prot:
-                    self.log.warning("Multitask learning with protein descriptors not supported")
-                df = self.papyrus_obj.merge_descriptors(
-                    desc_prot=None,
-                    desc_mol=desc_mol,
-                    df=df,
-                    target_id_col="accession",
-                    connectivity_col="connectivity"
-                )
-            else:
-                df = df[[
-                    "SMILES",
-                    "connectivity",
-                    "target_id",
-                    "accession",
-                    "Sequence",
-                    "pchembl_value_Mean",
-                    "Year"
-                ]]
+            # if multitask:
+            pivoted = pd.pivot_table(
+                df,
+                index="SMILES",
+                columns="accession",
+                values="pchembl_value_Mean",
+                aggfunc="first"
+            )
+            # reset the index to make the "smiles" column a regular column
+            pivoted = pivoted.reset_index()
+            # replace any missing values with NaN
+            df = pivoted.fillna(value=np.nan)
+            label_col = list(top_targets.index)
+                # if desc_prot:
+                #     self.log.warning("Multitask learning with protein descriptors not supported")
+
+            # else:
+                # df = df[[
+                #     "SMILES",
+                #     "connectivity",
+                #     "target_id",
+                #     "accession",
+                #     "pchembl_value_Mean",
+                #     "Year"
+                # ]]
         else:
             # dataset/papyrus/xc50/all/
             self.output_path = os.path.join(self.output_path, "all")
@@ -478,7 +445,7 @@ class PapyrusDataProcessor:
         df = self._get_descriptors(
             df,
             desc_prot,
-            desc_mol,
+            desc_chem,
         )
 
         # Split the data
@@ -493,7 +460,7 @@ class PapyrusDataProcessor:
             seed=42,
             output_path=self.output_path,
             label_col=label_col
-            )
+        )
 
         return all_data
 
@@ -510,21 +477,43 @@ class PapyrusDataProcessor:
         # step 5: filter the original dataframe to only include rows corresponding to these x protein targets
         filtered_df = df[df["accession"].isin(top_targets.index)]
         # step 6: filter the dataframe to only include rows with a pchembl value mean
-        filtered_df = filtered_df[filtered_df["pchemblValueMean"].notna()]
+        filtered_df = filtered_df[filtered_df["pchembl_value_Mean"].notna()]
         return filtered_df, top_targets
 
     def _get_descriptors(
             self,
             df,
             desc_prot,
-            desc_mol
+            desc_chem,
+            n_top=-1
     ):
+        if n_top > 0 and desc_prot:
+            self.log.warning("Multitask learning with protein descriptors not supported - desc_prot will be ignored")
+            desc_prot = None
+        desc_prot_from_papyrus = desc_prot in ["unirep", "prodec"]
+        desc_chem_from_papyrus = desc_chem in ["mold2", "mordred", "cddd", "fingerprint", "moe"]
 
-        # df = generate_ecfp(df, 2, 1024, False, False, smiles_col="smiles")
-        # df = generate_ecfp(df, 4, 2048, False, False, smiles_col="smiles")
+        if desc_prot_from_papyrus and desc_chem_from_papyrus:
+            df = self.papyrus_obj.merge_descriptors(
+                    desc_prot=desc_prot,
+                    desc_chem=desc_chem,
+                    df=df,
+                    target_id_col="accession",
+                    connectivity_col="connectivity"
+                )
+        elif desc_prot_from_papyrus: # desc_chem_from_papyrus is False
+            pass
+        elif desc_chem_from_papyrus: # desc_prot_from_papyrus is False
+
+            pass
+        else:
+            pass
+
+
+
         df = self.papyrus_obj.merge_descriptors(
             desc_prot=desc_prot,
-            desc_mol=desc_mol,
+            desc_chem=desc_chem,
             df=df,
             target_id_col="targetIds",
             connectivity_col="connectivity"
@@ -532,11 +521,17 @@ class PapyrusDataProcessor:
 
         raise NotImplementedError
 
+    def _get_other_prot_desc(self, df, desc_prot):
+        raise NotImplementedError
+
+    def _get_other_mol_desc(self, df, desc_chem):
+        raise NotImplementedError
+
 
 class PapyrusDatasetMT(Dataset):
     def __init__(
             self,
-            file_path: Union[str, Path] = os.path.join(DATASET_DIR, "all", "xc50", "random", "train.pkl"),
+            file_path: Union[str, Path] = os.path.join(DATASET_DIR, "xc50", "all", "random", "train.pkl"),
             input_col: str = "ecfp1024",
             target_col: Union[str, List, None] = None,
             device: object = "cuda",
@@ -587,7 +582,7 @@ class PapyrusDataset(Dataset):
             file_path: Union[str, Path] = os.path.join(DATASET_DIR, "all", "xc50", "random", "train.pkl"),
             chem_xcol: str = "ecfp1024",
             prot_xcol: str = "protein_embeddings",
-            label_ycol: Union[str, List, None] = "pchemblValueMean",
+            label_ycol: Union[str, List, None] = "pchembl_value_Mean",
             # input_col: str = "ecfp1024",
             device: object = "cuda",
     ) -> None:
@@ -633,7 +628,6 @@ if __name__ == "__main__":
         accession=None,
         activity_type="xc50",
         std_smiles=True,
-        add_protein_sequence=True,
         verbose_files=True
     )
 
