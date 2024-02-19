@@ -34,6 +34,15 @@
     "pchembl_value_Median": "pchemblValueMedian",
     "pchembl_value_MAD": "pchemblValueMAD"
   },
+  "cols_to_keep": [
+    "SMILES",
+    "connectivity",
+    "target_id",
+    "accession",
+    "Sequence",
+    "Year",
+    "pchembl_value_Mean"
+  ],
   "dtypes": {
     "typeIC50": "str",
     "typeEC50": "str",
@@ -48,5 +57,16 @@
     "pchemblValueN": "int32",
     "pchemblValueMedian": "float64",
     "pchemblValueMAD": "float64"
+  },
+  "dtypes_protein": {
+    "target_id":"str",
+    "HGNC_symbol": "str",
+    "UniProtID": "str",
+    "Status": "str",
+    "Organism": "str",
+    "Classification": "str",
+    "Length": "int",
+    "Sequence": "str",
+    "TID":  "str"
   }
 }
