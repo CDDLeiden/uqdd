@@ -37,69 +37,48 @@ class Papyrus:
     ):
         # LOGGING
         self.log = create_logger(name="Papyrus", file_level="debug", stream_level="info")
-        self.log.info("Initializing -- PAPYRUS -- Module")
         self.config = get_config("papyrus")
-
         self.chunksize = self.config.get("chunksize", 1000000)
         self.cols_to_keep = self.config.get("cols_to_keep", None)
-        dtypes = self.config.get("dtypes", {})
-        dtypes_protein = self.config.get("dtypes_protein", {})
-
+        self.dtypes, self.dtypes_protein = self.config.get("dtypes", {}), self.config.get("dtypes_protein", {})
         self.keep_accession = accession
-        self.activity_key, self.activity_type = self._get_activity_key(activity_type)
-
-        # DEFINITION OF FILE PATHS
-        self.output_path = os.path.join(
-            DATASET_DIR,
-            "papyrus",
-            self.activity_type,
-
+        self.activity_key, self.activity_type = self._parse_activity_key(activity_type)
+        self.output_path, self.pap_filepath, self.pap_path, self.pap_file, self.pap_protpath = self._setup_path(
+            self.activity_type
         )
-        os.makedirs(self.output_path, exist_ok=True)
-
-        self.papyrus_filepath = os.path.join(
-            str(self.output_path),
-            "papyrus_filtered_raw.csv"
-        )
-        self.papyrus_file = os.path.isfile(self.papyrus_filepath)
-        # where download will create the folder papyrus if to be downloaded else file path
-        self.papyrus_path = self.papyrus_filepath if self.papyrus_file else DATA_DIR
-        self.papyrus_protein_path = os.path.join(DATASET_DIR, "papyrus", "papyrus_proteins_raw.csv")
-
-        self.std_smiles = std_smiles
-        self.verbose_files = verbose_files
-
-        if self.papyrus_file:
-            self.log.info("PapyrusApi processing input from previously processed files")
-            self.df_filtered = pd.read_csv(
-                self.papyrus_path,
-                index_col=0,
-                dtype=dtypes,
-                low_memory=False
-            )
-            self.papyrus_protein_data = pd.read_csv(
-                self.papyrus_protein_path,
-                index_col=0,
-                dtype=dtypes_protein,
-                low_memory=False
-            )
-
-            # output is the same dir as input file
-            self.output_path = os.path.dirname(self.papyrus_path)
-
-        else:
-
-            self.log.info("PapyrusApi processing input from Raw Papyrus database")
-            papyrus_data, papyrus_protein_data = self._reader()
-            self.df_filtered = self._filter_raw_file(papyrus_data, papyrus_protein_data)
-
-            # Forcing verbose here to avoid reprocessing
-            self.df_filtered.to_csv(self.papyrus_filepath)
-            papyrus_protein_data.to_csv(self.papyrus_protein_path)
-            self.papyrus_protein_data = papyrus_protein_data
-
-            os.makedirs(self.output_path, exist_ok=True)
-
+        self.std_smiles, self.verbose_files = std_smiles, verbose_files
+        self.df_filtered, self.papyrus_protein_data = self._load_or_process_file()
+        # if self.pap_file:
+        #     self.log.info("PapyrusApi processing input from previously processed files")
+        #     self.df_filtered = pd.read_csv(
+        #         self.pap_path,
+        #         index_col=0,
+        #         dtype=dtypes,
+        #         low_memory=False
+        #     )
+        #     self.papyrus_protein_data = pd.read_csv(
+        #         self.pap_protpath,
+        #         index_col=0,
+        #         dtype=dtypes_protein,
+        #         low_memory=False
+        #     )
+        #
+        #     # output is the same dir as input file
+        #     self.output_path = os.path.dirname(self.pap_path)
+        #
+        # else:
+        #
+        #     self.log.info("PapyrusApi processing input from Raw Papyrus database")
+        #     papyrus_data, papyrus_protein_data = self._reader()
+        #     self.df_filtered = self._filter_raw_file(papyrus_data, papyrus_protein_data)
+        #
+        #     # Forcing verbose here to avoid reprocessing
+        #     self.df_filtered.to_csv(self.pap_filepath)
+        #     papyrus_protein_data.to_csv(self.pap_protpath)
+        #     self.papyrus_protein_data = papyrus_protein_data
+        #
+        #     os.makedirs(self.output_path, exist_ok=True)
+    
     def __call__(self):
         return self._process_papyrus()
 
@@ -144,6 +123,59 @@ class Papyrus:
             how="left",
         )
 
+    @staticmethod
+    def _setup_path(activity_type):
+        activity_type = activity_type.lower()
+        out_path = DATASET_DIR / "papyrus" / activity_type
+        out_path.mkdir(parents=True, exist_ok=True)
+        pap_filepath = out_path / "papyrus_filtered_raw.csv"
+        pap_file = pap_filepath.is_file()
+        pap_path = out_path if pap_file else DATA_DIR
+        pap_protpath = DATASET_DIR / "papyrus" / "papyrus_proteins_raw.csv"
+        #
+        # out_path = os.path.join(
+        #     DATASET_DIR,
+        #     "papyrus",
+        #     activity_type,
+        # )
+        # os.makedirs(out_path, exist_ok=True)
+        #
+        # pap_filepath = os.path.join(
+        #     str(out_path),
+        #     "papyrus_filtered_raw.csv"
+        # )
+        # pap_file = os.path.isfile(pap_filepath)
+        # where download will create the folder papyrus if to be downloaded else file path
+        # pap_path = pap_filepath if pap_file else DATA_DIR
+        # pap_protpath = os.path.join(DATASET_DIR, "papyrus", "papyrus_proteins_raw.csv")
+
+        return out_path, pap_filepath, pap_path, pap_file, pap_protpath
+
+    def _load_or_process_file(self):
+        if self.pap_file:
+            self.log.info("Loading previously processed Papyrus data ...")
+            df_filtered = pd.read_csv(
+                self.pap_path,
+                index_col=0,
+                dtype=self.dtypes,
+                low_memory=False
+            )
+            papyrus_protein_data = pd.read_csv(
+                self.pap_protpath,
+                index_col=0,
+                dtype=self.dtypes_protein,
+                low_memory=False
+            )
+        else:
+            self.log.info("PapyrusApi processing input from Raw Papyrus database")
+            papyrus_data, papyrus_protein_data = self._reader()
+            df_filtered = self._filter_raw_file(papyrus_data, papyrus_protein_data)
+            # Forcing verbose here to avoid reprocessing
+            df_filtered.to_csv(self.pap_filepath)
+            papyrus_protein_data.to_csv(self.pap_protpath)
+
+        return df_filtered, papyrus_protein_data
+
     def _process_papyrus(self):
         self.log.info("Processing Papyrus data ...")
 
@@ -162,7 +194,7 @@ class Papyrus:
         return self.df_filtered
 
     @staticmethod
-    def _get_activity_key(activity_type):
+    def _parse_activity_key(activity_type):
         activity_type = activity_type.lower()
         if isinstance(activity_type, str) and activity_type in ["xc50", "kx"]:
             act_dict = {
@@ -183,7 +215,7 @@ class Papyrus:
     def _download(self):
         self.log.info("Downloading Papyrus data ...")
         download_papyrus(
-            outdir=self.papyrus_path,
+            outdir=self.pap_path,
             version="latest",
             nostereo=True,
             stereo=False,
@@ -203,9 +235,9 @@ class Papyrus:
             version="latest",
             plusplus=True,
             chunksize=self.chunksize,
-            source_path=self.papyrus_path,
+            source_path=self.pap_path,
         )
-        papyrus_protein_data = read_protein_set(source_path=self.papyrus_path, version="latest")
+        papyrus_protein_data = read_protein_set(source_path=self.pap_path, version="latest")
         return papyrus_data, papyrus_protein_data
 
     def _filter_raw_file(self, papyrus_data, papyrus_protein_data):
