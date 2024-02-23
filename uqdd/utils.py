@@ -4,6 +4,7 @@ from typing import List, Union, Tuple  # , List, Tuple, Any, Set, Dict
 import logging
 import pandas as pd
 from uqdd import CONFIG_DIR
+
 string_types = (type(b""), type(""))
 
 
@@ -69,7 +70,7 @@ def custom_agg(x):
 
 
 def check_na(
-        df, cols: Union[List[str], str] = "smiles", nan_dup_source="", logger=None
+    df, cols: Union[List[str], str] = "smiles", nan_dup_source="", logger=None
 ):
     """
     Check for NaN values in the specified column(s) of the given DataFrame.
@@ -141,63 +142,63 @@ def check_na(
 
 
 def check_duplicates(
-        df: pd.DataFrame,
-        cols: Union[List[str], str],
-        drop: bool = True,
-        sorting_col: str = "",
-        keep: Union[bool, str] = "first",
-        nan_dup_source: str = "",
-        logger=None,
+    df: pd.DataFrame,
+    cols: Union[List[str], str],
+    drop: bool = True,
+    sorting_col: str = "",
+    keep: Union[bool, str] = "first",
+    nan_dup_source: str = "",
+    logger=None,
 ):
     """
-        Check for duplicates in the specified column(s) of the given DataFrame.
+    Check for duplicates in the specified column(s) of the given DataFrame.
 
-        Parameters:
-        -----------
-        df : pandas.DataFrame
-            DataFrame to check for duplicates.
-        cols : Union[List[str], str]
-            A list of column names or a single column name to check for duplicates.
-        drop : bool, optional, default=True
-            If True, drop the duplicate rows.
-        sorting_col : str, optional, default=""
-            The column by which to sort the duplicates DataFrame.
-        keep : Union[bool, str], optional, default='first'
-            If drop is True, this parameter indicates which duplicate values to keep.
-            If keep is 'first', the first occurrence of the duplicate value is kept.
-            If keep is 'last', the last occurrence of the duplicate value is kept.
-            If keep is False, all occurrences of the duplicate value are dropped.
-        nan_dup_source : str, optional, default=""
-            Source of duplicate values in the DataFrame.
-        logger : Logger, optional
-            Logger object to use for logging.
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame to check for duplicates.
+    cols : Union[List[str], str]
+        A list of column names or a single column name to check for duplicates.
+    drop : bool, optional, default=True
+        If True, drop the duplicate rows.
+    sorting_col : str, optional, default=""
+        The column by which to sort the duplicates DataFrame.
+    keep : Union[bool, str], optional, default='first'
+        If drop is True, this parameter indicates which duplicate values to keep.
+        If keep is 'first', the first occurrence of the duplicate value is kept.
+        If keep is 'last', the last occurrence of the duplicate value is kept.
+        If keep is False, all occurrences of the duplicate value are dropped.
+    nan_dup_source : str, optional, default=""
+        Source of duplicate values in the DataFrame.
+    logger : Logger, optional
+        Logger object to use for logging.
 
-        Returns:
-        --------
-        df : pandas.DataFrame
-            A copy of the DataFrame with duplicate rows removed if drop is True.
-        df_dup : pandas.DataFrame
-            A copy of the DataFrame with only duplicate rows if any.
+    Returns:
+    --------
+    df : pandas.DataFrame
+        A copy of the DataFrame with duplicate rows removed if drop is True.
+    df_dup : pandas.DataFrame
+        A copy of the DataFrame with only duplicate rows if any.
 
-        Raises:
-        -------
-        AssertionError :
-            If any column from `cols` is not present in the DataFrame.
-            If sorting_col is not present in the DataFrame.
-            If keep is not one of 'first', 'last', or False.
+    Raises:
+    -------
+    AssertionError :
+        If any column from `cols` is not present in the DataFrame.
+        If sorting_col is not present in the DataFrame.
+        If keep is not one of 'first', 'last', or False.
 
-        Example:
-        --------
-        # >>> df = pd.DataFrame({'A': [1, 2, 2], 'B': [4, 5, 4], 'C': [7, 8, 9]})
-        # >>> df_clean, df_dup = check_duplicates(df, cols=['A', 'B'], keep='last')
-        # >>> print(df_clean)
-           A  B  C
-        0  1  4  7
-        2  2  4  9
-        # >>> print(df_dup)
-           A  B  C
-        1  2  5  8
-        """
+    Example:
+    --------
+    # >>> df = pd.DataFrame({'A': [1, 2, 2], 'B': [4, 5, 4], 'C': [7, 8, 9]})
+    # >>> df_clean, df_dup = check_duplicates(df, cols=['A', 'B'], keep='last')
+    # >>> print(df_clean)
+       A  B  C
+    0  1  4  7
+    2  2  4  9
+    # >>> print(df_dup)
+       A  B  C
+    1  2  5  8
+    """
     # df = df[[x, y]].
     if not isinstance(cols, list):
         cols = [cols]
@@ -247,14 +248,14 @@ def check_duplicates(
 
 
 def check_nan_duplicated(
-        df,
-        cols_nan: Union[List[str], str] = "smiles",
-        cols_dup: Union[List[str], str] = "smiles",
-        nan_dup_source="",
-        drop=True,
-        sorting_col="",
-        keep="first",
-        logger=None,
+    df,
+    cols_nan: Union[List[str], str] = "smiles",
+    cols_dup: Union[List[str], str] = "smiles",
+    nan_dup_source="",
+    drop=True,
+    sorting_col="",
+    keep="first",
+    logger=None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Check for NaN and duplicated values in a pandas DataFrame.

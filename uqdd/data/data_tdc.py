@@ -10,8 +10,8 @@ import torch
 from tdc.benchmark_group import dti_dg_group
 from tdc.multi_pred import DTI
 from tdc.chem_utils import MolConvert
-from uqdd.chemutils import scaffold_split, standardize_df, generate_ecfp
-from uqdd.utils import create_logger, transformer_featurizer
+from uqdd.utils_chem import scaffold_split, standardize_df, generate_ecfp
+from uqdd.utils import create_logger
 
 DATA_DIR = os.environ.get("DATA_DIR")
 default_path = os.path.join(DATA_DIR, "tdc/")
