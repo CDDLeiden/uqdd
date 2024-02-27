@@ -5,6 +5,8 @@ from typing import Union, List, Tuple
 from PIL import Image
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
+from concurrent.futures import ProcessPoolExecutor
 
 import rdkit
 from rdkit import Chem, RDLogger
@@ -15,7 +17,7 @@ from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculat
 
 from uqdd.utils import check_nan_duplicated, custom_agg
 
-RDLogger.DisableLog('rdApp.info')
+RDLogger.DisableLog("rdApp.info")
 print(f"rdkit {rdkit.__version__}")
 
 
@@ -71,7 +73,12 @@ def standardize(smi, logger=None, suppress_exception=False):
         # Functional Groups Normalization
         mol = Chem.MolFromSmiles(smi)
         mol.UpdatePropertyCache(strict=False)
-        Chem.SanitizeMol(mol, sanitizeOps=(Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES))
+        Chem.SanitizeMol(
+            mol,
+            sanitizeOps=(
+                Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES
+            ),
+        )
         mol = rdMolStandardize.Normalize(mol)
 
         # Neutralization
@@ -89,15 +96,22 @@ def standardize(smi, logger=None, suppress_exception=False):
     return Chem.MolToSmiles(mol)
 
 
+def standardize_wrapper(args):
+    """
+    Wrapper function for the standardize function to be used with the concurrent.futures.ProcessPoolExecutor.
+    """
+    return standardize(*args)
+
+
 def standardize_df(
-        df: pd.DataFrame,
-        smiles_col: str = 'smiles',
-        other_dup_col: Union[List[str], str] = None,
-        sorting_col: str = "",
-        drop: bool = True,
-        keep: Union[bool, str] = "last",
-        logger=None,
-        suppress_exception=True,
+    df: pd.DataFrame,
+    smiles_col: str = "SMILES",
+    other_dup_col: Union[List[str], str] = None,
+    sorting_col: str = "",
+    drop: bool = True,
+    keep: Union[bool, str] = "last",
+    logger=None,
+    suppress_exception=True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Applies a standardization workflow to the 'smiles' column of a pandas dataframe.
@@ -145,10 +159,12 @@ def standardize_df(
     of the input dataframe,
     and replaces the column with the standardized versions.
     """
-    aggregate = None
     if keep == "aggregate":
         keep = False
         aggregate = True
+    else:
+        aggregate = False
+
     if other_dup_col:
         if not isinstance(other_dup_col, list):
             other_dup_col = [other_dup_col]
@@ -175,25 +191,49 @@ def standardize_df(
             f"is: {df_dup_before.shape[0]} duplicated rows"
         )
 
-    # standardizing the SMILES
-    # progress_apply is a wrapper around apply that uses tqdm to show a progress bar
+    # standardizing the SMILES in parallel
     start_time = time.time()
-    # df_filtered smiles standardization
-    df_filtered[smiles_col] = df_filtered[smiles_col].apply(
-        standardize,
-        logger=logger,
-        suppress_exception=suppress_exception)
-    # df_dup_before smiles standardization
-    df_dup_before[smiles_col] = df_dup_before[smiles_col].apply(
-        standardize,
-        logger=logger,
-        suppress_exception=suppress_exception)
+    tqdm.pandas(desc="Standardizing SMILES")
+    unique_smiles = df_filtered[smiles_col].unique()
+    args_list = [(smi, logger, suppress_exception) for smi in unique_smiles]
+    standardized_result = {}
+    with ProcessPoolExecutor() as executor:
+        results = list(
+            tqdm(
+                executor.map(standardize_wrapper, args_list),
+                total=len(args_list),
+                desc="Standardizing Unique SMILES",
+            )
+        )
 
+    for smi, result in zip(unique_smiles, results):
+        standardized_result[smi] = result
+
+    # Apply the standardized result to the dataframe
+    df_filtered[smiles_col] = df_filtered[smiles_col].map(standardized_result)
     if logger:
         logger.info(
             "SMILES standardization took --- %s seconds ---"
             % (time.time() - start_time)
         )
+
+    # # progress_apply is a wrapper around apply that uses tqdm to show a progress bar
+    # start_time = time.time()
+    # tqdm.pandas(desc="Standardizing SMILES")
+    # # df_filtered smiles standardization
+    # df_filtered[smiles_col] = df_filtered[smiles_col].progress_apply(
+    #     standardize, logger=logger, suppress_exception=suppress_exception
+    # )
+    # # df_dup_before smiles standardization
+    # df_dup_before[smiles_col] = df_dup_before[smiles_col].progress_apply(
+    #     standardize, logger=logger, suppress_exception=suppress_exception
+    # )
+    #
+    # if logger:
+    #     logger.info(
+    #         "SMILES standardization took --- %s seconds ---"
+    #         % (time.time() - start_time)
+    #     )
 
     # checking NaN & duplicate after standardization
     df_filtered, df_nan_after, df_dup_after = check_nan_duplicated(
@@ -230,11 +270,7 @@ def standardize_df(
 
 # define function that transforms SMILES strings into ECFPs
 def ecfp_from_smiles(
-        smiles,
-        radius=2,
-        length=2 ** 10,
-        use_features=False,
-        use_chirality=False
+    smiles, radius=2, length=2**10, use_features=False, use_chirality=False
 ):
     """
     Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
@@ -272,12 +308,19 @@ def ecfp_from_smiles(
         radius=radius,
         nBits=length,
         useFeatures=use_features,
-        useChirality=use_chirality
+        useChirality=use_chirality,
     )
     return np.array(feature_list)
 
 
-def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chirality=False, smiles_col='smiles'):
+def generate_ecfp(
+    df,
+    radius=2,
+    length=2**10,
+    use_features=False,
+    use_chirality=False,
+    smiles_col="smiles",
+):
     """
     Generates ECFP fingerprints from the 'smiles' column of a pandas dataframe.
 
@@ -313,50 +356,220 @@ def generate_ecfp(df, radius=2, length=2 ** 10, use_features=False, use_chiralit
     # Generate ECFP fingerprints
     # for length in [2 ** i for i in range(5, 12)]:
 
-    df[f'ecfp{length}'] = df[smiles_col].apply(
+    df[f"ecfp{length}"] = df[smiles_col].apply(
         lambda x: ecfp_from_smiles(
-            x, radius=radius, length=length, use_features=use_features, use_chirality=use_chirality
-        ))
+            x,
+            radius=radius,
+            length=length,
+            use_features=use_features,
+            use_chirality=use_chirality,
+        )
+    )
 
     return df
 
 
 descriptors = [
-    'BalabanJ', 'BertzCT', 'Chi0', 'Chi0n', 'Chi0v', 'Chi1', 'Chi1n', 'Chi1v', 'Chi2n', 'Chi2v',
-    'Chi3n', 'Chi3v', 'Chi4n', 'Chi4v', 'EState_VSA1', 'EState_VSA10', 'EState_VSA11',
-    'EState_VSA2', 'EState_VSA3', 'EState_VSA4', 'EState_VSA5', 'EState_VSA6', 'EState_VSA7',
-    'EState_VSA8', 'EState_VSA9', 'ExactMolWt', 'FpDensityMorgan1', 'FpDensityMorgan2',
-    'FpDensityMorgan3', 'FractionCSP3', 'HallKierAlpha', 'HeavyAtomCount', 'HeavyAtomMolWt',
-    'Ipc', 'Kappa1', 'Kappa2', 'Kappa3', 'LabuteASA', 'MaxAbsEStateIndex',
-    'MaxAbsPartialCharge',
-    'MaxEStateIndex', 'MaxPartialCharge', 'MinAbsEStateIndex', 'MinAbsPartialCharge',
-    'MinEStateIndex', 'MinPartialCharge', 'MolLogP', 'MolMR', 'MolWt', 'NHOHCount', 'NOCount',
-    'NumAliphaticCarbocycles', 'NumAliphaticHeterocycles', 'NumAliphaticRings',
-    'NumAromaticCarbocycles', 'NumAromaticHeterocycles', 'NumAromaticRings', 'NumHAcceptors',
-    'NumHDonors', 'NumHeteroatoms', 'NumRadicalElectrons', 'NumRotatableBonds',
-    'NumSaturatedCarbocycles', 'NumSaturatedHeterocycles', 'NumSaturatedRings',
-    'NumValenceElectrons', 'PEOE_VSA1', 'PEOE_VSA10', 'PEOE_VSA11', 'PEOE_VSA12', 'PEOE_VSA13',
-    'PEOE_VSA14', 'PEOE_VSA2', 'PEOE_VSA3', 'PEOE_VSA4', 'PEOE_VSA5', 'PEOE_VSA6', 'PEOE_VSA7',
-    'PEOE_VSA8', 'PEOE_VSA9', 'RingCount', 'SMR_VSA1', 'SMR_VSA10', 'SMR_VSA2', 'SMR_VSA3',
-    'SMR_VSA4', 'SMR_VSA5', 'SMR_VSA6', 'SMR_VSA7', 'SMR_VSA8', 'SMR_VSA9', 'SlogP_VSA1',
-    'SlogP_VSA10', 'SlogP_VSA11', 'SlogP_VSA12', 'SlogP_VSA2', 'SlogP_VSA3', 'SlogP_VSA4',
-    'SlogP_VSA5', 'SlogP_VSA6', 'SlogP_VSA7', 'SlogP_VSA8', 'SlogP_VSA9', 'TPSA', 'VSA_EState1',
-    'VSA_EState10', 'VSA_EState2', 'VSA_EState3', 'VSA_EState4', 'VSA_EState5', 'VSA_EState6',
-    'VSA_EState7', 'VSA_EState8', 'VSA_EState9', 'fr_Al_COO', 'fr_Al_OH', 'fr_Al_OH_noTert',
-    'fr_ArN', 'fr_Ar_COO', 'fr_Ar_N', 'fr_Ar_NH', 'fr_Ar_OH', 'fr_COO', 'fr_COO2', 'fr_C_O',
-    'fr_C_O_noCOO', 'fr_C_S', 'fr_HOCCN', 'fr_Imine', 'fr_NH0', 'fr_NH1', 'fr_NH2', 'fr_N_O',
-    'fr_Ndealkylation1', 'fr_Ndealkylation2', 'fr_Nhpyrrole', 'fr_SH', 'fr_aldehyde',
-    'fr_alkyl_carbamate', 'fr_alkyl_halide', 'fr_allylic_oxid', 'fr_amide', 'fr_amidine',
-    'fr_aniline', 'fr_aryl_methyl', 'fr_azide', 'fr_azo', 'fr_barbitur', 'fr_benzene',
-    'fr_benzodiazepine', 'fr_bicyclic', 'fr_diazo', 'fr_dihydropyridine', 'fr_epoxide',
-    'fr_ester', 'fr_ether', 'fr_furan', 'fr_guanido', 'fr_halogen', 'fr_hdrzine', 'fr_hdrzone',
-    'fr_imidazole', 'fr_imide', 'fr_isocyan', 'fr_isothiocyan', 'fr_ketone', 'fr_ketone_Topliss',
-    'fr_lactam', 'fr_lactone', 'fr_methoxy', 'fr_morpholine', 'fr_nitrile', 'fr_nitro',
-    'fr_nitro_arom', 'fr_nitro_arom_nonortho', 'fr_nitroso', 'fr_oxazole', 'fr_oxime',
-    'fr_para_hydroxylation', 'fr_phenol', 'fr_phenol_noOrthoHbond', 'fr_phos_acid',
-    'fr_phos_ester', 'fr_piperdine', 'fr_piperzine', 'fr_priamide', 'fr_prisulfonamd',
-    'fr_pyridine', 'fr_quatN', 'fr_sulfide', 'fr_sulfonamd', 'fr_sulfone', 'fr_term_acetylene',
-    'fr_tetrazole', 'fr_thiazole', 'fr_thiocyan', 'fr_thiophene', 'fr_unbrch_alkane', 'fr_urea', 'qed'
+    "BalabanJ",
+    "BertzCT",
+    "Chi0",
+    "Chi0n",
+    "Chi0v",
+    "Chi1",
+    "Chi1n",
+    "Chi1v",
+    "Chi2n",
+    "Chi2v",
+    "Chi3n",
+    "Chi3v",
+    "Chi4n",
+    "Chi4v",
+    "EState_VSA1",
+    "EState_VSA10",
+    "EState_VSA11",
+    "EState_VSA2",
+    "EState_VSA3",
+    "EState_VSA4",
+    "EState_VSA5",
+    "EState_VSA6",
+    "EState_VSA7",
+    "EState_VSA8",
+    "EState_VSA9",
+    "ExactMolWt",
+    "FpDensityMorgan1",
+    "FpDensityMorgan2",
+    "FpDensityMorgan3",
+    "FractionCSP3",
+    "HallKierAlpha",
+    "HeavyAtomCount",
+    "HeavyAtomMolWt",
+    "Ipc",
+    "Kappa1",
+    "Kappa2",
+    "Kappa3",
+    "LabuteASA",
+    "MaxAbsEStateIndex",
+    "MaxAbsPartialCharge",
+    "MaxEStateIndex",
+    "MaxPartialCharge",
+    "MinAbsEStateIndex",
+    "MinAbsPartialCharge",
+    "MinEStateIndex",
+    "MinPartialCharge",
+    "MolLogP",
+    "MolMR",
+    "MolWt",
+    "NHOHCount",
+    "NOCount",
+    "NumAliphaticCarbocycles",
+    "NumAliphaticHeterocycles",
+    "NumAliphaticRings",
+    "NumAromaticCarbocycles",
+    "NumAromaticHeterocycles",
+    "NumAromaticRings",
+    "NumHAcceptors",
+    "NumHDonors",
+    "NumHeteroatoms",
+    "NumRadicalElectrons",
+    "NumRotatableBonds",
+    "NumSaturatedCarbocycles",
+    "NumSaturatedHeterocycles",
+    "NumSaturatedRings",
+    "NumValenceElectrons",
+    "PEOE_VSA1",
+    "PEOE_VSA10",
+    "PEOE_VSA11",
+    "PEOE_VSA12",
+    "PEOE_VSA13",
+    "PEOE_VSA14",
+    "PEOE_VSA2",
+    "PEOE_VSA3",
+    "PEOE_VSA4",
+    "PEOE_VSA5",
+    "PEOE_VSA6",
+    "PEOE_VSA7",
+    "PEOE_VSA8",
+    "PEOE_VSA9",
+    "RingCount",
+    "SMR_VSA1",
+    "SMR_VSA10",
+    "SMR_VSA2",
+    "SMR_VSA3",
+    "SMR_VSA4",
+    "SMR_VSA5",
+    "SMR_VSA6",
+    "SMR_VSA7",
+    "SMR_VSA8",
+    "SMR_VSA9",
+    "SlogP_VSA1",
+    "SlogP_VSA10",
+    "SlogP_VSA11",
+    "SlogP_VSA12",
+    "SlogP_VSA2",
+    "SlogP_VSA3",
+    "SlogP_VSA4",
+    "SlogP_VSA5",
+    "SlogP_VSA6",
+    "SlogP_VSA7",
+    "SlogP_VSA8",
+    "SlogP_VSA9",
+    "TPSA",
+    "VSA_EState1",
+    "VSA_EState10",
+    "VSA_EState2",
+    "VSA_EState3",
+    "VSA_EState4",
+    "VSA_EState5",
+    "VSA_EState6",
+    "VSA_EState7",
+    "VSA_EState8",
+    "VSA_EState9",
+    "fr_Al_COO",
+    "fr_Al_OH",
+    "fr_Al_OH_noTert",
+    "fr_ArN",
+    "fr_Ar_COO",
+    "fr_Ar_N",
+    "fr_Ar_NH",
+    "fr_Ar_OH",
+    "fr_COO",
+    "fr_COO2",
+    "fr_C_O",
+    "fr_C_O_noCOO",
+    "fr_C_S",
+    "fr_HOCCN",
+    "fr_Imine",
+    "fr_NH0",
+    "fr_NH1",
+    "fr_NH2",
+    "fr_N_O",
+    "fr_Ndealkylation1",
+    "fr_Ndealkylation2",
+    "fr_Nhpyrrole",
+    "fr_SH",
+    "fr_aldehyde",
+    "fr_alkyl_carbamate",
+    "fr_alkyl_halide",
+    "fr_allylic_oxid",
+    "fr_amide",
+    "fr_amidine",
+    "fr_aniline",
+    "fr_aryl_methyl",
+    "fr_azide",
+    "fr_azo",
+    "fr_barbitur",
+    "fr_benzene",
+    "fr_benzodiazepine",
+    "fr_bicyclic",
+    "fr_diazo",
+    "fr_dihydropyridine",
+    "fr_epoxide",
+    "fr_ester",
+    "fr_ether",
+    "fr_furan",
+    "fr_guanido",
+    "fr_halogen",
+    "fr_hdrzine",
+    "fr_hdrzone",
+    "fr_imidazole",
+    "fr_imide",
+    "fr_isocyan",
+    "fr_isothiocyan",
+    "fr_ketone",
+    "fr_ketone_Topliss",
+    "fr_lactam",
+    "fr_lactone",
+    "fr_methoxy",
+    "fr_morpholine",
+    "fr_nitrile",
+    "fr_nitro",
+    "fr_nitro_arom",
+    "fr_nitro_arom_nonortho",
+    "fr_nitroso",
+    "fr_oxazole",
+    "fr_oxime",
+    "fr_para_hydroxylation",
+    "fr_phenol",
+    "fr_phenol_noOrthoHbond",
+    "fr_phos_acid",
+    "fr_phos_ester",
+    "fr_piperdine",
+    "fr_piperzine",
+    "fr_priamide",
+    "fr_prisulfonamd",
+    "fr_pyridine",
+    "fr_quatN",
+    "fr_sulfide",
+    "fr_sulfonamd",
+    "fr_sulfone",
+    "fr_term_acetylene",
+    "fr_tetrazole",
+    "fr_thiazole",
+    "fr_thiocyan",
+    "fr_thiophene",
+    "fr_unbrch_alkane",
+    "fr_urea",
+    "qed",
 ]
 
 
@@ -399,9 +612,8 @@ def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
 
 
 def generate_mol_descriptors(
-        df: pd.DataFrame,
-        smiles_col: str = 'SMILES',
-        chosen_descriptors: List[str] = None) -> pd.DataFrame:
+    df: pd.DataFrame, smiles_col: str = "SMILES", chosen_descriptors: List[str] = None
+) -> pd.DataFrame:
     """
     Applies the `mol_descriptors` function to a pandas dataframe and returns a new dataframe
     with additional columns containing the calculated descriptor values.
@@ -428,10 +640,14 @@ def generate_mol_descriptors(
         chosen_descriptors = descriptors
 
     # apply mol_descriptors() to the 'smiles' column using the .apply() method
-    calc_descriptors = new_df[smiles_col].apply(mol_descriptors, chosen_descriptors=chosen_descriptors)
+    calc_descriptors = new_df[smiles_col].apply(
+        mol_descriptors, chosen_descriptors=chosen_descriptors
+    )
 
     # convert the list of descriptor values to a DataFrame with separate columns
-    descriptor_df = pd.DataFrame(calc_descriptors, columns=chosen_descriptors)  # .tolist()
+    descriptor_df = pd.DataFrame(
+        calc_descriptors, columns=chosen_descriptors
+    )  # .tolist()
 
     # concatenate the new DataFrame with the original DataFrame
     # new_df = pd.concat([new_df, descriptor_df], axis=1)
@@ -443,7 +659,7 @@ def generate_mol_descriptors(
         right_index=True,
         how="left",
         on=None,
-        validate="many_to_many"
+        validate="many_to_many",
     )
     return new_df
 
@@ -464,7 +680,9 @@ def generate_mol_descriptors(
     # return new_df
 
 
-def mol_to_pil_image(molecule: Chem.rdchem.Mol, width: int = 300, height: int = 300) -> Image:
+def mol_to_pil_image(
+    molecule: Chem.rdchem.Mol, width: int = 300, height: int = 300
+) -> Image:
     """
     Converts an RDKit molecule to a PIL image.
 
@@ -534,7 +752,9 @@ def generate_scaffold(smiles, include_chirality=False):
         The scaffold SMILES string.
     """
     try:
-        scaffold = MurckoScaffold.MurckoScaffoldSmiles(smiles=smiles, includeChirality=include_chirality)
+        scaffold = MurckoScaffold.MurckoScaffoldSmiles(
+            smiles=smiles, includeChirality=include_chirality
+        )
     except Exception as e:
         scaffold = None
         print(f"following error {e} \n occurred while processing smiles: {smiles}")
@@ -542,19 +762,16 @@ def generate_scaffold(smiles, include_chirality=False):
 
 
 def get_chem_desc(
-        df,
-        smiles_col: str = 'SMILES',
-        desc_chem: str = 'ecfp1024',
-        **kwargs
+    df, smiles_col: str = "SMILES", desc_chem: str = "ecfp1024", **kwargs
 ):
     desc_chem = desc_chem.lower()
-    if desc_chem == 'ecfp1024':
+    if desc_chem == "ecfp1024":
         df = generate_ecfp(df, radius=2, length=1024, smiles_col=smiles_col, **kwargs)
-    elif desc_chem == 'ecfp2048':
+    elif desc_chem == "ecfp2048":
         df = generate_ecfp(df, radius=4, length=2048, smiles_col=smiles_col, **kwargs)
-    elif desc_chem == 'moldesc':
+    elif desc_chem == "moldesc":
         df = generate_mol_descriptors(df, smiles_col=smiles_col, **kwargs)
-    elif desc_chem == 'graph2d':
+    elif desc_chem == "graph2d":
         raise NotImplementedError
     else:
         raise ValueError(f"desc_mol: {desc_chem} is not a valid molecular descriptor")

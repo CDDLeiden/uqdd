@@ -7,7 +7,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from uqdd import DATASET_DIR, DEVICE
 from uqdd.utils_chem import generate_scaffold
-from uqdd.data.data_papyrus import PapyrusDatasetMT
+
+# from uqdd.data.data_papyrus import PapyrusDatasetMT
 
 string_types = (type(b""), type(""))
 
@@ -94,24 +95,25 @@ def get_dataset_sizes(datasets):
         logging.info(f"{name} set size: {len(dataset)}")
 
 
-def get_datasets(activity, split_type, device=DEVICE):
-    try:
-        paths = {
-            split: os.path.join(DATASET_DIR, activity, split_type, f"{split}.pkl")
-            for split in ["train", "val", "test"]
-        }
-        datasets = {}
-
-        for input_col in ["ecfp1024", "ecfp2048"]:
-            for split, dataset_path in paths.items():
-                key = f"{split}_{input_col}"
-                datasets[key] = PapyrusDatasetMT(
-                    dataset_path, input_col=input_col, device=device
-                )
-        return datasets
-
-    except Exception as e:
-        raise RuntimeError(f"Error loading datasets: {e}")
+# TODO check this function
+# def get_datasets(activity, split_type, device=DEVICE):
+#     try:
+#         paths = {
+#             split: os.path.join(DATASET_DIR, activity, split_type, f"{split}.pkl")
+#             for split in ["train", "val", "test"]
+#         }
+#         datasets = {}
+#
+#         for input_col in ["ecfp1024", "ecfp2048"]:
+#             for split, dataset_path in paths.items():
+#                 key = f"{split}_{input_col}"
+#                 datasets[key] = PapyrusDatasetMT(
+#                     dataset_path, input_col=input_col, device=device
+#                 )
+#         return datasets
+#
+#     except Exception as e:
+#         raise RuntimeError(f"Error loading datasets: {e}")
 
 
 def get_data_info(train_data, val_data, test_data):
