@@ -23,8 +23,8 @@ from papyrus_scripts.reader import (
 from torch.utils.data import Dataset
 from uqdd import TODAY, DATA_DIR, DATASET_DIR
 from uqdd.utils import create_logger, get_config
-from uqdd.utils_chem import standardize_df, generate_ecfp
-from uqdd.data.utils_data import split_data
+from uqdd.utils_chem import standardize_df
+from uqdd.data.utils_data import split_data, export_df, load_df
 
 
 class Papyrus:
@@ -53,12 +53,99 @@ class Papyrus:
             self.pap_path,
             self.pap_file,
             self.pap_protpath,
-        ) = self._setup_path(self.activity_type)
+        ) = self._setup_path(activity_type)
         self.std_smiles, self.verbose_files = std_smiles, verbose_files
-        self.df_filtered, self.papyrus_protein_data = self._load_or_process_file()
+        self.df_filtered, self.papyrus_protein_data = self._load_or_process_papyrus()
 
-    def __call__(self):
-        return self._process_papyrus()
+    def __call__(
+        self,
+        ntop: int = -1,
+        desc_prot: Union[str, None] = None,
+        desc_chem: Union[str, None] = None,
+        recalculate: bool = False,
+        split_type: str = "random",
+        split_proportions=None,
+        file_ext: str = "pkl",
+        # multitask: bool = True,
+    ):
+        # step 1: get the data top-x or all
+        df, output_path, label_col = self._get_ntop_or_all_dataset(ntop=ntop)
+
+        # step 2: merge the descriptors
+        df = self.merge_descriptors(
+            desc_prot,
+            desc_chem,
+            df=df,
+            target_id_col="target_id",
+            connectivity_col="connectivity",
+        )
+
+        # step 3: split the data
+        # step 4: export the data
+
+        if split_proportions is None:
+            split_proportions = [0.7, 0.15, 0.15]
+
+        df = self._data_preparation(
+            ntop,
+            split_type,
+            desc_prot,
+            desc_chem,
+            recalculate,
+            # multitask,
+        )
+
+    def _get_ntop_or_all_dataset(
+        self,
+        ntop=20,
+    ):
+        if ntop > 0:
+            df, top_targets = self._get_top_targets(self.df_filtered, ntop)
+            output_path = self.output_path / f"top{ntop}"
+            # if multitask:
+            pivoted = pd.pivot_table(
+                df,
+                index="SMILES",
+                columns="accession",
+                values="pchembl_value_Mean",
+                aggfunc="first",
+            )
+            # reset the index to make the "smiles" column a regular column
+            pivoted = pivoted.reset_index()
+            # replace any missing values with NaN
+            df = pivoted.fillna(value=np.nan)
+            label_col = list(top_targets.index)
+        else:
+            # dataset/papyrus/xc50/all/
+            output_path = self.output_path / "all"
+            df = self.df_filtered.copy()  # the whole thing
+            label_col = ["pchembl_value_Mean"]
+
+        os.makedirs(output_path, exist_ok=True)
+        return df, output_path, label_col
+
+        # df = self.merge_descriptors(
+        #     df,
+        #     desc_prot,
+        #     desc_chem,
+        # )
+        #
+        # # Split the data
+        # all_data = split_data(
+        #     df,
+        #     split_type=split_type,
+        #     smiles_col="SMILES",
+        #     time_col="Year",
+        #     train_frac=0.7,
+        #     val_frac=0.15,
+        #     test_frac=0.15,
+        #     seed=42,
+        #     output_path=self.output_path,
+        #     label_col=label_col,
+        # )
+        # # export data
+        # # export_df()
+        # return all_data
 
     def merge_descriptors(
         self,
@@ -100,48 +187,82 @@ class Papyrus:
         out_path.mkdir(parents=True, exist_ok=True)
         pap_filepath = out_path / "papyrus_filtered.csv"
         pap_file = pap_filepath.is_file()
-        pap_path = out_path if pap_file else DATA_DIR
+        pap_path = pap_filepath if pap_file else DATA_DIR
         pap_protpath = DATASET_DIR / "papyrus" / "papyrus_proteins.csv"
 
         return out_path, pap_filepath, pap_path, pap_file, pap_protpath
 
-    def _load_or_process_file(self):
+    def _load_or_process_papyrus(self):
         if self.pap_file:
             self.log.info("Loading previously processed Papyrus data ...")
-            df_filtered = pd.read_csv(
-                self.pap_path, index_col=0, dtype=self.dtypes, low_memory=False
-            )
-            papyrus_protein_data = pd.read_csv(
-                self.pap_protpath,
-                index_col=0,
-                dtype=self.dtypes_protein,
-                low_memory=False,
-            )
+            df_filtered, papyrus_protein_data = self._load_files()
+
         else:
             self.log.info("PapyrusApi processing input from Raw Papyrus database")
-            papyrus_data, papyrus_protein_data = self._reader()
-            df_filtered = self._filter_raw_file(papyrus_data, papyrus_protein_data)
-            # Forcing verbose here to avoid reprocessing
-            df_filtered.to_csv(self.pap_filepath)
-            papyrus_protein_data.to_csv(self.pap_protpath)
+            df_filtered, papyrus_protein_data = self._preprocess_papyrus()
 
         return df_filtered, papyrus_protein_data
 
-    def _process_papyrus(self):
-        self.log.info("Processing Papyrus data ...")
+    def _load_files(self):
+        df_filtered = pd.read_csv(self.pap_path, dtype=self.dtypes, low_memory=False)
+        papyrus_protein_data = pd.read_csv(
+            self.pap_protpath,
+            dtype=self.dtypes_protein,
+            low_memory=False,
+        )
+
+        return df_filtered, papyrus_protein_data
+
+    def _preprocess_papyrus(self):
+        papyrus_data, papyrus_protein_data = self._reader()
+        df_filtered = self._filter_raw_file(papyrus_data, papyrus_protein_data)
+
         df_nan, df_dup = None, None
         # SMILES standardization
         if self.std_smiles:
-            self.df_filtered, df_nan, df_dup = self._sanitize_smiles()
-
+            df_filtered, df_nan, df_dup = self._sanitize_smiles()
+        # Keeping only the columns we need
         if self.cols_to_keep:
-            self.df_filtered = self.df_filtered[self.cols_to_keep]
-
+            df_filtered = df_filtered[self.cols_to_keep]
         # Verbosing files
         if self.verbose_files:
-            self._verbosing_files(self.df_filtered, df_nan, df_dup)
+            self._verbosing_files(df_filtered, df_nan, df_dup)
 
-        return self.df_filtered
+        # Forcing verbose here to avoid reprocessing
+        df_filtered.to_csv(self.pap_filepath, index=False)
+        papyrus_protein_data.to_csv(self.pap_protpath, index=False)
+
+        return df_filtered, papyrus_protein_data
+
+        # df_nan, df_dup = None, None
+        # # SMILES standardization
+        # if self.std_smiles:
+        #     self.df_filtered, df_nan, df_dup = self._sanitize_smiles()
+        #
+        # if self.cols_to_keep:
+        #     self.df_filtered = self.df_filtered[self.cols_to_keep]
+        #
+        # # Verbosing files
+        # if self.verbose_files:
+        #     self._verbosing_files(self.df_filtered, df_nan, df_dup)
+        #
+        # return self.df_filtered
+
+    @staticmethod
+    def _get_top_targets(df, ntop=20):
+        # step 1: group the dataframe by protein target
+        grouped = df.groupby("accession")
+        # step 2: count the number of measurements for each protein target
+        counts = grouped["accession"].count()
+        # step 3: sort the counts in descending order
+        sorted_counts = counts.sort_values(ascending=False, by="counts")
+        # step 4: select the x protein targets with the highest counts
+        top_targets = sorted_counts.head(ntop)
+        # step 5: filter the original dataframe to only include rows corresponding to these x protein targets
+        filtered_df = df[df["accession"].isin(top_targets.index)]
+        # step 6: filter the dataframe to only include rows with a pchembl value mean
+        filtered_df = filtered_df[filtered_df["pchembl_value_Mean"].notna()]
+        return filtered_df, top_targets
 
     @staticmethod
     def _parse_activity_key(activity_type):
@@ -282,20 +403,20 @@ class Papyrus:
         self, df, target_id_col="target_id", desc_type="unirep"
     ):
         self.log.info("Merging protein descriptors")
-        if isinstance(desc_type, list):
-            for desc in desc_type:
-                df = self._merge_protein_descriptors(df, target_id_col, desc_type=desc)
-
-        elif isinstance(desc_type, str):
-            protein_descriptors = self._get_protein_descriptors(
-                df, target_id_col, desc_type=desc_type
-            )
-            df = df.merge(
-                protein_descriptors,
-                left_on=target_id_col,
-                right_on="target_id",
-                how="left",
-            )
+        # if isinstance(desc_type, list):
+        #     for desc in desc_type:
+        #         df = self._merge_protein_descriptors(df, target_id_col, desc_type=desc)
+        #
+        # elif isinstance(desc_type, str):
+        protein_descriptors = self._get_protein_descriptors(
+            df, target_id_col, desc_type=desc_type
+        )
+        df = df.merge(
+            protein_descriptors,
+            left_on=target_id_col,
+            right_on="target_id",
+            how="left",
+        )
 
         return df
 
@@ -367,14 +488,14 @@ class PapyrusDataProcessor:
 
     def __call__(
         self,
-        n_top: int = -1,
+        ntop: int = -1,
         # multitask: bool = True,
         split_type: str = "random",
         desc_prot: Union[str, List[str], None] = None,
         desc_chem: Union[str, List[str], None] = None,
     ):
         return self._data_preparation(
-            n_top,
+            ntop,
             # multitask,
             split_type,
             desc_prot,
@@ -382,12 +503,12 @@ class PapyrusDataProcessor:
         )
 
     def _data_preparation(
-        self, n_top=20, split_type="random", desc_prot=None, desc_chem=None
+        self, ntop=20, split_type="random", desc_prot=None, desc_chem=None
     ):
         label_col = ["pchembl_value_Mean"]
-        if n_top > 0:
-            df, top_targets = self._get_top_targets(self.papyrus_df, n_top)
-            self.output_path = self.output_path / f"top{n_top}"
+        if ntop > 0:
+            df, top_targets = self._get_top_targets(self.papyrus_df, ntop)
+            self.output_path = self.output_path / f"top{ntop}"
             # if multitask:
             pivoted = pd.pivot_table(
                 df,
@@ -429,7 +550,7 @@ class PapyrusDataProcessor:
         return all_data
 
     @staticmethod
-    def _get_top_targets(df, n_top=20):
+    def _get_top_targets(df, ntop=20):
         # step 1: group the dataframe by protein target
         grouped = df.groupby("accession")
         # step 2: count the number of measurements for each protein target
@@ -437,15 +558,15 @@ class PapyrusDataProcessor:
         # step 3: sort the counts in descending order
         sorted_counts = counts.sort_values(ascending=False, by="counts")
         # step 4: select the x protein targets with the highest counts
-        top_targets = sorted_counts.head(n_top)
+        top_targets = sorted_counts.head(ntop)
         # step 5: filter the original dataframe to only include rows corresponding to these x protein targets
         filtered_df = df[df["accession"].isin(top_targets.index)]
         # step 6: filter the dataframe to only include rows with a pchembl value mean
         filtered_df = filtered_df[filtered_df["pchembl_value_Mean"].notna()]
         return filtered_df, top_targets
 
-    def _get_descriptors(self, df, desc_prot, desc_chem, n_top=-1):
-        if n_top > 0 and desc_prot:
+    def _get_descriptors(self, df, desc_prot, desc_chem, ntop=-1):
+        if ntop > 0 and desc_prot:
             self.log.warning(
                 "Multitask learning with protein descriptors not supported - desc_prot will be ignored"
             )

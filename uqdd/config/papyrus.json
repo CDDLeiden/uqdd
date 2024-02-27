@@ -53,7 +53,7 @@
     "pchemblValueMean": "float64",
     "pchemblValueStdDev": "float64",
     "pchemblValueSEM": "float64",
-    "pchemblValueN": "int32",
+    "pchemblValueN": "int64",
     "pchemblValueMedian": "float64",
     "pchemblValueMAD": "float64"
   },
@@ -64,7 +64,7 @@
     "Status": "str",
     "Organism": "str",
     "Classification": "str",
-    "Length": "int",
+    "Length": "Int64",
     "Sequence": "str",
     "TID":  "str"
   }
