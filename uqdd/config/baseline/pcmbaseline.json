@@ -1,0 +1,39 @@
+{
+  "chem_input_dim": 1024,
+  "prot_input_dim": 1024,
+  "chem_model_config": {
+    "layers": [1024, 512, 256],
+    "dropout": 0.2
+  },
+  "prot_model_config": {
+    "layers": [512, 256, 128],
+    "dropout": 0.2
+  },
+  "model_config": {
+    "dropout": 0.2
+  },
+  "regressor_config": {
+    "layers": [384, 192, 1]
+  },
+  "activity": "xc50",
+  "split": "random",
+
+  "training_config": {
+    "batch_size": 128,
+    "epochs": 3000,
+    "early_stop": 100,
+
+    "optimizer": {
+      "type": "adam",
+      "lr": 1e-3,
+      "weight_decay": 1e-4
+    },
+    "lr_scheduler": {
+      "type": "ReduceLROnPlateau",
+      "patience": 20,
+      "factor": 0.5
+    }
+  },
+  "optimizer": "adam",
+  "loss": "huber"
+}
