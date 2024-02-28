@@ -1,14 +1,16 @@
 import os
 import pickle
 import logging
+from pathlib import Path
+from typing import Union, List
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from uqdd import DATASET_DIR, DEVICE
 from uqdd.utils_chem import generate_scaffold
-
-# from uqdd.data.data_papyrus import PapyrusDatasetMT
+from tqdm.auto import tqdm
+from concurrent.futures import ProcessPoolExecutor
 
 string_types = (type(b""), type(""))
 
@@ -24,7 +26,9 @@ def load_pickle(filepath):
         logging.error(f"Error loading file {filepath}: {e}")
 
 
-def export_df(df, output_path="./", filename="exported_file", ext="csv", **kwargs):
+def export_df(
+    df, file_path=None, output_path="./", filename="exported_file", ext="csv", **kwargs
+):
     """
     Exports a DataFrame to a specified file format.
 
@@ -32,6 +36,10 @@ def export_df(df, output_path="./", filename="exported_file", ext="csv", **kwarg
     ----------
     df : pandas.DataFrame
         The DataFrame to be exported.
+    file_path : str or Path, optional
+        The full file path for export.
+        If provided, output_path, filename, and ext are ignored.
+        Default is None.
     output_path : str, optional
         The path to the output directory. Default is the current directory.
     filename : str, optional
@@ -39,23 +47,35 @@ def export_df(df, output_path="./", filename="exported_file", ext="csv", **kwarg
     ext : str, optional
         The file extension to use. Default is 'csv'.
     """
+    if df.empty:
+        return logging.warning("DataFrame is empty. Nothing to export.")
+
+    if file_path:
+        path_obj = Path(file_path)
+        output_path = path_obj.parent
+        filename = path_obj.stem
+        ext = path_obj.suffix.lstrip(".")
+    else:
+        if not filename.endswith(ext):
+            filename = f"{filename}.{ext}"
+        file_path = os.path.join(output_path, filename)
+
     os.makedirs(output_path, exist_ok=True)
 
     if not filename.endswith(ext):
         filename = f"{filename}.{ext}"
-    output_file_path = os.path.join(output_path, filename)
     if ext == "csv":
-        df.to_csv(output_file_path, index=False, **kwargs)
+        df.to_csv(file_path, index=False, **kwargs)
     elif ext == "parquet":
-        df.to_parquet(output_file_path, index=False, **kwargs)
+        df.to_parquet(file_path, index=False, **kwargs)
     elif ext == "feather":
-        df.to_feather(output_file_path, index=False, **kwargs)
+        df.to_feather(file_path, **kwargs)
     elif ext == "pkl":
-        df.to_pickle(output_file_path, index=False, **kwargs)
+        df.to_pickle(file_path, **kwargs)
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
-    logging.info(f"DataFrame exported to {output_file_path}")
+    logging.info(f"DataFrame exported to {file_path}")
 
 
 def load_df(input_path, **kwargs):
@@ -64,23 +84,36 @@ def load_df(input_path, **kwargs):
 
     Parameters
     ----------
-    input_path : str
+    input_path : str or Path
         The path to the input file.
     """
-    if input_path.endswith(".csv"):
+    # we want to get the extension from the Path object
+    if isinstance(input_path, string_types):
+        input_path = Path(input_path)
+    ext = input_path.suffix.lstrip(".")
+    if ext == "csv":
         return pd.read_csv(input_path, **kwargs)
-    elif input_path.endswith(".parquet"):
+    elif ext == "parquet":
         return pd.read_parquet(input_path, **kwargs)
-    elif input_path.endswith(".pkl"):
+    elif ext == "pkl":
         return pd.read_pickle(input_path, **kwargs)
     else:
-        raise ValueError(
-            f"Unsupported file extension for loading: {os.path.splitext(input_path)[1]}"
-        )
+        raise ValueError(f"Unsupported file extension for loading: {ext} provided")
 
 
-def get_tasks(activity, split):
-    target_col_path = os.path.join(DATASET_DIR, activity, split, "target_col.pkl")
+def export_tasks(data_name, activity, ntop, label_col):
+    topx = f"top{ntop}" if ntop > 0 else "all"
+    target_col_path = DATASET_DIR / data_name / activity / topx / "target_col.pkl"
+    os.makedirs(target_col_path.parent, exist_ok=True)
+    # export to pickle
+    with open(target_col_path, "wb") as file:
+        pickle.dump(label_col, file)
+    logging.info(f"Tasks exported to {target_col_path}")
+
+
+def get_tasks(data_name, activity, ntop):
+    topx = f"top{ntop}" if ntop > 0 else "all"
+    target_col_path = DATASET_DIR / data_name / activity / topx / "target_col.pkl"
     target_col = load_pickle(target_col_path)
     if target_col is None:
         raise RuntimeError(f"Error loading tasks from {target_col_path}")
@@ -128,22 +161,21 @@ def get_data_info(train_data, val_data, test_data):
     return count_data
 
 
-def create_split_dict(split_type, train_df, val_df, test_df, **kwargs):
+def create_split_dict(split_type, train_df, val_df, test_df):  # , **kwargs):
     out = {
         split_type: {
             "train": train_df,
             "val": val_df,
             "test": test_df,
-            "info": get_data_info(train_df, val_df, test_df),
         }
     }
-    out[split_type].update(kwargs)
+    # out[split_type].update(kwargs)
     return out
 
 
 def random_split(
-    df: pd.DataFrame, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42, **kwargs
-):
+    df: pd.DataFrame, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42
+) -> dict:
     """
     Splits a DataFrame into training, validation, and test sets based on specified fractions.
 
@@ -159,8 +191,6 @@ def random_split(
         The fraction of the dataset to be used as the test set.
     seed : int
         The random seed for reproducible splits.
-    **kwargs
-        Additional keyword arguments to be included in the result dictionary.
     Returns:
     --------
     train_df : pandas.DataFrame
@@ -182,20 +212,12 @@ def random_split(
     val_df, test_df = train_test_split(
         temp_df, test_size=1 - adjusted_val_frac, random_state=seed
     )
-
-    # create result dictionary for return
-    return create_split_dict("random", train_df, val_df, test_df, **kwargs)
+    return create_split_dict("random", train_df, val_df, test_df)
 
 
 def scaffold_split(
-    df,
-    smiles_col="smiles",
-    train_frac=0.7,
-    val_frac=0.15,
-    test_frac=0.15,
-    seed=42,
-    **kwargs,
-):
+    df, smiles_col="smiles", train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42
+) -> dict:
     """
     Splits dataframe into scaffold splits.
 
@@ -213,8 +235,7 @@ def scaffold_split(
         The fraction of the data to use for testing. Default is 0.15.
     seed : int, optional
         The random seed to use for splitting the data. Default is 42.
-    kwargs
-        Additional keyword arguments to be included in the result dictionary.
+
     Returns
     -------
     train_df : pandas.DataFrame
@@ -227,8 +248,20 @@ def scaffold_split(
     # set random seed
     np.random.seed(seed)
 
-    # calculate scaffolds for each smiles string
-    df["scaffold"] = df[smiles_col].apply(generate_scaffold)
+    # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
+    unique_smiles = df[smiles_col].unique().tolist()
+
+    with ProcessPoolExecutor() as executor:
+        scaffolds = list(
+            tqdm(
+                executor.map(generate_scaffold, unique_smiles),
+                total=len(unique_smiles),
+                desc="Generating scaffolds",
+            )
+        )
+
+    smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
+    df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
 
     # get unique scaffolds
     scaffolds = list(df["scaffold"].unique())
@@ -250,7 +283,7 @@ def scaffold_split(
     test_df = df[df["scaffold"].isin(scaffold_test)]
 
     # create result dictionary for return
-    return create_split_dict("scaffold", train_df, val_df, test_df, **kwargs)
+    return create_split_dict("scaffold", train_df, val_df, test_df)
 
 
 def time_split(
@@ -271,8 +304,7 @@ def time_split(
         The fraction of the dataset to be used as the validation set.
     test_frac: float
         The fraction of the dataset to be used as the test set.
-    kwargs
-        Additional keyword arguments to be included in the result dictionary.
+
     Returns
     -------
     train_df : pandas.DataFrame
@@ -282,6 +314,7 @@ def time_split(
     test_df : pandas.DataFrame
         The testing dataframe.
     """
+
     # order df by time_col and split
     df = df.sort_values(by=time_col)
     train_df = df.iloc[: int(train_frac * len(df))]
@@ -289,7 +322,7 @@ def time_split(
     test_df = df.iloc[int((train_frac + val_frac) * len(df)) :]
 
     # create result dictionary for return
-    return create_split_dict("time", train_df, val_df, test_df, **kwargs)
+    return create_split_dict("time", train_df, val_df, test_df)
 
 
 def split_data(
@@ -297,12 +330,9 @@ def split_data(
     split_type: str = "random",
     smiles_col: str = "smiles",
     time_col: str = "year",
-    train_frac: float = 0.7,
-    val_frac: float = 0.15,
-    test_frac: float = 0.15,
+    fractions: Union[List[float], None] = None,
     seed: int = 42,
-    **kwargs,
-):
+) -> dict:
     """
     Splits a DataFrame into training, validation, and test sets based on the specified split type.
 
@@ -316,66 +346,138 @@ def split_data(
         The name of the column containing the SMILES strings. Default is 'smiles'.
     time_col : str, optional
         The name of the column containing the time information. Default is 'year'.
-    train_frac : float, optional
-        The fraction of the data to use for training. Default is 0.7.
-    val_frac : float, optional
-        The fraction of the data to use for validation. Default is 0.15.
-    test_frac : float, optional
-        The fraction of the data to use for testing. Default is 0.15.
+    fractions : list, optional
+        A list of fractions to use for the training, validation, and test sets. Default is [0.7, 0.15, 0.15].
+        The sum of the fractions must be 1. If only two fractions are provided, the second fraction is used for the test set.
     seed : int, optional
         The random seed to use for splitting the data. Default is 42.
-    kwargs
-        Additional keyword arguments to be included in the result dictionary.
 
     Returns
     -------
     dict
         A dictionary with key as split_type and value is another dict containing the training, validation, and test dataframes.
     """
-    # Validate that the fractions sum up to 1
-    total_frac = train_frac + val_frac + test_frac
-    if total_frac != 1:
-        raise ValueError("The sum of train_frac, val_frac, and test_frac must be 1.")
+    if fractions is None:
+        fractions = [0.7, 0.15, 0.15]
+    if sum(fractions) != 1:
+        raise ValueError(
+            f"The sum of train_frac, val_frac, and test_frac in arg list `fractions` must be 1 not {sum(fractions)}."
+        )
+    if not 2 <= len(fractions) <= 3:
+        raise ValueError(
+            f"Expected 2 or 3 fractions in arg list `fractions` but got {len(fractions)}."
+        )
 
-    all_data = {}
+    train_frac, test_frac = fractions[0], fractions[-1]
+    val_frac = fractions[1] if len(fractions) == 3 else 0.0
+
     func_key = {
         "random": (random_split, {}),
         "scaffold": (scaffold_split, {"smiles_col": smiles_col}),
         "time": (time_split, {"time_col": time_col}),
     }
 
+    # POSTPONED for now - only one split at a time can be done here
+    all_data = {}
     if split_type == "all":
         for t in ["random", "scaffold", "time"]:
+            # Recursion here
             sub_dict = split_data(
                 df,
                 split_type=t,
                 smiles_col=smiles_col,
                 time_col=time_col,
-                train_frac=train_frac,
-                val_frac=val_frac,
-                test_frac=test_frac,
+                fractions=fractions,
                 seed=seed,
-                **kwargs,
             )
             all_data.update(sub_dict)
 
     elif split_type in func_key.keys():
-        # here we either get output_path from kwargs or use the default DATASET_DIR; either merged with split_type
-        output_path = os.path.join(kwargs.pop("output_path", DATASET_DIR), split_type)
-        split_func, split_kwargs = func_key[split_type]
-        sub_dict = split_func(
-            df,
-            **split_kwargs,
-            train_frac=train_frac,
-            val_frac=val_frac,
-            test_frac=test_frac,
-            seed=seed,
-            output_path=output_path,
-            **kwargs,
-        )
-        all_data.update(sub_dict)
-
+        # here we either get output_path from kwargs or use the default DATASET_DIR; either merged with split_type # TODO I dont like it here
+        # output_path = os.path.join(kwargs.pop("output_path", DATASET_DIR), split_type)
+        try:
+            split_func, split_kwargs = func_key[split_type]
+            sub_dict = split_func(
+                df,
+                **split_kwargs,
+                train_frac=train_frac,
+                val_frac=val_frac,
+                test_frac=test_frac,
+                seed=seed,
+            )
+            all_data.update(sub_dict)
+        except Exception as e:
+            logging.error(f"Error splitting the data: {e}")
+            all_data = create_split_dict(
+                split_type, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+            )
     else:
         raise ValueError("split_type must be one of 'random', 'scaffold', or 'time'.")
 
     return all_data
+
+
+def check_if_processed_file(
+    data_name="papyrus",
+    activity_type="xc50",
+    ntop=-1,
+    split_type="random",
+    desc_prot=None,
+    desc_chem="ecfp1024",
+    file_ext="pkl",
+):
+
+    topx = f"top{ntop}" if ntop > 0 else "all"
+    output_path = DATASET_DIR / data_name / activity_type / topx
+    prefix = (
+        f"{split_type}_{desc_prot}_{desc_chem}"
+        if desc_prot
+        else f"{split_type}_{desc_chem}"
+    )
+
+    files_paths = [
+        output_path / f"{prefix}_{subset}.{file_ext}"
+        for subset in ["train", "val", "test"]
+    ]
+
+    files_exist = all(file_p.exists() for file_p in files_paths)
+
+    return files_exist, files_paths
+
+
+# deprecated
+# def _check_if_processed_file(
+#     data_name="papyrus",
+#     activity_type="xc50",
+#     ntop=-1,
+#     split_type="random",
+#     desc_prot=None,
+#     desc_chem="ecfp1024",
+#     file_ext="pkl",
+# ):
+#
+#     topx = f"top{ntop}" if ntop > 0 else "all"
+#     # if split_type == "all":
+#     #     all_files_exist = []
+#     #     all_file_paths = {}
+#     #     for st in ["random", "scaffold", "time"]:
+#     #         files_exist, files_paths = check_if_processed_file(
+#     #             data_name, activity_type, ntop, st, desc_prot, desc_chem, file_ext
+#     #         )
+#     #
+#     #         all_files_exist.append(files_exist)
+#     #         all_file_paths.update(files_paths)
+#     #     return True, []
+#     output_path = DATASET_DIR / data_name / activity_type / topx / split_type
+#
+#     desc = f"{desc_prot}_{desc_chem}" if desc_prot else desc_chem
+#
+#     results = {
+#         split_type: {
+#             subset: output_path / f"{desc}{'_' if desc else ''}{subset}.{file_ext}"
+#             for subset in ["train", "val", "test"]
+#         }
+#     }
+#     results[split_type]["all_exists"] = all(file_p.exists() for file_p in results[split_type].values())
+#
+#     return results

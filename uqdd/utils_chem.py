@@ -1,10 +1,11 @@
 import copy
 import time
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Dict, Any
 
 from PIL import Image
 import numpy as np
 import pandas as pd
+from pandas import DataFrame
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
@@ -14,360 +15,25 @@ from rdkit.Chem import Draw, AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
-
+from uqdd import DATA_DIR
 from uqdd.utils import check_nan_duplicated, custom_agg
+
+from papyrus_scripts.reader import read_molecular_descriptors
 
 RDLogger.DisableLog("rdApp.info")
 print(f"rdkit {rdkit.__version__}")
 
-
-def standardize(smi, logger=None, suppress_exception=False):
-    """
-    Applies a standardization workflow to a SMILES string.
-
-    Parameters:
-    -----------
-    smi : str
-        The input SMILES string to standardize.
-
-    logger : logging.Logger, optional
-        A logger object to log error messages. Default is None.
-
-    suppress_exception : bool, optional
-        A boolean flag to suppress exceptions and return the original SMILES string if an error
-        occurs during standardization. If False, an exception is raised or logged, depending on the value of logger.
-        Default is True.
-
-    Returns:
-    --------
-    str
-        The standardized SMILES string.
-
-    Raises
-    ------
-    TypeError
-        If check_smiles_type is True and the input is not a string.
-    StandardizationError
-        If an unexpected error occurs during standardization and suppress_exception is False.
-        The error message is logged or raised, depending on the value of logger.
-
-    Notes:
-    ------
-    This function applies the following standardization steps to the input SMILES string:
-
-    1. Functional Groups Normalization: The input SMILES string is converted to a molecule object,
-    and any functional groups present are normalized to a standard representation.
-    2. Sanitization: The molecule is sanitized, which involves performing various checks
-    and corrections to ensure that it is well-formed.
-    3. Neutralization: Any charges on the molecule are neutralized.
-    4. Parent Tautomer: The canonical tautomer of the molecule is determined.
-
-    This function uses the RDKit library for performing standardization.
-    implementation source:
-    https://github.com/greglandrum/RSC_OpenScience_Standardization_202104/blob/main/MolStandardize%20pieces.ipynb
-    """
-    if smi is None:
-        return None
-    og_smiles = copy.deepcopy(smi)
-    try:
-        # Functional Groups Normalization
-        mol = Chem.MolFromSmiles(smi)
-        mol.UpdatePropertyCache(strict=False)
-        Chem.SanitizeMol(
-            mol,
-            sanitizeOps=(
-                Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES
-            ),
-        )
-        mol = rdMolStandardize.Normalize(mol)
-
-        # Neutralization
-        uncharger = rdMolStandardize.Uncharger()
-        mol = uncharger.uncharge(rdMolStandardize.FragmentParent(mol))
-
-    except Exception as e:
-        if logger:
-            logger.error(f"StandardizationError: {e} for {og_smiles}")
-        if suppress_exception:
-            return og_smiles
-        else:
-            return None
-
-    return Chem.MolToSmiles(mol)
-
-
-def standardize_wrapper(args):
-    """
-    Wrapper function for the standardize function to be used with the concurrent.futures.ProcessPoolExecutor.
-    """
-    return standardize(*args)
-
-
-def standardize_df(
-    df: pd.DataFrame,
-    smiles_col: str = "SMILES",
-    other_dup_col: Union[List[str], str] = None,
-    sorting_col: str = "",
-    drop: bool = True,
-    keep: Union[bool, str] = "last",
-    logger=None,
-    suppress_exception=True,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Applies a standardization workflow to the 'smiles' column of a pandas dataframe.
-
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The input dataframe, which should contain a 'smiles' column.
-
-    smiles_col : str, optional
-        The name of the column containing the SMILES strings to standardize. Default is 'smiles'.
-
-    other_dup_col : str or list of str, optional
-        The name of the column(s) containing other information that should be kept for duplicate SMILES.
-        If None, no other columns are kept. Default is None.
-
-    sorting_col : str, optional
-        The name of the column to sort the dataframe by before standardization. If None, the dataframe is not sorted.
-        Default is None.
-
-    drop : bool, optional
-        A boolean flag to drop the rows with NaN SMILES before standardization. Default is True.
-
-    keep : bool or str, optional
-        A boolean flag to keep the first or last duplicate SMILES. If True, the first duplicate is kept.
-        If False, the last duplicate is kept. If 'aggregate', the duplicates are aggregated into a list.
-        Default is 'last'.
-
-    logger : logging.Logger, optional
-        A logger object to log error messages. Default is None.
-
-    suppress_exception : bool, optional
-        A boolean flag to suppress exceptions and return the original SMILES string if an error
-        occurs during standardization. If False, an exception is raised or logged, depending on the value of logger.
-        Default is True.
-
-    Returns:
-    --------
-    pandas.DataFrame
-        A new dataframe with the 'smiles' column replaced by the standardized versions.
-
-    Notes:
-    ------
-    This function applies the `standardize` function to each SMILES string in the 'smiles' column
-    of the input dataframe,
-    and replaces the column with the standardized versions.
-    """
-    if keep == "aggregate":
-        keep = False
-        aggregate = True
-    else:
-        aggregate = False
-
-    if other_dup_col:
-        if not isinstance(other_dup_col, list):
-            other_dup_col = [other_dup_col]
-        cols_dup = [smiles_col, *other_dup_col]
-    else:
-        cols_dup = smiles_col
-
-    # checking NaN & duplicate before standardization
-    df_filtered, df_nan_before, df_dup_before = check_nan_duplicated(
-        df=df,
-        cols_nan=smiles_col,
-        cols_dup=cols_dup,  # [smiles_col, *other_dup_col],
-        nan_dup_source="smiles_before_std",
-        drop=drop,
-        sorting_col=sorting_col,
-        keep=keep,
-        logger=logger,
-    )
-    if logger:
-        logger.info(
-            f"BEFORE SMILES standardization, The number of filtered-out NaN values"
-            f"is: {df_nan_before.shape[0]} NaN values"
-            f"While The number of points that were found to be duplicates"
-            f"is: {df_dup_before.shape[0]} duplicated rows"
-        )
-
-    # standardizing the SMILES in parallel
-    start_time = time.time()
-    tqdm.pandas(desc="Standardizing SMILES")
-    unique_smiles = df_filtered[smiles_col].unique()
-    args_list = [(smi, logger, suppress_exception) for smi in unique_smiles]
-    standardized_result = {}
-    with ProcessPoolExecutor() as executor:
-        results = list(
-            tqdm(
-                executor.map(standardize_wrapper, args_list),
-                total=len(args_list),
-                desc="Standardizing Unique SMILES",
-            )
-        )
-
-    for smi, result in zip(unique_smiles, results):
-        standardized_result[smi] = result
-
-    # Apply the standardized result to the dataframe
-    df_filtered[smiles_col] = df_filtered[smiles_col].map(standardized_result)
-    if logger:
-        logger.info(
-            "SMILES standardization took --- %s seconds ---"
-            % (time.time() - start_time)
-        )
-
-    # # progress_apply is a wrapper around apply that uses tqdm to show a progress bar
-    # start_time = time.time()
-    # tqdm.pandas(desc="Standardizing SMILES")
-    # # df_filtered smiles standardization
-    # df_filtered[smiles_col] = df_filtered[smiles_col].progress_apply(
-    #     standardize, logger=logger, suppress_exception=suppress_exception
-    # )
-    # # df_dup_before smiles standardization
-    # df_dup_before[smiles_col] = df_dup_before[smiles_col].progress_apply(
-    #     standardize, logger=logger, suppress_exception=suppress_exception
-    # )
-    #
-    # if logger:
-    #     logger.info(
-    #         "SMILES standardization took --- %s seconds ---"
-    #         % (time.time() - start_time)
-    #     )
-
-    # checking NaN & duplicate after standardization
-    df_filtered, df_nan_after, df_dup_after = check_nan_duplicated(
-        df=df_filtered,
-        cols_nan=smiles_col,
-        cols_dup=cols_dup,  # [smiles_col, *other_dup_col],
-        nan_dup_source="smiles_after_std",
-        drop=drop,
-        sorting_col=sorting_col,
-        keep=keep,
-        logger=logger,
-    )
-
-    if logger:
-        logger.info(
-            f"After SMILES standardization, The number of additional NaN values (failed standardization) "
-            f"is: {df_nan_after.shape[0]} NaN values"
-            f"While The number of points that were found to be duplicates after standardization "
-            f"is: {df_dup_after.shape[0]} duplicated rows"
-        )
-
-    # concat the nan and dup dataframes
-    df_nan = pd.concat([df_nan_before, df_nan_after])
-    df_dup = pd.concat([df_dup_before, df_dup_after])
-
-    if aggregate:
-        # aggregate the duplicates
-        df_dup = (
-            df_dup.groupby(smiles_col, as_index=False).agg(custom_agg).reset_index()
-        )
-
-    return df_filtered, df_nan, df_dup
-
-
-# define function that transforms SMILES strings into ECFPs
-def ecfp_from_smiles(
-    smiles, radius=2, length=2**10, use_features=False, use_chirality=False
-):
-    """
-    Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
-
-    Parameters:
-    -----------
-    smiles : str
-        The input SMILES string to generate a fingerprint from.
-    radius : int, optional
-        The radius of the circular substructure (in bonds) to use when generating the fingerprint.
-        Default is 2.
-    length : int, optional
-        The length of the output fingerprint in bits. Default is 2^10.
-    use_features : bool, optional
-        Whether to use feature-based fingerprints instead of circular fingerprints.
-        Default is False (i.e., use circular fingerprints).
-    use_chirality : bool, optional
-        Whether to include chirality information in the fingerprint. Default is False.
-
-    Returns:
-    --------
-    numpy.ndarray
-        The ECFP fingerprint as a binary numpy array.
-
-    Notes:
-    ------
-    This function uses the RDKit library for generating ECFP fingerprints.
-    source:
-    https://www.blopig.com/blog/2022/11/how-to-turn-a-smiles-string-into-an-extended-connectivity-fingerprint-using-rdkit/
-    """
-
-    molecule = AllChem.MolFromSmiles(smiles)
-    feature_list = AllChem.GetMorganFingerprintAsBitVect(
-        molecule,
-        radius=radius,
-        nBits=length,
-        useFeatures=use_features,
-        useChirality=use_chirality,
-    )
-    return np.array(feature_list)
-
-
-def generate_ecfp(
-    df,
-    radius=2,
-    length=2**10,
-    use_features=False,
-    use_chirality=False,
-    smiles_col="smiles",
-):
-    """
-    Generates ECFP fingerprints from the 'smiles' column of a pandas dataframe.
-
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        The input dataframe.
-    radius : int, optional
-        The radius of the circular substructure (in bonds) to use when generating the fingerprint.
-        Default is 2.
-    length : int, optional
-        The length of the output fingerprint in bits. Default is 2^10.
-    use_features : bool, optional
-        Whether to use feature-based fingerprints instead of circular fingerprints.
-        Default is False (i.e., use circular fingerprints).
-    use_chirality : bool, optional
-        Whether to include chirality information in the fingerprint. Default is False.
-    smiles_col : str, optional
-        The name of the column containing the SMILES strings to generate fingerprints from. Default is 'smiles'.
-    Returns:
-    --------
-    pandas.DataFrame
-        A new dataframe with a column for each fingerprint length, containing the corresponding ECFP fingerprints.
-
-    Notes:
-    ------
-    This function applies the `ECFP_from_smiles` function to each
-    SMILES string in the 'smiles' column of the input dataframe,
-    and generates ECFP fingerprints with the specified radius, length,
-    and optional parameters. The resulting fingerprints are stored in columns named 'ECFP-{length}',
-    where {length} is the specified fingerprint length.
-    """
-    # Generate ECFP fingerprints
-    # for length in [2 ** i for i in range(5, 12)]:
-
-    df[f"ecfp{length}"] = df[smiles_col].apply(
-        lambda x: ecfp_from_smiles(
-            x,
-            radius=radius,
-            length=length,
-            use_features=use_features,
-            use_chirality=use_chirality,
-        )
-    )
-
-    return df
-
+all_models = [
+    "ecfp1024",
+    "ecfp2048",
+    "mold2",
+    "mordred",
+    "cddd",
+    "fingerprint",
+    "moe",
+    "moldesc",
+    "graph2d",
+]
 
 descriptors = [
     "BalabanJ",
@@ -573,7 +239,362 @@ descriptors = [
 ]
 
 
-def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
+def standardize(smi, logger=None, suppress_exception=False):
+    """
+    Applies a standardization workflow to a SMILES string.
+
+    Parameters:
+    -----------
+    smi : str
+        The input SMILES string to standardize.
+
+    logger : logging.Logger, optional
+        A logger object to log error messages. Default is None.
+
+    suppress_exception : bool, optional
+        A boolean flag to suppress exceptions and return the original SMILES string if an error
+        occurs during standardization. If False, an exception is raised or logged, depending on the value of logger.
+        Default is True.
+
+    Returns:
+    --------
+    str
+        The standardized SMILES string.
+
+    Raises
+    ------
+    TypeError
+        If check_smiles_type is True and the input is not a string.
+    StandardizationError
+        If an unexpected error occurs during standardization and suppress_exception is False.
+        The error message is logged or raised, depending on the value of logger.
+
+    Notes:
+    ------
+    This function applies the following standardization steps to the input SMILES string:
+
+    1. Functional Groups Normalization: The input SMILES string is converted to a molecule object,
+    and any functional groups present are normalized to a standard representation.
+    2. Sanitization: The molecule is sanitized, which involves performing various checks
+    and corrections to ensure that it is well-formed.
+    3. Neutralization: Any charges on the molecule are neutralized.
+    4. Parent Tautomer: The canonical tautomer of the molecule is determined.
+
+    This function uses the RDKit library for performing standardization.
+    implementation source:
+    https://github.com/greglandrum/RSC_OpenScience_Standardization_202104/blob/main/MolStandardize%20pieces.ipynb
+    """
+    if smi is None:
+        return None
+    og_smiles = copy.deepcopy(smi)
+    try:
+        # Functional Groups Normalization
+        mol = Chem.MolFromSmiles(smi)
+        mol.UpdatePropertyCache(strict=False)
+        Chem.SanitizeMol(
+            mol,
+            sanitizeOps=(
+                Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES
+            ),
+        )
+        mol = rdMolStandardize.Normalize(mol)
+
+        # Neutralization
+        uncharger = rdMolStandardize.Uncharger()
+        mol = uncharger.uncharge(rdMolStandardize.FragmentParent(mol))
+
+    except Exception as e:
+        if logger:
+            logger.error(f"StandardizationError: {e} for {og_smiles}")
+        if suppress_exception:
+            return og_smiles
+        else:
+            return None
+
+    return Chem.MolToSmiles(mol)
+
+
+def standardize_wrapper(args):
+    """
+    Wrapper function for the standardize function to be used with the concurrent.futures.ProcessPoolExecutor.
+    """
+    return standardize(*args)
+
+
+def standardize_df(
+    df: pd.DataFrame,
+    smiles_col: str = "SMILES",
+    other_dup_col: Union[List[str], str] = None,
+    sorting_col: str = "",
+    drop: bool = True,
+    keep: Union[bool, str] = "last",
+    logger=None,
+    suppress_exception=True,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Applies a standardization workflow to the 'smiles' column of a pandas dataframe.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        The input dataframe, which should contain a 'smiles' column.
+
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings to standardize. Default is 'smiles'.
+
+    other_dup_col : str or list of str, optional
+        The name of the column(s) containing other information that should be kept for duplicate SMILES.
+        If None, no other columns are kept. Default is None.
+
+    sorting_col : str, optional
+        The name of the column to sort the dataframe by before standardization. If None, the dataframe is not sorted.
+        Default is None.
+
+    drop : bool, optional
+        A boolean flag to drop the rows with NaN SMILES before standardization. Default is True.
+
+    keep : bool or str, optional
+        A boolean flag to keep the first or last duplicate SMILES. If True, the first duplicate is kept.
+        If False, the last duplicate is kept. If 'aggregate', the duplicates are aggregated into a list.
+        Default is 'last'.
+
+    logger : logging.Logger, optional
+        A logger object to log error messages. Default is None.
+
+    suppress_exception : bool, optional
+        A boolean flag to suppress exceptions and return the original SMILES string if an error
+        occurs during standardization. If False, an exception is raised or logged, depending on the value of logger.
+        Default is True.
+
+    Returns:
+    --------
+    pandas.DataFrame
+        A new dataframe with the 'smiles' column replaced by the standardized versions.
+
+    Notes:
+    ------
+    This function applies the `standardize` function to each SMILES string in the 'smiles' column
+    of the input dataframe,
+    and replaces the column with the standardized versions.
+    """
+    if keep == "aggregate":
+        keep = False
+        aggregate = True
+    else:
+        aggregate = False
+
+    if other_dup_col:
+        if not isinstance(other_dup_col, list):
+            other_dup_col = [other_dup_col]
+        cols_dup = [smiles_col, *other_dup_col]
+    else:
+        cols_dup = smiles_col
+
+    # checking NaN & duplicate before standardization
+    df_filtered, df_nan_before, df_dup_before = check_nan_duplicated(
+        df=df,
+        cols_nan=smiles_col,
+        cols_dup=cols_dup,  # [smiles_col, *other_dup_col],
+        nan_dup_source="smiles_before_std",
+        drop=drop,
+        sorting_col=sorting_col,
+        keep=keep,
+        logger=logger,
+    )
+    if logger:
+        logger.info(
+            f"BEFORE SMILES standardization, The number of filtered-out NaN values"
+            f"is: {df_nan_before.shape[0]} NaN values"
+            f"While The number of points that were found to be duplicates"
+            f"is: {df_dup_before.shape[0]} duplicated rows"
+        )
+
+    # standardizing the SMILES in parallel
+    # tqdm.pandas(desc="Standardizing SMILES")
+    unique_smiles = df_filtered[smiles_col].unique()
+    args_list = [(smi, logger, suppress_exception) for smi in unique_smiles]
+
+    with ProcessPoolExecutor() as executor:
+        results = list(
+            tqdm(
+                executor.map(standardize_wrapper, args_list),
+                total=len(args_list),
+                desc="Standardizing Unique SMILES",
+            )
+        )
+    standardized_result = {smi: result for smi, result in zip(unique_smiles, results)}
+
+    # Apply the standardized result to the dataframe
+    df_filtered[smiles_col] = df_filtered[smiles_col].map(standardized_result)
+
+    # # progress_apply is a wrapper around apply that uses tqdm to show a progress bar
+    # start_time = time.time()
+    # tqdm.pandas(desc="Standardizing SMILES")
+    # # df_filtered smiles standardization
+    # df_filtered[smiles_col] = df_filtered[smiles_col].progress_apply(
+    #     standardize, logger=logger, suppress_exception=suppress_exception
+    # )
+    # # df_dup_before smiles standardization
+    # df_dup_before[smiles_col] = df_dup_before[smiles_col].progress_apply(
+    #     standardize, logger=logger, suppress_exception=suppress_exception
+    # )
+    #
+    # if logger:
+    #     logger.info(
+    #         "SMILES standardization took --- %s seconds ---"
+    #         % (time.time() - start_time)
+    #     )
+
+    # checking NaN & duplicate after standardization
+    df_filtered, df_nan_after, df_dup_after = check_nan_duplicated(
+        df=df_filtered,
+        cols_nan=smiles_col,
+        cols_dup=cols_dup,  # [smiles_col, *other_dup_col],
+        nan_dup_source="smiles_after_std",
+        drop=drop,
+        sorting_col=sorting_col,
+        keep=keep,
+        logger=logger,
+    )
+
+    if logger:
+        logger.info(
+            f"After SMILES standardization, The number of additional NaN values (failed standardization) "
+            f"is: {df_nan_after.shape[0]} NaN values"
+            f"While The number of points that were found to be duplicates after standardization "
+            f"is: {df_dup_after.shape[0]} duplicated rows"
+        )
+
+    # concat the nan and dup dataframes
+    df_nan = pd.concat([df_nan_before, df_nan_after])
+    df_dup = pd.concat([df_dup_before, df_dup_after])
+
+    if aggregate:
+        # aggregate the duplicates
+        df_dup = (
+            df_dup.groupby(smiles_col, as_index=False).agg(custom_agg).reset_index()
+        )
+
+    return df_filtered, df_nan, df_dup
+
+
+# define function that transforms SMILES strings into ECFPs
+def ecfp_from_smiles(
+    smiles, radius=2, length=2**10, use_features=False, use_chirality=False
+):
+    """
+    Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
+
+    Parameters:
+    -----------
+    smiles : str
+        The input SMILES string to generate a fingerprint from.
+    radius : int, optional
+        The radius of the circular substructure (in bonds) to use when generating the fingerprint.
+        Default is 2.
+    length : int, optional
+        The length of the output fingerprint in bits. Default is 2^10.
+    use_features : bool, optional
+        Whether to use feature-based fingerprints instead of circular fingerprints.
+        Default is False (i.e., use circular fingerprints).
+    use_chirality : bool, optional
+        Whether to include chirality information in the fingerprint. Default is False.
+
+    Returns:
+    --------
+    numpy.ndarray
+        The ECFP fingerprint as a binary numpy array.
+
+    Notes:
+    ------
+    This function uses the RDKit library for generating ECFP fingerprints.
+    source:
+    https://www.blopig.com/blog/2022/11/how-to-turn-a-smiles-string-into-an-extended-connectivity-fingerprint-using-rdkit/
+    """
+    smiles = (
+        smiles[0] if isinstance(smiles, list) or isinstance(smiles, tuple) else smiles
+    )
+    molecule = AllChem.MolFromSmiles(smiles)
+    feature_list = AllChem.GetMorganFingerprintAsBitVect(
+        molecule,
+        radius=radius,
+        nBits=length,
+        useFeatures=use_features,
+        useChirality=use_chirality,
+    )
+    return np.array(feature_list)
+
+
+def generate_ecfp(
+    smiles,
+    radius=2,
+    length=2**10,
+    use_features=False,
+    use_chirality=False,
+) -> dict[Any, Any]:
+    """
+    Generates ECFP fingerprints from the 'smiles' column of a pandas dataframe.
+
+    Parameters:
+    -----------
+    smiles : List[str] or ndarray or Series
+        The input SMILES strings to calculate ECFP fingerprints from.
+    radius : int, optional
+        The radius of the circular substructure (in bonds) to use when generating the fingerprint.
+        Default is 2.
+    length : int, optional
+        The length of the output fingerprint in bits. Default is 2^10.
+    use_features : bool, optional
+        Whether to use feature-based fingerprints instead of circular fingerprints.
+        Default is False (i.e., use circular fingerprints).
+    use_chirality : bool, optional
+        Whether to include chirality information in the fingerprint. Default is False.
+
+    Returns:
+    --------
+    ecfp_result : dict
+        A dictionary containing the ECFP fingerprints for each SMILES string.
+        to be used as df[smiles_col].map(ecfp_result)
+        to add the fingerprints to the dataframe
+
+    Notes:
+    ------
+    This function applies the `ECFP_from_smiles` function to each
+    SMILES string in the 'smiles' column of the input dataframe,
+    and generates ECFP fingerprints with the specified radius, length,
+    and optional parameters. The resulting fingerprints are stored in columns named 'ECFP-{length}',
+    where {length} is the specified fingerprint length.
+    """
+    # Generate ECFP fingerprints
+    # for length in [2 ** i for i in range(5, 12)]:
+    args_list = [(smi, radius, length, use_features, use_chirality) for smi in smiles]
+
+    with ProcessPoolExecutor() as executor:
+        results = list(
+            tqdm(
+                executor.map(ecfp_from_smiles, args_list),
+                total=len(args_list),
+                desc="Generating ECFP",
+            )
+        )
+    ecfp_result = {smi: result for smi, result in zip(smiles, results)}
+    # This should be used as
+    # df_filtered[smiles_col] = df_filtered[smiles_col].map(standardized_result)
+    return ecfp_result
+
+    # df[f"ecfp{length}"] = df[smiles_col].apply(
+    #     lambda x: ecfp_from_smiles(
+    #         x,
+    #         radius=radius,
+    #         length=length,
+    #         use_features=use_features,
+    #         use_chirality=use_chirality,
+    #     )
+    # )
+    # return df
+
+
+def get_mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
     """
     Calculates a set of molecular descriptors for a given SMILES string.
 
@@ -606,62 +627,75 @@ def mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
     mol_descriptor_calculator = MolecularDescriptorCalculator(chosen_descriptors)
 
     # use molecular descriptor calculator on RDKit mol object
-    list_of_descriptor_vals = list(mol_descriptor_calculator.CalcDescriptors(mol))
+    desc_array = np.array(mol_descriptor_calculator.CalcDescriptors(mol))
 
-    return list_of_descriptor_vals
+    return desc_array
 
 
 def generate_mol_descriptors(
-    df: pd.DataFrame, smiles_col: str = "SMILES", chosen_descriptors: List[str] = None
-) -> pd.DataFrame:
+    smiles, chosen_descriptors: List[str] = None
+) -> dict[Any, Any]:
     """
     Applies the `mol_descriptors` function to a pandas dataframe and returns a new dataframe
     with additional columns containing the calculated descriptor values.
 
     Parameters
     ----------
-    df : pandas.DataFrame
-        The input dataframe.
-    smiles_col : str, optional
-        The name of the column containing the SMILES strings to calculate descriptors for. Default is 'SMILES'.
+    smiles: List[str] or ndarray or Series
+        The input SMILES strings to calculate molecular descriptors from.
     chosen_descriptors : list of str, optional
         The list of descriptors to calculate. If None, the default list of descriptors in
         `mol_descriptors` will be used.
 
     Returns
     -------
-    pandas.DataFrame
-        A new dataframe with additional columns containing the calculated descriptor values.
+    mol_desc_result : dict
+        A dictionary containing the molecular descriptors for each SMILES string.
+        to be used as df[smiles_col].map(mol_desc_result)
+        to add the descriptors to the dataframe
     """
-    # create a copy of the input DataFrame
-    new_df = df.copy()
 
     if chosen_descriptors is None:
         chosen_descriptors = descriptors
 
-    # apply mol_descriptors() to the 'smiles' column using the .apply() method
-    calc_descriptors = new_df[smiles_col].apply(
-        mol_descriptors, chosen_descriptors=chosen_descriptors
-    )
+    args_list = [(smi, chosen_descriptors) for smi in smiles]
 
-    # convert the list of descriptor values to a DataFrame with separate columns
-    descriptor_df = pd.DataFrame(
-        calc_descriptors, columns=chosen_descriptors
-    )  # .tolist()
+    with ProcessPoolExecutor() as executor:
+        results = list(
+            tqdm(
+                executor.map(get_mol_descriptors, args_list),
+                total=len(args_list),
+                desc="Generating Molecular Descriptors",
+            )
+        )
 
-    # concatenate the new DataFrame with the original DataFrame
-    # new_df = pd.concat([new_df, descriptor_df], axis=1)
-    # merge the new DataFrame with the original DataFrame
-    new_df = pd.merge(
-        new_df,
-        descriptor_df,
-        left_index=True,
-        right_index=True,
-        how="left",
-        on=None,
-        validate="many_to_many",
-    )
-    return new_df
+    mol_desc_result = {smi: result for smi, result in zip(smiles, results)}
+
+    return mol_desc_result
+
+    # # apply mol_descriptors() to the 'smiles' column using the .apply() method
+    # calc_descriptors = new_df[smiles_col].apply(
+    #     get_mol_descriptors, chosen_descriptors=chosen_descriptors
+    # )
+
+    # # convert the list of descriptor values to a DataFrame with separate columns
+    # descriptor_df = pd.DataFrame(
+    #     calc_descriptors, columns=chosen_descriptors
+    # )  # .tolist()
+    #
+    # # concatenate the new DataFrame with the original DataFrame
+    # # new_df = pd.concat([new_df, descriptor_df], axis=1)
+    # # merge the new DataFrame with the original DataFrame
+    # new_df = pd.merge(
+    #     new_df,
+    #     descriptor_df,
+    #     left_index=True,
+    #     right_index=True,
+    #     how="left",
+    #     on=None,
+    #     validate="many_to_many",
+    # )
+    # return new_df
 
     #
     # # create a new dataframe with the same columns as the input dataframe plus the descriptor columns
@@ -678,6 +712,61 @@ def generate_mol_descriptors(
     # new_df.loc[i, descriptors] = descriptor_vals
     #
     # return new_df
+
+
+def get_papyrus_descriptors(connectivity_ids=None, desc_type="cddd"):
+    # "mold2", "mordred", "cddd", "fingerprint", "moe", "all"
+    def _merge_cols(row):
+        return np.array(row[1:])
+
+    mol_descriptors = read_molecular_descriptors(
+        desc_type=desc_type,
+        is3d=False,
+        version="latest",
+        chunksize=100000,
+        source_path=DATA_DIR,
+        ids=connectivity_ids,
+        verbose=True,
+    )
+
+    mol_descriptors[desc_type] = mol_descriptors.apply(_merge_cols, axis=1)
+
+    mol_descriptors = mol_descriptors[["connectivity", desc_type]]
+
+    mol_descriptors_mapper = mol_descriptors.set_index("connectivity")[
+        desc_type
+    ].to_dict()
+
+    return mol_descriptors_mapper
+
+
+def get_chem_desc(
+    df, desc_type: str = "ecfp1024", query_col: str = "SMILES", **kwargs
+) -> pd.DataFrame:
+    desc_type = desc_type.lower()
+    unique_entries = df[query_col].unique().tolist()
+
+    if desc_type in ["mold2", "mordred", "cddd", "fingerprint", "moe"]:
+        desc_mapper = get_papyrus_descriptors(
+            connectivity_ids=unique_entries, desc_type=desc_type
+        )
+    elif desc_type.startswith("ecfp"):
+        length = int(desc_type[4:])
+        desc_mapper = generate_ecfp(unique_entries, radius=2, length=length, **kwargs)
+    # elif desc_type == "ecfp1024":
+    #     desc_mapper = generate_ecfp(unique_entries, radius=2, length=1024, **kwargs)
+    # elif desc_type == "ecfp2048":
+    #     desc_mapper = generate_ecfp(unique_entries, radius=2, length=2048, **kwargs)
+    elif desc_type == "moldesc":
+        desc_mapper = generate_mol_descriptors(unique_entries, **kwargs)
+    elif desc_type == "graph2d":
+        raise NotImplementedError
+    else:
+        raise ValueError(f"desc_mol: {desc_type} is not a valid molecular descriptor")
+
+    df[desc_type] = df[query_col].map(desc_mapper)
+
+    return df
 
 
 def mol_to_pil_image(
@@ -759,19 +848,3 @@ def generate_scaffold(smiles, include_chirality=False):
         scaffold = None
         print(f"following error {e} \n occurred while processing smiles: {smiles}")
     return scaffold
-
-
-def get_chem_desc(
-    df, smiles_col: str = "SMILES", desc_chem: str = "ecfp1024", **kwargs
-):
-    desc_chem = desc_chem.lower()
-    if desc_chem == "ecfp1024":
-        df = generate_ecfp(df, radius=2, length=1024, smiles_col=smiles_col, **kwargs)
-    elif desc_chem == "ecfp2048":
-        df = generate_ecfp(df, radius=4, length=2048, smiles_col=smiles_col, **kwargs)
-    elif desc_chem == "moldesc":
-        df = generate_mol_descriptors(df, smiles_col=smiles_col, **kwargs)
-    elif desc_chem == "graph2d":
-        raise NotImplementedError
-    else:
-        raise ValueError(f"desc_mol: {desc_chem} is not a valid molecular descriptor")
