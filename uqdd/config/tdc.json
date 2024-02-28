@@ -1,0 +1,25 @@
+{
+  "cols_rename_map_benchmark": {
+    "Drug_ID": "Drug_ID",
+    "Drug": "SMILES",
+    "Target_ID": "target_id",
+    "Target": "Sequence",
+    "Y": "Y",
+    "Year": "Year"
+  },
+  "cols_rename_map_not_benchmark": {
+    "ID1":  "Drug_ID",
+    "X1":  "SMILES",
+    "ID2":  "target_id",
+    "X2":  "Sequence",
+    "Y":  "Y"
+  },
+  "cols_to_keep": [
+    "SMILES",
+    "connectivity",
+    "target_id",
+    "accession",
+    "Year",
+    "pchembl_value_Mean"
+  ]
+}
