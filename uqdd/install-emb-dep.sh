@@ -29,4 +29,13 @@ main() {
     replace_content "$source_file" "$target_file"
 }
 
+wget https://files.pythonhosted.org/packages/34/5a/086fd5c388c4a6c0fb5f0e541b6ec922187a09d85f829789a4ff72f34295/bio-transformers-0.1.17.tar.gz
+tar -xvf bio-transformers-0.1.17.tar.gz
 main
+rm -rf bio-transformers-0.1.17.tar.gz
+pip install -r requirements-biotransformer.txt
+
+cd bio-transformers-0.1.17 || exit
+pip install -e .
+cd ..
+rm -rf bio-transformers-0.1.17
