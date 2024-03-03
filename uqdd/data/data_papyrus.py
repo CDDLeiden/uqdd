@@ -1,3 +1,4 @@
+import logging
 import pickle
 import argparse
 from pathlib import Path
@@ -28,6 +29,13 @@ from uqdd.data.utils_data import (
     export_tasks,
 )
 from uqdd.utils_prot import get_embeddings
+
+
+# import os
+# import sys
+# # module_path = os.path.abspath(os.path.join('..', '..'))
+# # if module_path not in sys.path:
+# #     sys.path.append(module_path)
 
 
 class Papyrus:
@@ -70,6 +78,7 @@ class Papyrus:
         split_proportions=None,
         first_run_all_splits: bool = False,
         file_ext: str = "pkl",
+        batch_size: int = 2,
     ):
         # step 0: assertions
         assert desc_prot or desc_chem, "At least desc_chem must be provided"
@@ -95,7 +104,9 @@ class Papyrus:
             return self._load_processed_files(files_paths, split_type)
 
         # step 2: merge the descriptors
-        df = self.merge_descriptors(df=df, desc_prot=desc_prot, desc_chem=desc_chem)
+        df = self.merge_descriptors(
+            df=df, desc_prot=desc_prot, desc_chem=desc_chem, batch_size=batch_size
+        )
 
         # step 3: filter the columns
         cols_to_include = ["SMILES", desc_chem]
@@ -108,6 +119,7 @@ class Papyrus:
         #     ["Year"] if (split_type in ["all", "time"] and ntop <= 0) else []
         # )
         cols_to_include += label_col
+        cols_to_include.remove(None)
         df = df[cols_to_include]
 
         # step 4: split the data
@@ -172,10 +184,6 @@ class Papyrus:
                 file_path = output_folder / f"{prefix}_{subset}.{file_ext}"
                 export_df(df, file_path=file_path)
 
-        # for subset, file_path in zip(data_dict[split_type], files_paths):
-        #     df = data_dict[split_type][subset]
-        #     export_df(df, file_path=file_path)
-
     def _get_ntop_or_all_dataset(
         self,
         ntop=20,
@@ -209,7 +217,7 @@ class Papyrus:
 
         return df, label_col
 
-    def merge_descriptors(self, df=None, desc_prot=None, desc_chem=None):
+    def merge_descriptors(self, df=None, desc_prot=None, desc_chem=None, batch_size=4):
         # "unirep", "esm", "protbert", "msa", "all"
         # "mold2", "mordred", "cddd", "fingerprint", "moe", "all"
         # check descriptors saved file:
@@ -221,7 +229,9 @@ class Papyrus:
             self.log.info("Merging protein descriptors")
             # target_id or sequence ...
             query_col, df = self._prepare_query_col(df, desc_prot)
-            df = get_embeddings(df, embedding_type=desc_prot, query_col=query_col)
+            df = get_embeddings(
+                df, embedding_type=desc_prot, query_col=query_col, batch_size=batch_size
+            )
 
         if desc_chem:
             self.log.info("Merging molecular descriptors")
@@ -422,9 +432,7 @@ class Papyrus:
             protein_data=papyrus_protein_data,
             organism="Homo sapiens (Human)",  # self.keep_organism
         )
-        df_filtered = consume_chunks(
-            filter_4, progress=True, total=int(60000000 / self.chunksize)
-        )
+        df_filtered = consume_chunks(filter_4, progress=True, total=60)
 
         # IMPORTANT - WE HERE HAVE TO SET THE STD_SMILES TO TRUE
         self.std_smiles = True
@@ -571,55 +579,12 @@ class PapyrusDataset(Dataset):
         return x_sample, y_sample
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Papyrus class interface")
-
-    # Argument to specify whether to calculate all combinations of arguments
-    parser.add_argument(
-        "--all_combinations",
-        type=bool,
-        default=False,
-        help="Calculate all combinations of arguments",
-    )
-
-    # Arguments for Papyrus class initialization
-    parser.add_argument("--accession", type=str, default=None, help="Accession")
-    parser.add_argument("--activity_type", type=str, default=None, help="Activity type")
-    parser.add_argument(
-        "--std_smiles", type=bool, default=True, help="Standardize SMILES"
-    )
-    parser.add_argument(
-        "--verbose_files", type=bool, default=False, help="Verbose files"
-    )
-
-    # Arguments for Papyrus class call
-    parser.add_argument("--ntop", type=int, default=-1, help="Top N")
-    parser.add_argument(
-        "--desc_prot", type=str, default=None, help="Protein descriptor"
-    )
-    parser.add_argument(
-        "--desc_chem", type=str, default=None, help="Chemical descriptor"
-    )
-    parser.add_argument("--recalculate", type=bool, default=False, help="Recalculate")
-    parser.add_argument("--split_type", type=str, default="random", help="Split type")
-    parser.add_argument(
-        "--split_proportions",
-        type=str,
-        default=None,
-        help="Split proportions 0.7,0.15,0.15",
-    )
-    parser.add_argument(
-        "--first_run_all_splits", type=bool, default=False, help="First run all splits"
-    )
-    parser.add_argument("--file_ext", type=str, default="pkl", help="File extension")
-
-    args = parser.parse_args()
-
-    if args.all_combinations:
-        # Define all possible values for each argument
-        activity_types = ["xc50", "kx"]
-        ntops = [-1, 20]
-        desc_prots = [
+def run_all_combs(args):
+    # Define all possible values for each argument
+    activity_types = ["xc50", "kx"]
+    ntop = args.ntop
+    desc_prots = (
+        [
             None,
             "unirep",
             "esm1_t34",
@@ -634,82 +599,181 @@ if __name__ == "__main__":
             "ankh-base",
             "ankh-large",
         ]
-        desc_chems = [
-            "ecfp1024",
-            "ecfp2048",
-            "mold2",
-            "mordred",
-            "cddd",
-            "fingerprint",
-            "moe",
-            "moldesc",
-            "graph2d",
-        ]
+        if ntop <= 0
+        else [None]
+    )
 
-        for act_key in activity_types:
-            papyrus = Papyrus(
-                activity_type=act_key,
-                std_smiles=True,
-                verbose_files=False,
+    desc_chems = [
+        "ecfp1024",
+        "ecfp2048",
+        "mold2",
+        "mordred",
+        "cddd",
+        "fingerprint",
+        "moe",
+        "moldesc",
+        "graph2d",
+    ]
+
+    for act_key in activity_types:
+        papyrus = Papyrus(
+            activity_type=act_key,
+            std_smiles=True,
+            verbose_files=False,
+        )
+        call_args = list(itertools.product(desc_prots, desc_chems))
+        for call_arg in call_args:
+            # Call the instance with the current combination of call argument values
+            logging.info("Running Papyrus with the following arguments:")
+            logging.info(
+                f"act_key: {act_key}, n_top: {args.ntop}, call_arg: {call_arg}"
             )
-            # case 1 - ntop = -1
-            n_top = -1
-            call_args = list(itertools.product(desc_prots, desc_chems))
-            for call_arg in call_args:
-                # Call the instance with the current combination of call argument values
-                try:
-                    papyrus(
-                        ntop=n_top,
-                        desc_prot=call_arg[0],
-                        desc_chem=call_arg[1],
-                        recalculate=False,
-                        first_run_all_splits=True,
-                        file_ext="pkl",
-                    )
-                except Exception as e:
-                    print(f"Error: {e}")
-                    print(f"act_key: {act_key}, n_top: {n_top}, call_arg: {call_arg}")
-                    continue
+            try:
+                papyrus(
+                    ntop=args.ntop,
+                    desc_prot=call_arg[0],
+                    desc_chem=call_arg[1],
+                    recalculate=False,
+                    first_run_all_splits=True,
+                    file_ext=args.file_ext,  # "pkl",
+                    batch_size=args.batch_size,  # 2,
+                )
+            except Exception as e:
+                print(f"Error: {e}")
+                print(f"act_key: {act_key}, n_top: {args.ntop}, call_arg: {call_arg}")
+                continue
 
-            # case 2 - ntop = 20
-            n_top = 20
-            for d_chem in desc_chems:
-                try:
-                    papyrus(
-                        ntop=n_top,
-                        desc_prot=None,
-                        desc_chem=d_chem,
-                        recalculate=False,
-                        first_run_all_splits=True,
-                        file_ext="pkl",
-                    )
-                except Exception as e:
-                    print(f"Error: {e}")
-                    print(f"act_key: {act_key}, n_top: {n_top}, desc_chem: {d_chem}")
-                    continue
+
+def run_papyrus(args):
+    # Create an instance of the Papyrus class with the arguments provided by the user
+    papyrus = Papyrus(
+        accession=args.accession,
+        activity_type=args.activity_type,
+        std_smiles=args.std_smiles,
+        verbose_files=args.verbose_files,
+    )
+
+    # Call the instance with the arguments provided by the user
+    split_proportions = (
+        [float(item) for item in args.split_proportions.split(",")]
+        if args.split_proportions
+        else None
+    )
+    papyrus(
+        ntop=args.ntop,
+        desc_prot=args.desc_prot,
+        desc_chem=args.desc_chem,
+        recalculate=args.recalculate,
+        split_type=args.split_type,
+        split_proportions=split_proportions,
+        first_run_all_splits=args.first_run_all_splits,
+        file_ext=args.file_ext,
+        batch_size=args.batch_size,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Papyrus class interface")
+
+    # Argument to specify whether to calculate all combinations of arguments
+    parser.add_argument(
+        "--all_combinations",
+        action="store_true",
+        help="Calculate all combinations of arguments",
+    )
+    # parser.add_argument(
+    #     "--all_combinations",
+    #     type=bool,
+    #     default=False,
+    #     help="Calculate all combinations of arguments",
+    # )
+
+    # Arguments for Papyrus class initialization
+    parser.add_argument("--accession", type=str, default=None, help="Accession")
+    parser.add_argument("--activity_type", type=str, default=None, help="Activity type")
+    parser.add_argument("--std_smiles", action="store_true", help="Standardize SMILES")
+
+    # Arguments for Papyrus class call
+    parser.add_argument(
+        "--desc_prot", type=str, default=None, help="Protein descriptor"
+    )
+    parser.add_argument(
+        "--desc_chem", type=str, default=None, help="Chemical descriptor"
+    )
+    parser.add_argument("--split_type", type=str, default="random", help="Split type")
+
+    parser.add_argument("--verbose_files", action="store_true", help="Verbose files")
+
+    parser.add_argument(
+        "--first_run_all_splits", action="store_true", help="First run all splits"
+    )
+
+    # optional arguments even with all combs
+    parser.add_argument("--ntop", type=int, default=-1, help="Number of top targets")
+
+    parser.add_argument("--recalculate", action="store_true", help="Recalculate")
+    parser.add_argument(
+        "--split_proportions",
+        type=str,
+        default=None,
+        help="Split proportions 0.7,0.15,0.15",
+    )
+    parser.add_argument("--file_ext", type=str, default="pkl", help="File extension")
+    parser.add_argument("--batch_size", type=int, default=2, help="Batch size")
+
+    args = parser.parse_args()
+
+    if args.all_combinations:
+        run_all_combs(args)
 
     else:
-        # Create an instance of the Papyrus class with the arguments provided by the user
-        papyrus = Papyrus(
-            accession=args.accession,
-            activity_type=args.activity_type,
-            std_smiles=args.std_smiles,
-            verbose_files=args.verbose_files,
-        )
+        run_papyrus(args)
 
-        # Call the instance with the arguments provided by the user
-        split_proportions = (
-            [float(item) for item in args.split_proportions.split(",")]
-            if args.split_proportions
-            else None
-        )
-        papyrus(
-            ntop=args.ntop,
-            desc_prot=args.desc_prot,
-            desc_chem=args.desc_chem,
-            recalculate=args.recalculate,
-            split_type=args.split_type,
-            split_proportions=split_proportions,
-            first_run_all_splits=args.first_run_all_splits,
-            file_ext=args.file_ext,
-        )
+
+#
+# parser.add_argument(
+#     "--std_smiles", type=bool, default=True, help="Standardize SMILES"
+# )
+# parser.add_argument(
+#     "--verbose_files", type=bool, default=False, help="Verbose files"
+# )
+# parser.add_argument("--recalculate", type=bool, default=False, help="Recalculate")
+# parser.add_argument(
+#     "--first_run_all_splits", type=bool, default=False, help="First run all splits"
+# )
+#
+# if __name__ == "__main__":
+#     # init args
+#     activity_type = "xc50"
+#     std_smiles = True
+#     verbose_files = False
+#
+#     # call args
+#     ntop = -1
+#     desc_prot = "ankh-base"
+#     # "esm1b"
+#     # ValueError: You cant't pass sequence with length more than 1024 with esm1b_t33_650M_UR50S, use esm1_t34_670M_UR100 or filter the sequence length
+#
+#     desc_chem = "ecfp2048"
+#     first_run_all_splits = True
+#     recalculate = True
+#     split_type = "random"
+#     split_proportions = [0.7, 0.15, 0.15]
+#     file_ext = "pkl"
+#
+#     papyrus = Papyrus(
+#         activity_type=activity_type,
+#         std_smiles=std_smiles,
+#         verbose_files=verbose_files,
+#     )
+#
+#     papyrus(
+#         ntop=ntop,
+#         desc_prot=desc_prot,
+#         desc_chem=desc_chem,
+#         recalculate=recalculate,
+#         split_type=split_type,
+#         split_proportions=split_proportions,
+#         first_run_all_splits=first_run_all_splits,
+#         file_ext=file_ext,
+#     )

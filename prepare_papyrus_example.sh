@@ -5,7 +5,7 @@ start_time=$SECONDS
 # Report start time
 echo "Script started at: $(date)"
 
-python data_papyrus.py --all_combinations True
+python featurize_papyrus.py --activity_type xc50 --desc_prot esm1_t34 --desc_chem ecfp2048 --first_run_all_splits --recalculate --batch_size 4
 
 # Report end time
 echo "Script ended at: $(date)"

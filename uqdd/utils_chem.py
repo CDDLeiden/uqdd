@@ -19,6 +19,7 @@ from uqdd import DATA_DIR
 from uqdd.utils import check_nan_duplicated, custom_agg
 
 from papyrus_scripts.reader import read_molecular_descriptors
+from papyrus_scripts.preprocess import consume_chunks
 
 RDLogger.DisableLog("rdApp.info")
 print(f"rdkit {rdkit.__version__}")
@@ -594,13 +595,13 @@ def generate_ecfp(
     # return df
 
 
-def get_mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
+def get_mol_descriptors(smiles: str, chosen_descriptors: List[str] = None):
     """
     Calculates a set of molecular descriptors for a given SMILES string.
 
     Parameters
     ----------
-    smi : str
+    smiles : str
         The SMILES string to calculate the descriptors for.
 
     chosen_descriptors : list of str, optional
@@ -616,8 +617,12 @@ def get_mol_descriptors(smi: str, chosen_descriptors: List[str] = None):
     https://www.blopig.com/blog/2022/06/how-to-turn-a-molecule-into-a-vector-of-physicochemical-descriptors-using-rdkit/
     """
 
+    smiles = (
+        smiles[0] if isinstance(smiles, list) or isinstance(smiles, tuple) else smiles
+    )
+
     # convert SMILES string to RDKit mol object
-    mol = Chem.MolFromSmiles(smi)
+    mol = Chem.MolFromSmiles(smiles)
 
     # choose 200 molecular descriptors
     if chosen_descriptors is None:
@@ -728,6 +733,8 @@ def get_papyrus_descriptors(connectivity_ids=None, desc_type="cddd"):
         ids=connectivity_ids,
         verbose=True,
     )
+
+    mol_descriptors = consume_chunks(mol_descriptors, progress=True, total=60)
 
     mol_descriptors[desc_type] = mol_descriptors.apply(_merge_cols, axis=1)
 

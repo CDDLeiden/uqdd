@@ -55,7 +55,8 @@
     "pchemblValueSEM": "float64",
     "pchemblValueN": "int64",
     "pchemblValueMedian": "float64",
-    "pchemblValueMAD": "float64"
+    "pchemblValueMAD": "float64",
+    "Year": "Int64"
   },
   "dtypes_protein": {
     "target_id":"str",

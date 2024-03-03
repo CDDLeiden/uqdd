@@ -6,8 +6,13 @@ import pandas as pd
 from biotransformers import BioTransformers
 import ankh
 import ray
-from uqdd import DATA_DIR
+from uqdd import DATA_DIR, DEVICE
 from papyrus_scripts.reader import read_protein_descriptors
+from tqdm.auto import tqdm
+
+torch.cuda.empty_cache()
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 all_models = [
     "esm1_t34",
@@ -21,7 +26,7 @@ all_models = [
     "protbert_bfd",
     "ankh-base",
     "ankh-large",
-    "unirep",
+    "unirep",  # TODO to calculate it
 ]
 num_gpus = torch.cuda.device_count()
 
@@ -31,42 +36,108 @@ def create_results_dict(entries, embeddings):
     return results
 
 
+def get_num_params(model):
+    return sum(p.numel() for p in model.parameters())
+
+
+def batch_generator(seq_list, size):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(seq_list), size):
+        yield seq_list[i : i + size]
+
+
 def compute_biotransformer_embeddings(
-    protein_sequences: list, embedding_type: str, batch_size=32
+    protein_sequences: list, embedding_type: str, batch_size=8
 ):
     """Compute embeddings using BioTransformers."""
-    ray.init()
-    biotrans = BioTransformers(backend=embedding_type, num_gpus=num_gpus)
+    embtype_keys = {
+        "esm1_t34": "esm1_t34_670M_UR100",
+        "esm1_t12": "esm1_t12_85M_UR50S",
+        "esm1_t6": "esm1_t6_43M_UR50S",
+        "esm1b": "esm1b_t33_650M_UR50S",
+        "esm_msa1": "esm_msa1_t12_100M_UR50S",
+        "esm_msa1b": "esm_msa1b_t12_100M_UR50S",
+        "esm1v": "esm1v_t33_650M_UR90S_1",
+        "protbert": "protbert",
+        "protbert_bfd": "protbert_bfd",
+    }
+    ray.shutdown()
+    ray.init(ignore_reinit_error=True)
+    biotrans = BioTransformers(backend=embtype_keys[embedding_type], num_gpus=num_gpus)
     embeddings = biotrans.compute_embeddings(
-        protein_sequences, pool_mode=("cls", "mean"), batch_size=batch_size
+        protein_sequences, batch_size=batch_size, pool_mode=("mean",)
     )
-
+    ray.shutdown()
     return create_results_dict(protein_sequences, embeddings["mean"])
 
 
-def compute_ankh_embeddings(protein_sequences: list, embedding_type: str):
+def compute_ankh_embeddings(
+    protein_sequences: list, embedding_type: str, batch_size: int = 32
+):
     """Compute embeddings using Ankh."""
     if embedding_type == "ankh-base":
+        logging.info("Loading Ankh base model...")
         model, tokenizer = ankh.load_base_model()
     elif embedding_type == "ankh-large":
+        logging.info("Loading Ankh large model...")
         model, tokenizer = ankh.load_large_model()
     else:
         raise ValueError(f"Unsupported Ankh model type: {embedding_type}")
 
+    model.to(DEVICE)
     model.eval()
-    outputs = tokenizer.batch_encode_plus(
-        protein_sequences,
-        add_special_tokens=True,
-        padding=True,
-        return_tensors="pt",
-    )
-    with torch.no_grad():
-        embeddings = model(
-            input_ids=outputs["input_ids"], attention_mask=outputs["attention_mask"]
-        )
+    print(f"Number of parameters: {get_num_params(model)}")
+
+    # encoded_batches = tokenizer.batch_encode_plus(
+    #     protein_sequences,
+    #     add_special_tokens=True,
+    #     padding=True,
+    #     return_tensors="pt",
+    # )
+    # dataset = TensorDataset(
+    #     encoded_batches["input_ids"], encoded_batches["attention_mask"]
+    # )
+    # dataloader = DataLoader(dataset, batch_size=batch_size)
+
+    embeddings = []
+    for batch_seqs in tqdm(
+        batch_generator(protein_sequences, batch_size),
+        desc="Processing Protein Embedding batches",
+        total=len(protein_sequences) // batch_size,
+    ):
+        # Tokenize the current batch of sequences
+        outputs = tokenizer.batch_encode_plus(
+            batch_seqs,
+            add_special_tokens=True,
+            padding=True,
+            return_tensors="pt",
+        ).to(DEVICE)
+
+        with torch.no_grad():
+            batch_embeddings = model(
+                input_ids=outputs["input_ids"], attention_mask=outputs["attention_mask"]
+            )
+            averaged_batch_embeddings = (
+                batch_embeddings.last_hidden_state.mean(1).cpu().numpy()
+            )
+            embeddings.extend(averaged_batch_embeddings)
+    #
+    # with torch.no_grad():
+    #     for batch in tqdm(dataloader, desc="Computing embeddings"):
+    #         input_ids, attention_mask = batch
+    #         input_ids, attention_mask = input_ids.to(DEVICE), attention_mask.to(DEVICE)
+    #         batch_embeddings = model(input_ids=input_ids, attention_mask=attention_mask)
+    #         averaged_batch_embeddings = (
+    #             batch_embeddings.last_hidden_state.mean(1).cpu().numpy()
+    #         )
+    #         embeddings.extend(averaged_batch_embeddings)
+    # embeddings = model(
+    #     input_ids=outputs["input_ids"], attention_mask=outputs["attention_mask"]
+    # )
     # Average the embeddings over dim 1
-    averaged_embeddings = embeddings.last_hidden_state.mean(1).numpy()
-    return create_results_dict(protein_sequences, averaged_embeddings)
+    # averaged_embeddings = embeddings.last_hidden_state.mean(1).numpy()
+
+    return create_results_dict(protein_sequences, embeddings)
 
 
 def get_papyrus_embeddings(target_ids=None, desc_type="unirep"):
@@ -124,6 +195,7 @@ def get_embeddings(
     df: pd.DataFrame,
     embedding_type: str,
     query_col: str = "Sequence",
+    batch_size: int = 4,
 ) -> pd.DataFrame:
     embedding_type = embedding_type.lower()
     protein_sequences = df[query_col].unique().tolist()
@@ -139,10 +211,12 @@ def get_embeddings(
         "protbert_bfd",
     ]:
         embeddings = compute_biotransformer_embeddings(
-            protein_sequences, embedding_type
+            protein_sequences, embedding_type, batch_size=batch_size
         )
     elif embedding_type in ["ankh-base", "ankh-large"]:
-        embeddings = compute_ankh_embeddings(protein_sequences, embedding_type)
+        embeddings = compute_ankh_embeddings(
+            protein_sequences, embedding_type, batch_size=batch_size
+        )
     elif embedding_type == "unirep":
         logging.warning(
             "UniRep can only be extracted from Papyrus and not computed on the fly for new input."
