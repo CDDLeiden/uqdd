@@ -8,11 +8,12 @@ from tqdm import tqdm
 from uqdd import TODAY, DEVICE, LOGS_DIR, WANDB_MODE
 
 from uqdd.models.utils_models import (
-    get_datasets,
     get_model_config,
     get_sweep_config,
     build_loader,
     build_optimizer,
+    build_loss,
+    build_lr_scheduler,
     save_models,
     calc_regr_metrics,
     set_seed,
@@ -62,8 +63,8 @@ def evaluate(model, dataloader, loss_fn, device=DEVICE):
 def predict(
     model,
     dataloader,
-    device=DEVICE,
     return_targets=False,
+    device=DEVICE,
 ):
     model.eval()
     outputs_all = []
@@ -117,6 +118,8 @@ def run_one_epoch(
         Learning rate scheduler.
     epoch : int, optional
         Current epoch number. Default is 0.
+    device : torch.device, optional
+        Device to run the model on. Default is DEVICE var.
 
     Returns
     -------
@@ -154,24 +157,49 @@ def wandb_epoch_logger(epoch, train_loss, val_loss, val_rmse, val_r2, val_evs):
     )
 
 
+def wandb_test_logger(test_loss, test_rmse, test_r2, test_evs):
+    wandb.log(
+        data={
+            "test/loss": test_loss,
+            "test/rmse": test_rmse,
+            "test/r2": test_r2,
+            "test/evs": test_evs,
+        }
+    )
+
+
 def train_model(
     model,
+    model_name,
     train_loader,
     val_loader,
-    loss_fn,
-    optimizer,
-    lr_scheduler,
     config,
+    n_targets=-1,
     seed=42,
     device=DEVICE,
 ):
     try:
         set_seed(seed)
+        multitask = n_targets > 1
         model = model.to(device)
         best_model = model
+
         best_val_loss = float("inf")
         early_stop_counter = 0
-        for epoch in tqdm(range(config.num_epochs + 1)):
+
+        optimizer = build_optimizer(
+            model, config.optimizer, config.learning_rate, config.weight_decay
+        )
+        loss_fn = build_loss(config.loss, reduction="none", mt=multitask)
+        lr_scheduler = build_lr_scheduler(
+            optimizer,
+            config.lr_scheduler,
+            config.lr_scheduler_patience,
+            config.lr_scheduler_factor,
+        )
+
+        # "none", "mean", "sum"
+        for epoch in tqdm(range(config.epochs + 1)):
             try:
                 epoch, train_loss, val_loss, val_rmse, val_r2, val_evs = run_one_epoch(
                     model,
@@ -198,93 +226,128 @@ def train_model(
                 raise RuntimeError(
                     f"The following exception occurred inside the epoch loop {e}"
                 )
-        save_models(config, best_model)
-    except Exception as e:
-        raise Exception(f"The following exception occurred in train_model {e}")
-
-    pass
-
-
-def train_model(
-    model, train_loader, val_loader, config=wandb.config, seed=42, device=DEVICE
-):
-    try:
-        # set a random seed for reproducibility
-        set_seed(seed)
-
-        # Load the model
-        model = model.to(device)
-
-        # Temporarily initialize best_model
-        best_model = model
-
-        # Define the loss function
-        loss_fn = MultiTaskLoss(loss_type=config.loss, reduction="none")
-
-        # Define the optimizer with weight decay and learning rate scheduler
-        optimizer = build_optimizer(
-            model, config.optimizer, config.learning_rate, config.weight_decay
-        )
-
-        # Define Learning rate scheduler
-        lr_scheduler = ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            factor=config.lr_factor,
-            patience=config.lr_patience,
-            verbose=True,
-        )
-
-        # Train the model
-        best_val_loss = float("inf")
-        early_stop_counter = 0
-        # Train the model
-        for epoch in tqdm(range(config.num_epochs + 1)):
-            try:
-                epoch, train_loss, val_loss, val_rmse, val_r2, val_evs = run_epoch(
-                    model,
-                    train_loader,
-                    val_loader,
-                    loss_fn,
-                    optimizer,
-                    lr_scheduler,
-                    epoch=epoch,
-                )
-                # Log the metrics
-                wandb.log(
-                    data={
-                        "epoch": epoch,
-                        "train/loss": train_loss,
-                        "val/loss": val_loss,
-                        "val/rmse": val_rmse,
-                        "val/r2": val_r2,
-                    }
-                )
-                # Early stopping
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    early_stop_counter = 0
-                    # Save the best model - dropped to avoid memory issues
-                    # Update the best model and its performance
-                    best_model = model
-
-                else:
-                    early_stop_counter += 1
-                    if early_stop_counter > config.early_stop:
-                        break
-
-            except Exception as e:
-                raise RuntimeError(
-                    f"The following exception occurred inside the epoch loop {e}"
-                )
-
-        # Save the best model
-        save_models(config, best_model)
+        save_models(best_model, model_name=model_name, onnx=True)
         return best_model, loss_fn
-
     except Exception as e:
-        raise Exception(f"The following exception occurred in train_model {e}")
+        raise RuntimeError(f"The following exception occurred in train_model {e}")
 
+
+def run_model(
+    config,
+    datasets,
+    model,
+    model_name,
+    n_targets=-1,
+    seed=42,
+    device=DEVICE,
+):
+    # Load the dataset
+    train_loader, val_loader, test_loader = build_loader(
+        datasets, config.batch_size, shuffle=True
+    )
+
+    # Train the model
+    best_model, loss_fn = train_model(
+        model,
+        model_name,
+        train_loader,
+        val_loader,
+        config,
+        n_targets,
+        seed,
+        device,
+    )
+
+    # Testing metrics on the best model
+    test_loss, test_rmse, test_r2, test_evs = evaluate(
+        best_model, test_loader, loss_fn, device
+    )
+
+    wandb_test_logger(test_loss, test_rmse, test_r2, test_evs)
+
+    return best_model, test_loss
+
+
+# def _train_model(
+#     model, train_loader, val_loader, config=wandb.config, seed=42, device=DEVICE
+# ):
+#     try:
+#         # set a random seed for reproducibility
+#         set_seed(seed)
+#
+#         # Load the model
+#         model = model.to(device)
+#
+#         # Temporarily initialize best_model
+#         best_model = model
+#
+#         # Define the loss function
+#         loss_fn = MultiTaskLoss(loss_type=config.loss, reduction="none")
+#
+#         # Define the optimizer with weight decay and learning rate scheduler
+#         optimizer = build_optimizer(
+#             model, config.optimizer, config.learning_rate, config.weight_decay
+#         )
+#
+#         # Define Learning rate scheduler
+#         lr_scheduler = ReduceLROnPlateau(
+#             optimizer,
+#             mode="min",
+#             factor=config.lr_factor,
+#             patience=config.lr_patience,
+#             verbose=True,
+#         )
+#
+#         # Train the model
+#         best_val_loss = float("inf")
+#         early_stop_counter = 0
+#         # Train the model
+#         for epoch in tqdm(range(config.num_epochs + 1)):
+#             try:
+#                 epoch, train_loss, val_loss, val_rmse, val_r2, val_evs = run_epoch(
+#                     model,
+#                     train_loader,
+#                     val_loader,
+#                     loss_fn,
+#                     optimizer,
+#                     lr_scheduler,
+#                     epoch=epoch,
+#                 )
+#                 # Log the metrics
+#                 wandb.log(
+#                     data={
+#                         "epoch": epoch,
+#                         "train/loss": train_loss,
+#                         "val/loss": val_loss,
+#                         "val/rmse": val_rmse,
+#                         "val/r2": val_r2,
+#                     }
+#                 )
+#                 # Early stopping
+#                 if val_loss < best_val_loss:
+#                     best_val_loss = val_loss
+#                     early_stop_counter = 0
+#                     # Save the best model - dropped to avoid memory issues
+#                     # Update the best model and its performance
+#                     best_model = model
+#
+#                 else:
+#                     early_stop_counter += 1
+#                     if early_stop_counter > config.early_stop:
+#                         break
+#
+#             except Exception as e:
+#                 raise RuntimeError(
+#                     f"The following exception occurred inside the epoch loop {e}"
+#                 )
+#
+#         # Save the best model
+#         save_models(config, best_model)
+#         return best_model, loss_fn
+#
+#     except Exception as e:
+#         raise Exception(f"The following exception occurred in train_model {e}")
+#
 
 #
 # def train(

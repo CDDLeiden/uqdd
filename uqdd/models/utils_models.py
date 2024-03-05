@@ -2,6 +2,8 @@ import os
 import pickle
 import random
 import logging
+from typing import Union
+
 import matplotlib.pyplot as plt
 
 import numpy as np
@@ -16,8 +18,9 @@ from sklearn.metrics import r2_score, mean_squared_error, explained_variance_sco
 from torch.utils.data import DataLoader
 
 from uqdd import CONFIG_DIR, MODELS_DIR, FIGS_DIR, TODAY, DEVICE
-from uqdd.utils import get_config
-from uqdd.utils_chem import smi_to_pil_image, generate_scaffold
+from uqdd.utils import get_config, create_logger
+from uqdd.utils_chem import smi_to_pil_image
+
 string_types = (type(b""), type(""))
 
 
@@ -41,10 +44,30 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 
-def get_model_config(
-        model_name="baseline",
-        **kwargs
-):
+def get_desc_len(dataset):  # , desc_prot=True):
+    """
+    Get the length of the descriptors for the protein and chemical  inputs
+    Parameters
+    ----------
+    dataset
+        One of the datasets from the get_datasets function train or val or test.
+
+    Returns
+    -------
+    desc_prot_len: int
+        Length of the protein descriptors
+    desc_chem_len: int
+        Length of the chemical descriptors
+    """
+    # desc_prot then desc_chem
+    # if desc_prot:
+    #     return dataset[0][0].shape[0], dataset[0][1].shape[0]
+    # else:
+    #     return dataset[0][0].shape[0], dataset[0][1].shape[0]
+    return dataset[0][0].shape[0], dataset[0][1].shape[0]
+
+
+def get_model_config(model_name="baseline", **kwargs):
     """
     Retrieve the configuration dictionary for model training.
 
@@ -78,14 +101,15 @@ def get_model_config(
     # Example 4: Provide config as a dictionary and additional keyword arguments
     config = get_config(config=custom_config, num_epochs=1000, batch_size=32)
     """
-    assert model_name in ['baseline', 'ensemble', 'gp'], f"Invalid model name: {model_name}"
-    return get_config(config_name=model_name, config_dir=CONFIG_DIR/model_name, **kwargs)
+    assert model_name in [
+        "baseline",
+        "ensemble",
+        "gp",
+    ], f"Invalid model name: {model_name}"
+    return get_config(config_name=model_name, config_dir=CONFIG_DIR, **kwargs)
 
 
-def get_sweep_config(
-        model_name="baseline",
-        **kwargs
-):
+def get_sweep_config(model_name="baseline", **kwargs):
     """
     Retrieve the sweep configuration for hyperparameter tuning.
 
@@ -105,15 +129,70 @@ def get_sweep_config(
     - The default configuration values will be overridden by `config` and `kwargs`, if provided.
     - If both `config` and `kwargs` contain the same key in the 'parameters' dictionary, the value from `kwargs` will take precedence.
     """
-    assert model_name in ['baseline', 'ensemble', 'gp'], f"Invalid model name: {model_name}"
-    return get_config(config_name=f'{model_name}_sweeper', config_dir=CONFIG_DIR/model_name, **kwargs)
+    assert model_name in [
+        "baseline",
+        "ensemble",
+        "gp",
+    ], f"Invalid model name: {model_name}"
+    return get_config(
+        config_name=f"{model_name}-sweep",
+        config_dir=CONFIG_DIR,
+        **kwargs,
+    )
 
 
-def build_loader(datasets, batch_size, ecfp_size=1024):
+def build_datasets(
+    data_name="papyrus",
+    n_targets: int = -1,
+    activity_type: str = "xc50",
+    split_type: str = "random",
+    desc_prot: Union[str, None] = None,
+    desc_chem: Union[str, None] = None,
+    ext: str = "pkl",
+):
+    logger = create_logger(name="build_datasets")
+    logger.debug(f"Building datasets for {data_name}")
+
+    if data_name == "papyrus":
+        from uqdd.data.data_papyrus import get_datasets
+    elif data_name == "tdc":
+        from uqdd.data.data_tdc import get_datasets
+    elif data_name == "other":
+        from uqdd.data.data_other import get_datasets
+    else:
+        raise ValueError(
+            f"Unknown data name: {data_name}"
+            f"Please choose from 'papyrus', 'tdc', or 'other'"
+        )
+
+    return get_datasets(
+        n_targets=n_targets,
+        activity_type=activity_type,
+        split_type=split_type,
+        desc_prot=desc_prot,
+        desc_chem=desc_chem,
+        ext=ext,
+        logger=logger,
+    )
+
+
+def build_loader(datasets, batch_size, shuffle=True):
     try:
-        train_set = datasets[f'train_ecfp{ecfp_size}']
-        val_set = datasets[f'val_ecfp{ecfp_size}']
-        test_set = datasets[f'test_ecfp{ecfp_size}']
+        dataloaders = {}
+        for k, v in datasets.items():
+            dataloaders[k] = DataLoader(v, batch_size=batch_size, shuffle=shuffle)
+        logging.info("Data loaders created")
+    except Exception as e:
+        raise RuntimeError(f"Error loading data {e}")
+
+    return dataloaders
+
+
+def _build_loader(datasets, batch_size, ecfp_size=1024):
+    try:
+        train_set = datasets[f"train_ecfp{ecfp_size}"]
+        val_set = datasets[f"val_ecfp{ecfp_size}"]
+        test_set = datasets[f"test_ecfp{ecfp_size}"]
         train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
@@ -125,39 +204,27 @@ def build_loader(datasets, batch_size, ecfp_size=1024):
 
 
 def build_optimizer(model, optimizer, lr, weight_decay):
-    if optimizer.lower() == 'adam':
+    if optimizer.lower() == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer.lower() == 'adamw':
+    elif optimizer.lower() == "adamw":
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer.lower() == 'sgd':
+    elif optimizer.lower() == "sgd":
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer.lower() == 'rmsprop':
+    elif optimizer.lower() == "rmsprop":
         optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
-        raise ValueError('Unknown optimizer: {}'.format(optimizer))
+        raise ValueError("Unknown optimizer: {}".format(optimizer))
 
     return optimizer
 
 
-def build_loss(loss, reduction='none'):
-    if loss.lower() == 'mse':
-        loss_fn = nn.MSELoss(reduction=reduction)
-    elif loss.lower() in ['mae', 'l1']:
-        loss_fn = nn.L1Loss(reduction=reduction)
-    elif loss.lower() in ['huber', 'smoothl1']:
-        loss_fn = nn.SmoothL1Loss(reduction=reduction)
-    else:
-        raise ValueError('Unknown loss: {}'.format(loss))
-    return loss_fn
-
-
 ### Custom Loss Functions ###
 class MultiTaskLoss(nn.Module):
-
-    def __init__(self, loss_type='huber', reduction='mean'):
+    def __init__(self, loss_type="huber", reduction="mean"):
         super(MultiTaskLoss, self).__init__()
         self.loss_type = loss_type
         self.loss_fn = build_loss(loss_type, reduction=reduction)
+
     def forward(self, outputs, targets):
         nan_mask = torch.isnan(targets)
         # loss
@@ -165,20 +232,90 @@ class MultiTaskLoss(nn.Module):
         return loss
 
 
+def build_loss(loss, reduction="none", mt=False):
+    if mt:
+        return MultiTaskLoss(loss_type=loss, reduction=reduction)
+
+    if loss.lower() == "mse":
+        loss_fn = nn.MSELoss(reduction=reduction)
+    elif loss.lower() in ["mae", "l1"]:
+        loss_fn = nn.L1Loss(reduction=reduction)
+    elif loss.lower() in ["huber", "smoothl1"]:
+        loss_fn = nn.SmoothL1Loss(reduction=reduction)
+    else:
+        raise ValueError("Unknown loss: {}".format(loss))
+    return loss_fn
 
 
+def build_lr_scheduler(optimizer, lr_scheduler, patience=20, factor=0.2):
+    if lr_scheduler.lower() == "plateau":
+        lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, factor=factor, patience=patience, mode="min"
+        )
+    elif lr_scheduler.lower() == "step":
+        lr_scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=patience, gamma=factor
+        )
+    elif lr_scheduler.lower() == "exp":
+        lr_scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=factor)
+    elif lr_scheduler.lower() == "cos":
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=patience)
+    else:
+        raise ValueError("Unknown lr_scheduler: {}".format(lr_scheduler))
+
+    return lr_scheduler
 
 
-def save_models(config, model, model_name=None, onnx=True):
+def save_models(
+    config,
+    model,
+    model_name=None,
+    onnx=True,
+):
+    try:
+        if model is None:
+            raise ValueError(f"No model to save - {model=}")
+
+        model_dir = MODELS_DIR / "saved_models"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        if model_name is None:
+            model_name = "best_model"
+        pt_path = model_dir / f"{TODAY}-{wandb.run.name}-{model_name}.pt"
+        torch.save(model.state_dict(), pt_path)
+        wandb_model_path = pt_path
+
+        if onnx:
+            onnx_path = model_dir / f"{TODAY}-{wandb.run.name}-{model_name}.onnx"
+
+            dummy_input = torch.zeros(
+                (config.batch_size, config.input_dim),
+                dtype=torch.float32,
+                device=DEVICE,
+                requires_grad=False,
+            )
+            torch.onnx.export(model, dummy_input, onnx_path)
+            wandb_model_path = onnx_path
+
+        # Model logging
+        wandb.save(wandb_model_path)
+
+    except Exception as e:
+        print("Error saving models: " + str(e))
+
+
+def _save_models(config, model, model_name=None, onnx=True):
     try:
         if model is None:
             print(f"No model to save - {model=}")
             return None
 
-        model_dir = os.path.join(MODELS_DIR, 'saved_models', config.activity, config.split)
+        model_dir = os.path.join(
+            MODELS_DIR, "saved_models", config.activity, config.split
+        )
         os.makedirs(model_dir, exist_ok=True)
         if model_name is None:
-            model_name = f"{TODAY}-{wandb.run.name}-best-model" # {'ENS'+str(model_idx) if model_idx is not None else ''}
+            model_name = f"{TODAY}-{wandb.run.name}-best-model"  # {'ENS'+str(model_idx) if model_idx is not None else ''}
 
         model_path = os.path.join(model_dir, model_name)
         pt_path = model_path + ".pt"
@@ -192,7 +329,7 @@ def save_models(config, model, model_name=None, onnx=True):
                 (config.batch_size, config.input_dim),
                 dtype=torch.float32,
                 device=DEVICE,
-                requires_grad=False
+                requires_grad=False,
             )
             torch.onnx.export(model, dummy_input, onnx_path)
             wandb_model_path = onnx_path
@@ -206,46 +343,46 @@ def save_models(config, model, model_name=None, onnx=True):
 
 def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
     """
-        Aggregate a tensor by excluding NaN values based on a nan_mask.
+    Aggregate a tensor by excluding NaN values based on a nan_mask.
 
-        Calculates the mean of the non-NaN values along the specified dimension.
-        Optionally, it can aggregate the mean across all tasks.
+    Calculates the mean of the non-NaN values along the specified dimension.
+    Optionally, it can aggregate the mean across all tasks.
 
-        Parameters
-        ----------
-        tensor : torch.Tensor
-            The input tensor to be aggregated.
-        nan_mask : torch.Tensor
-            A boolean mask indicating the NaN values in the tensor.
-        all_tasks_agg : bool or str, optional
-            Determines whether to aggregate across all tasks. If False (default),
-            returns the mean for each task. If 'mean', returns the mean of all tasks.
-            If 'sum', returns the sum of all tasks.
+    Parameters
+    ----------
+    tensor : torch.Tensor
+        The input tensor to be aggregated.
+    nan_mask : torch.Tensor
+        A boolean mask indicating the NaN values in the tensor.
+    all_tasks_agg : bool or str, optional
+        Determines whether to aggregate across all tasks. If False (default),
+        returns the mean for each task. If 'mean', returns the mean of all tasks.
+        If 'sum', returns the sum of all tasks.
 
-        Returns
-        -------
-        torch.Tensor
-            The aggregated tensor based on the specified aggregation method.
+    Returns
+    -------
+    torch.Tensor
+        The aggregated tensor based on the specified aggregation method.
 
-        Notes
-        -----
-        - The nan_mask should have the same shape as tensor_for_agg.
-        - The nan_mask should be a boolean tensor with True indicating NaN values.
+    Notes
+    -----
+    - The nan_mask should have the same shape as tensor_for_agg.
+    - The nan_mask should be a boolean tensor with True indicating NaN values.
 
-        Examples
-        --------
-        >>> import torch
-        >>> tensor_for_agg = torch.tensor([[1, 2, 3], [4, float('nan'), 6]])
-        >>> nan_mask = torch.isnan(tensor_for_agg)
-        >>> aggregated_tensor = calc_nanaware_metrics(tensor_for_agg, nan_mask, all_tasks_agg=True)
-        >>> print(aggregated_tensor)
-        tensor(3.3333)
+    Examples
+    --------
+    >>> import torch
+    >>> tensor_for_agg = torch.tensor([[1, 2, 3], [4, float('nan'), 6]])
+    >>> nan_mask = torch.isnan(tensor_for_agg)
+    >>> aggregated_tensor = calc_nanaware_metrics(tensor_for_agg, nan_mask, all_tasks_agg=True)
+    >>> print(aggregated_tensor)
+    tensor(3.3333)
 
-        The above example demonstrates the usage of the `agg_notnan` function.
-        The input tensor contains NaN values, and the nan_mask is used to identify those NaN values.
-        By specifying `all_tasks_agg=True`, the function calculates the mean of the non-NaN values and then
-        returns the mean of all tasks. In this case, the output is `tensor(3.3333)`.
-        """
+    The above example demonstrates the usage of the `agg_notnan` function.
+    The input tensor contains NaN values, and the nan_mask is used to identify those NaN values.
+    By specifying `all_tasks_agg=True`, the function calculates the mean of the non-NaN values and then
+    returns the mean of all tasks. In this case, the output is `tensor(3.3333)`.
+    """
     # Now we only include the non-Nan targets in the mean calc.
     tensor_means = torch.sum(tensor, dim=0) / torch.sum(~nan_mask, dim=0)
 
@@ -253,7 +390,7 @@ def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
     if not all_tasks_agg:
         return tensor_means
     # TODO - check if this is correct - SUM OR MEAN?
-    elif all_tasks_agg == 'mean':
+    elif all_tasks_agg == "mean":
         return torch.nanmean(tensor_means)
     else:
         return torch.nansum(tensor_means)
@@ -277,17 +414,15 @@ def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
     loss_per_task = loss_fn(outputs, targets)
 
     # Now we only include the non-Nan targets in the mean calc.
-    loss = calc_nanaware_metrics(tensor=loss_per_task, nan_mask=nan_mask, all_tasks_agg='sum')
+    loss = calc_nanaware_metrics(
+        tensor=loss_per_task, nan_mask=nan_mask, all_tasks_agg="sum"
+    )
     # task_losses = torch.sum(loss_per_task, dim=1) / torch.sum(~nan_mask, dim=1)
     # loss = torch.sum(task_losses)
     return loss
 
 
-def process_preds(
-        predictions,
-        targets,
-        task_idx=None
-):
+def process_preds(predictions, targets, task_idx=None):
     # Get the predictions mean and std
     preds_mu = predictions.mean(dim=2)
     preds_std = predictions.std(dim=2)
@@ -317,17 +452,16 @@ def process_preds(
 
 
 def make_uct_plots(
-        y_preds,
-        y_std,
-        y_true,
-        task_name=None,
-        n_subset=100,
-        ylims=(-3, 3),
-        num_stds_confidence_bound=2, #TODO: or 1.96 for 95% confidence interval for normal distribution
-        plot_save_str="row",
-        savefig=True
+    y_preds,
+    y_std,
+    y_true,
+    task_name=None,
+    n_subset=100,
+    ylims=(-3, 3),
+    num_stds_confidence_bound=2,  # TODO: or 1.96 for 95% confidence interval for normal distribution
+    plot_save_str="row",
+    savefig=True,
 ):
-
     """
     Make set of plots.
     Adapted from https://github.com/uncertainty-toolbox/uncertainty-toolbox/blob/main/examples/viz_readme_figures.py
@@ -336,38 +470,45 @@ def make_uct_plots(
     # ylims = [-3, 3]
     # n_subset = 2
 
-    fig, axs = plt.subplots(1, 5, figsize=(25,5)) # (28, 8)
-
+    fig, axs = plt.subplots(1, 5, figsize=(25, 5))  # (28, 8)
 
     # Make ordered intervals plot
     # axs[0] = uct.plot_intervals_ordered(
     #     y_preds, y_std, y_true, n_subset=n_subset, ylims=ylims, num_stds_confidence_bound=num_stds_confidence_bound, ax=axs[0]
     # )
     axs[0] = uct.plot_intervals(
-        y_preds, y_std, y_true, n_subset=n_subset, ylims=ylims, num_stds_confidence_bound=num_stds_confidence_bound, ax=axs[0]
+        y_preds,
+        y_std,
+        y_true,
+        n_subset=n_subset,
+        ylims=ylims,
+        num_stds_confidence_bound=num_stds_confidence_bound,
+        ax=axs[0],
     )
-    axs[0].set_title('Prediction Intervals - {}'.format(task_name))
+    axs[0].set_title("Prediction Intervals - {}".format(task_name))
     # calculate RMSE and add it to the plot left upper corner
     rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
-    axs[0].text(0.05, 0.95, 'RMSE: {:.2f}'.format(rmse), transform=axs[0].transAxes)
+    axs[0].text(0.05, 0.95, "RMSE: {:.2f}".format(rmse), transform=axs[0].transAxes)
 
     # Make calibration plot
     axs[1] = uct.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
-    axs[1].set_title('Average Calibration - {}'.format(task_name))
+    axs[1].set_title("Average Calibration - {}".format(task_name))
 
     # Make adversarial group calibration plot
     axs[2] = uct.plot_adversarial_group_calibration(
         y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
     )
-    axs[2].set_title('Adversarial Group Calibration - {}'.format(task_name))
+    axs[2].set_title("Adversarial Group Calibration - {}".format(task_name))
 
     # Make sharpness plot
     axs[3] = uct.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
-    axs[3].set_title('Sharpness - {}'.format(task_name))
+    axs[3].set_title("Sharpness - {}".format(task_name))
 
     # Make residual vs stds plot
-    axs[4] = uct.plot_residuals_vs_stds(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4])
-    axs[4].set_title('Residuals vs. Predictive Std - {}'.format(task_name))
+    axs[4] = uct.plot_residuals_vs_stds(
+        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4]
+    )
+    axs[4].set_title("Residuals vs. Predictive Std - {}".format(task_name))
 
     # Adjust subplots spacing
     fig.subplots_adjust(wspace=0.5)
@@ -376,17 +517,19 @@ def make_uct_plots(
 
     # Save figure
     if savefig:
-        uct.viz.save_figure(plot_save_str, ext_list=["png", "svg"], white_background=True)
+        uct.viz.save_figure(
+            plot_save_str, ext_list=["png", "svg"], white_background=True
+        )
         # print("Saved uct plots to {}".format(plot_save_str))
 
     return fig
 
 
 def make_true_vs_preds_plot(
-        y_preds,
-        y_true,
-        task_name,
-        save_path=None,
+    y_preds,
+    y_true,
+    task_name,
+    save_path=None,
 ):
     # Sort the values based on y_true
     sorted_indices = np.argsort(y_true)
@@ -395,35 +538,43 @@ def make_true_vs_preds_plot(
 
     # Plot the graph
     fig, ax = plt.subplots()
-    ax.plot(sorted_y_true, sorted_y_preds, 'o', label='Predictions')
-    ax.set_xlabel('True Values')
-    ax.set_ylabel('Predicted Values')
-    ax.set_title('True vs. Predicted Values - {}'.format(task_name))
+    ax.plot(sorted_y_true, sorted_y_preds, "o", label="Predictions")
+    ax.set_xlabel("True Values")
+    ax.set_ylabel("Predicted Values")
+    ax.set_title("True vs. Predicted Values - {}".format(task_name))
 
     # Calculate the best-fitting line
     best_fit_coeffs = np.polyfit(sorted_y_true, sorted_y_preds, deg=1)
     best_fit_line = np.poly1d(best_fit_coeffs)
-    ax.plot(sorted_y_true, best_fit_line(sorted_y_true), color='red', label='Best Fit Line')
+    ax.plot(
+        sorted_y_true, best_fit_line(sorted_y_true), color="red", label="Best Fit Line"
+    )
 
     # Calculate the distances of each point to the best-fitted line
     distances = np.abs(best_fit_line(sorted_y_true) - sorted_y_preds)
     normalized_distances = distances / np.max(distances)
-    ax.plot(sorted_y_true, sorted_y_preds, color='gray', alpha=0.2)
+    ax.plot(sorted_y_true, sorted_y_preds, color="gray", alpha=0.2)
     # for i in range(len(sorted_y_true)):
     #     ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
     #              color='gray', alpha=normalized_distances[i])
     # Plot the grey lines between dots and best fit line
     for i in range(len(sorted_y_true)):
-        ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
-                color='gray', alpha=0.2)
+        ax.plot(
+            [sorted_y_true[i], sorted_y_true[i]],
+            [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
+            color="gray",
+            alpha=0.2,
+        )
 
     # Calculate and display the RMSE
     rmse = np.sqrt(np.mean((sorted_y_preds - best_fit_line(sorted_y_true)) ** 2))
     # ax.text(0.05, 0.9, f'RMSE: {rmse:.2f}', transform=plt.gca().transAxes)
-    ax.text(0.95, 0.05, f'RMSE: {rmse:.2f}', transform=ax.transAxes, ha='right', va='bottom')
+    ax.text(
+        0.95, 0.05, f"RMSE: {rmse:.2f}", transform=ax.transAxes, ha="right", va="bottom"
+    )
 
     # Show the legend and display/save the graph
-    ax.legend(loc='upper left')
+    ax.legend(loc="upper left")
 
     if save_path is not None:
         fig.savefig(save_path)
@@ -434,7 +585,9 @@ def make_true_vs_preds_plot(
     return fig
 
 
-def calculate_uct_metrics(y_pred, y_std, y_true, task_name, activity, split, model_type="ensemble"):
+def calculate_uct_metrics(
+    y_pred, y_std, y_true, task_name, activity, split, model_type="ensemble"
+):
     """
     Calculate metrics for the predictions.
 
@@ -510,31 +663,31 @@ class UCTMetricsTable:
         self.config = config
         self.model_type = model_type
         if model_type is not None:
-            cols = ['Model type']
+            cols = ["Model type"]
 
-        cols.extend([
-            "Target",
-            "Activity",
-            "Split",
-            "RMSE",
-            "R2",
-            "MAE",
-            "MADAE",
-            "MARPD",
-            "Correlation",
-            "RMS Calibration",
-            "MA Calibration",
-            "Miscalibration Area",
-            "Sharpness",
-            "NLL",
-            "CRPS",
-            "Check",
-            "Interval",
-            "UCT plots"
-        ])
-        self.table = wandb.Table(
-            columns=cols
+        cols.extend(
+            [
+                "Target",
+                "Activity",
+                "Split",
+                "RMSE",
+                "R2",
+                "MAE",
+                "MADAE",
+                "MARPD",
+                "Correlation",
+                "RMS Calibration",
+                "MA Calibration",
+                "Miscalibration Area",
+                "Sharpness",
+                "NLL",
+                "CRPS",
+                "Check",
+                "Interval",
+                "UCT plots",
+            ]
         )
+        self.table = wandb.Table(columns=cols)
 
     def __call__(self, y_pred, y_std, y_true, task_name=None):
         """
@@ -557,17 +710,9 @@ class UCTMetricsTable:
             Dictionary containing calculated metrics.
         """
         metrics, img = self.calculate_metrics(
-            y_pred=y_pred,
-            y_std=y_std,
-            y_true=y_true,
-            task_name=task_name
+            y_pred=y_pred, y_std=y_std, y_true=y_true, task_name=task_name
         )
-        self.add_data(
-            task_name=task_name,
-            config=self.config,
-            metrics=metrics,
-            img=img
-        )
+        self.add_data(task_name=task_name, config=self.config, metrics=metrics, img=img)
 
         return metrics
 
@@ -579,17 +724,11 @@ class UCTMetricsTable:
             task_name=task_name,
             activity=self.config.activity,
             split=self.config.split,
-            model_type=self.model_type
+            model_type=self.model_type,
         )
         return metrics, img
 
-    def add_data(
-            self,
-            task_name,
-            config,
-            metrics,
-            img
-    ):
+    def add_data(self, task_name, config, metrics, img):
         """
         Add data to the UCT metrics table.
 
@@ -609,25 +748,28 @@ class UCTMetricsTable:
         None
         """
         vals = [self.model_type] if self.model_type is not None else []
-        vals.extend([
-            task_name,
-            config.activity,
-            config.split,
-            metrics["accuracy"]["rmse"],
-            metrics["accuracy"]["r2"],
-            metrics["accuracy"]["mae"],
-            metrics["accuracy"]["mdae"],
-            metrics["accuracy"]["marpd"],
-            metrics["accuracy"]["corr"],
-            metrics["avg_calibration"]["rms_cal"],
-            metrics["avg_calibration"]["ma_cal"],
-            metrics["avg_calibration"]["miscal_area"],
-            metrics["sharpness"]["sharp"],
-            metrics["scoring_rule"]["nll"],
-            metrics["scoring_rule"]["crps"],
-            metrics["scoring_rule"]["check"],
-            metrics["scoring_rule"]["interval"],
-            img])
+        vals.extend(
+            [
+                task_name,
+                config.activity,
+                config.split,
+                metrics["accuracy"]["rmse"],
+                metrics["accuracy"]["r2"],
+                metrics["accuracy"]["mae"],
+                metrics["accuracy"]["mdae"],
+                metrics["accuracy"]["marpd"],
+                metrics["accuracy"]["corr"],
+                metrics["avg_calibration"]["rms_cal"],
+                metrics["avg_calibration"]["ma_cal"],
+                metrics["avg_calibration"]["miscal_area"],
+                metrics["sharpness"]["sharp"],
+                metrics["scoring_rule"]["nll"],
+                metrics["scoring_rule"]["crps"],
+                metrics["scoring_rule"]["check"],
+                metrics["scoring_rule"]["interval"],
+                img,
+            ]
+        )
 
         self.table.add_data(*vals)
         plt.close()
@@ -639,13 +781,7 @@ class UCTMetricsTable:
         wandb.log({f"UCT Metrics Table {self.model_type}": self.table})
 
 
-def uct_metrics_logger(
-        uct_metrics_table,
-        task_name,
-        config,
-        metrics,
-        img
-):
+def uct_metrics_logger(uct_metrics_table, task_name, config, metrics, img):
     """
     Log UCT metrics to the UCT metrics table.
 
@@ -684,7 +820,7 @@ def uct_metrics_logger(
         metrics["scoring_rule"]["crps"],
         metrics["scoring_rule"]["check"],
         metrics["scoring_rule"]["interval"],
-        img
+        img,
     )
     plt.close()
 
@@ -698,7 +834,9 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
     # table = wandb.Table(columns=table_cols)
     # with wandb.init(dir=wandb_dir, mode=wandb_mode):
     data = []
-    for smi, inp, tar, out in zip(smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")):
+    for smi, inp, tar, out in zip(
+        smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")
+    ):
         row = {
             "smiles": smi,
             "molecule": wandb.Molecule.from_smiles(smi),
@@ -709,12 +847,11 @@ def log_mol_table(smiles, inputs, targets, outputs, targets_names):
 
         # Iterate over each pair of output and target
         for targetName, target, output in zip(targets_names, tar, out):
-            row[f'{targetName}_label'] = target.item()
-            row[f'{targetName}_predicted'] = output.item()
+            row[f"{targetName}_label"] = target.item()
+            row[f"{targetName}_predicted"] = output.item()
 
         data.append(row)
 
     dataframe = pd.DataFrame.from_records(data)
     table = wandb.Table(dataframe=dataframe)
     wandb.log({"mols_table": table}, commit=False)
-

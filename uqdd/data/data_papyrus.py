@@ -1,5 +1,4 @@
 import logging
-import pickle
 import argparse
 from pathlib import Path
 from typing import Union, List
@@ -17,25 +16,18 @@ from papyrus_scripts.preprocess import (
     consume_chunks,
 )
 from papyrus_scripts.reader import read_papyrus, read_protein_set
-from uqdd import DATA_DIR, DATASET_DIR, DEVICE
+from uqdd import DATA_DIR, DATASET_DIR
 from uqdd.utils import create_logger, get_config
 from uqdd.utils_chem import standardize_df, get_chem_desc
+from uqdd.utils_prot import get_embeddings
 from uqdd.data.utils_data import (
     split_data,
     export_df,
     load_df,
+    load_pickle,
     check_if_processed_file,
-    get_tasks,
     export_tasks,
 )
-from uqdd.utils_prot import get_embeddings
-
-
-# import os
-# import sys
-# # module_path = os.path.abspath(os.path.join('..', '..'))
-# # if module_path not in sys.path:
-# #     sys.path.append(module_path)
 
 
 class Papyrus:
@@ -68,29 +60,62 @@ class Papyrus:
         self.std_smiles, self.verbose_files = std_smiles, verbose_files
         self.df_filtered, self.papyrus_protein_data = self._load_or_process_papyrus()
 
+        self.desc_chems = [
+            "ecfp1024",
+            "ecfp2048",
+            "mold2",
+            "cddd",
+            "fingerprint",
+            "moldesc",
+            # "mordred",
+            # "moe",
+            # "graph2d",
+        ]
+        self.desc_prots = [
+            "esm1_t12",  # TODO
+            None,
+            "unirep",
+            "esm1_t34",
+            "esm1_t6",
+            "esm1b",
+            "esm_msa1",
+            "esm_msa1b",
+            "esm1v",
+            "protbert",
+            "protbert_bfd",
+            "ankh-base",
+            "ankh-large",
+        ]
+
     def __call__(
         self,
-        ntop: int = -1,
+        n_targets: int = -1,
         desc_prot: Union[str, None] = None,
         desc_chem: Union[str, None] = None,
         recalculate: bool = False,
         split_type: str = "random",
         split_proportions=None,
         first_run_all_splits: bool = False,
+        first_run_all_descs: bool = False,
         file_ext: str = "pkl",
         batch_size: int = 2,
     ):
         # step 0: assertions
-        assert desc_prot or desc_chem, "At least desc_chem must be provided"
+        assert (
+            desc_prot or desc_chem or first_run_all_descs
+        ), "Either a descriptor must be provided or calculate all of them by setting first_run_all_descs=True"
+        topx = f"top{n_targets}" if n_targets > 0 else "all"
+        output_folder = self.output_path / topx
 
         # step 1: get the data top-x or all
-        df, label_col = self._get_ntop_or_all_dataset(ntop=ntop)
+        df, label_col = self._get_n_targets_or_all_dataset(n_targets=n_targets)
 
-        # TODO need to be fixed in case of all splits required
+        # if (not first_run_all_descs and not recalculate) or split_type != "all":
+        # TODO fixing this with first_run_all_descs and split all
         files_exist, files_paths = check_if_processed_file(
             data_name="papyrus",
             activity_type=self.activity_key,
-            ntop=ntop,
+            n_targets=n_targets,
             split_type=split_type,
             desc_prot=desc_prot,
             desc_chem=desc_chem,
@@ -103,48 +128,69 @@ class Papyrus:
             )
             return self._load_processed_files(files_paths, split_type)
 
-        # step 2: merge the descriptors
-        df = self.merge_descriptors(
-            df=df, desc_prot=desc_prot, desc_chem=desc_chem, batch_size=batch_size
+        if first_run_all_descs:
+            self.desc_prots = self.desc_prots if n_targets <= 0 else [None]
+
+            df, desc_prots, desc_chems = self.merge_descriptors(
+                df=df,
+                desc_prot=self.desc_prots,
+                desc_chem=self.desc_chems,
+                batch_size=batch_size,
+            )
+            desc_iter = list(
+                itertools.product(desc_prots, desc_chems)
+            )  # Only including the ones that were actually calculated
+
+        else:
+            # step 2: merge the descriptors
+            df, desc_prots, desc_chems = self.merge_descriptors(
+                df=df,
+                desc_prot=[desc_prot],
+                desc_chem=[desc_chem],
+                batch_size=batch_size,
+            )
+            desc_iter = [(desc_prots, desc_chems)]
+
+        # step 3: split the data
+        splitted_data_dict = self._split(
+            df, split_type, split_proportions, first_run_all_splits
         )
 
-        # step 3: filter the columns
-        cols_to_include = ["SMILES", desc_chem]
-        cols_to_include = (
-            cols_to_include + ["target_id", desc_prot, "Year"]
-            if ntop <= 0
-            else cols_to_include
-        )
-        # cols_to_include += (
-        #     ["Year"] if (split_type in ["all", "time"] and ntop <= 0) else []
-        # )
-        cols_to_include += label_col
-        cols_to_include.remove(None)
-        df = df[cols_to_include]
-
-        # step 4: split the data
-        if split_proportions is None:
-            split_proportions = [0.7, 0.15, 0.15]
-
-        if first_run_all_splits:
-            split_type = "all"
-
-        splitted_data_dict = split_data(
-            df,
-            split_type=split_type,
-            smiles_col="SMILES",
-            time_col="Year",
-            fractions=split_proportions,
-            seed=42,
-        )
-
-        # step 4: export the data
-        topx = f"top{ntop}" if ntop > 0 else "all"
-        output_folder = self.output_path / topx
-
-        self._export_datasets(splitted_data_dict, output_folder, desc_prot, desc_chem)
+        for desc_prot, desc_chem in desc_iter:
+            # step 4: filter the columns
+            cols_to_include = self._cols_to_include(
+                desc_chem, desc_prot, n_targets, label_col
+            )
+            # step 5: export the data
+            self._export_datasets(
+                splitted_data_dict,
+                output_folder,
+                desc_prot,
+                desc_chem,
+                cols_to_include=cols_to_include,
+            )
 
         return splitted_data_dict
+
+    # def merge_all_descs(self, df):
+    #
+    #     for desc_chem in self.desc_chems:
+    #         try:
+    #             df = self.merge_descriptors(df, desc_prot=None, desc_chem=desc_chem)
+    #         except Exception as e:
+    #             self.log.error(f"Error: {e} - {desc_chem} not calculated")
+    #             self.desc_chems.remove(desc_chem)
+    #             continue
+    #
+    #     for desc_prot in self.desc_prots:
+    #         try:
+    #             df = self.merge_descriptors(df, desc_prot=desc_prot, desc_chem=None)
+    #         except Exception as e:
+    #             self.log.error(f"Error: {e} - {desc_prot} not calculated")
+    #             self.desc_prots.remove(desc_prot)
+    #             continue
+    #
+    #     return df
 
     @staticmethod
     def _export_datasets(
@@ -153,6 +199,7 @@ class Papyrus:
         desc_prot=None,
         desc_chem=None,
         file_ext="pkl",
+        cols_to_include=None,
     ):
         """
         Exports each DataFrame in the data dictionary to the corresponding path in files_paths.
@@ -160,14 +207,14 @@ class Papyrus:
         Parameters
         ----------
         data_dict : dict
-            Dictionary containing split_type as key then another
+            Dictionary containing split_type as key, and another
             dict as value of dataframes with keys
             as 'train', 'val', and 'test'.
         output_folder : Path
             folder path where the files will be saved.
-        desc_prot : str
+        desc_prot : str or None or List
             Descriptor type for the protein.
-        desc_chem : str
+        desc_chem : str or None or List
             Descriptor type for the chemical compound.
         file_ext : str (default='pkl')
             File extension to use for the saved files.
@@ -182,14 +229,50 @@ class Papyrus:
             )
             for subset, df in subdict.items():
                 file_path = output_folder / f"{prefix}_{subset}.{file_ext}"
+                if cols_to_include:
+                    df = df[cols_to_include]
                 export_df(df, file_path=file_path)
 
-    def _get_ntop_or_all_dataset(
-        self,
-        ntop=20,
+    @staticmethod
+    def _split(df, split_type, split_proportions, first_run_all_splits=False):
+        if split_proportions is None:
+            split_proportions = [0.7, 0.15, 0.15]
+
+        if first_run_all_splits:
+            split_type = "all"
+
+        splitted_data_dict = split_data(
+            df,
+            split_type=split_type,
+            smiles_col="SMILES",
+            time_col="Year",
+            fractions=split_proportions,
+            seed=42,
+        )
+        return splitted_data_dict
+
+    @staticmethod
+    def _cols_to_include(
+        desc_chem: list, desc_prot: list, n_targets: int, label_col: list
     ):
-        if ntop > 0:
-            df, top_targets = self._get_top_targets(self.df_filtered, ntop)
+        cols_to_include = ["SMILES", *desc_chem]  # * used to unpack the list ['ecfp']
+        cols_to_include = (
+            cols_to_include + ["target_id", *desc_prot, "Year"]
+            if n_targets <= 0 and desc_prot
+            else cols_to_include
+        )
+        cols_to_include += label_col
+        if None in cols_to_include:
+            cols_to_include.remove(None)
+
+        return cols_to_include
+
+    def _get_n_targets_or_all_dataset(
+        self,
+        n_targets=20,
+    ):
+        if n_targets > 0:
+            df, top_targets = self._get_top_targets(self.df_filtered, n_targets)
 
             # if multitask:
             pivoted = pd.pivot_table(
@@ -207,7 +290,7 @@ class Papyrus:
             export_tasks(
                 data_name="papyrus",
                 activity=self.activity_key,
-                ntop=ntop,
+                n_targets=n_targets,
                 label_col=label_col,
             )
         else:
@@ -217,32 +300,66 @@ class Papyrus:
 
         return df, label_col
 
-    def merge_descriptors(self, df=None, desc_prot=None, desc_chem=None, batch_size=4):
+    def merge_descriptors(
+        self,
+        df=None,
+        desc_prot: Union[str, List[str], None] = None,
+        desc_chem: Union[str, List[str], None] = None,
+        # all_descs: bool = False,
+        batch_size: int = 4,
+    ):
         # "unirep", "esm", "protbert", "msa", "all"
         # "mold2", "mordred", "cddd", "fingerprint", "moe", "all"
         # check descriptors saved file:
+        # if all_descs:
+        #     desc_prot = self.desc_prots
+        #     desc_chem = self.desc_chems
+        # else:  # make sure it is in a list format
+        #     desc_prot = [desc_prot] if desc_prot else []
+        #     desc_chem = [desc_chem] if desc_chem else []
+
+        # desc_prot = [desc_prot] if desc_prot and isinstance(desc_prot, str) else []
+        # desc_chem = [desc_chem] if desc_chem and isinstance(desc_chem, str) else []
 
         if df is None:
             df = self.df_filtered.copy()
 
         if desc_prot:  # This is not MT then
-            self.log.info("Merging protein descriptors")
-            # target_id or sequence ...
-            query_col, df = self._prepare_query_col(df, desc_prot)
-            df = get_embeddings(
-                df, embedding_type=desc_prot, query_col=query_col, batch_size=batch_size
-            )
+            for desc in desc_prot:
+                try:
+                    self.log.info(f"Merging protein descriptors {desc}")
+                    # target_id or sequence ...
+                    query_col, df = self._prepare_query_col(df, desc)
+                    df = get_embeddings(
+                        df,
+                        embedding_type=desc,
+                        query_col=query_col,
+                        batch_size=batch_size,
+                    )
+                except Exception as e:
+                    self.log.error(f"Error: {e} - {desc} not calculated")
+                    desc_prot.remove(desc)
+                    continue
 
         if desc_chem:
-            self.log.info("Merging molecular descriptors")
-            # connectivity or SMILES
-            query_col, _ = self._prepare_query_col(df, desc_chem)
-            df = get_chem_desc(df, desc_type=desc_chem, query_col=query_col)
+            for desc in desc_chem:
+                try:
+                    self.log.info(f"Merging molecular descriptors {desc}")
+                    # connectivity or SMILES
+                    query_col, _ = self._prepare_query_col(df, desc)
+                    df = get_chem_desc(df, desc_type=desc, query_col=query_col)
 
-        return df
+                except Exception as e:
+                    self.log.error(f"Error: {e} - {desc} not calculated")
+                    desc_chem.remove(desc)
+                    continue
+
+        return df, desc_prot, desc_chem
 
     def _prepare_query_col(self, df, desc):
-        if desc in [
+        if desc is None:
+            return None, df
+        elif desc in [
             "esm1_t34",
             "esm1_t12",
             "esm1_t6",
@@ -261,10 +378,10 @@ class Papyrus:
         elif desc == "unirep":
             query_col = "target_id"
 
-        elif desc in ["mold2", "mordred", "cddd", "fingerprint", "moe"]:
+        elif desc in ["mold2", "mordred", "cddd", "fingerprint"]:  # , "moe"
             query_col = "connectivity"
 
-        elif desc in ["ecfp1024", "ecfp2048", "moldesc", "graph2d"]:
+        elif desc in ["ecfp1024", "ecfp2048", "moldesc"]:  # , "graph2d"
             query_col = "SMILES"
 
         else:
@@ -357,7 +474,7 @@ class Papyrus:
         # return self.df_filtered
 
     @staticmethod
-    def _get_top_targets(df, ntop=20):
+    def _get_top_targets(df, n_targets=20):
         # step 1: group the dataframe by protein target
         grouped = df.groupby("accession")
         # step 2: count the number of measurements for each protein target
@@ -365,7 +482,7 @@ class Papyrus:
         # step 3: sort the counts in descending order
         sorted_counts = counts.sort_values(ascending=False)  # , by="counts"
         # step 4: select the x protein targets with the highest counts
-        top_targets = sorted_counts.head(ntop)
+        top_targets = sorted_counts.head(n_targets)
         # step 5: filter the original dataframe to only include rows corresponding to these x protein targets
         filtered_df = df[df["accession"].isin(top_targets.index)]
         # step 6: filter the dataframe to only include rows with a pchembl value mean
@@ -464,184 +581,298 @@ class Papyrus:
                 data.to_csv(self.output_path / f"{file}", index=False)
 
 
-class PapyrusDatasetMT(Dataset):
-    def __init__(
-        self,
-        file_path: Union[str, Path] = DATASET_DIR
-        / "xc50"
-        / "all"
-        / "random"
-        / "train.pkl",
-        input_col: str = "ecfp1024",
-        target_col: Union[str, List, None] = None,
-        device: str = "cuda",
-    ) -> None:
-        """
-        Parameters
-        ----------
-        file_path: str or Path
-        input_col: str
-        target_col: str or List or None
-        device: str
-        """
-        folder_path = file_path.parent
-        with open(file_path, "rb") as file:
-            self.data = pickle.load(file)
-
-        self.input_col = input_col.lower()
-
-        if target_col is None:  # has to be changed if all and not MT
-            # Assuming your DataFrame is named "df"
-            target_col_path = folder_path / "target_col.pkl"
-            with open(target_col_path, "rb") as file:
-                target_col = pickle.load(file)
-
-        self.target_col = target_col
-
-        self.input_data = (
-            torch.from_numpy(np.stack(self.data[self.input_col].values))
-            .to(torch.float)
-            .to(device)
-        )
-        self.target_data = (
-            torch.tensor(self.data[self.target_col].values).to(torch.float).to(device)
-        )
-
-        del self.data
-
-    def __len__(self):
-        return len(self.input_data)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        x_sample = self.input_data[idx]
-        y_sample = self.target_data[idx]
-
-        return x_sample, y_sample
-
-
 class PapyrusDataset(Dataset):
     def __init__(
         self,
-        file_path: Union[str, Path] = DATASET_DIR
-        / "xc50"
-        / "all"
-        / "random"
-        / "train.pkl",
-        chem_xcol: str = "ecfp1024",
-        prot_xcol: str = "protein_embeddings",
-        label_ycol: Union[str, List, None] = "pchembl_value_Mean",
-        # input_col: str = "ecfp1024",
-        device: object = "cuda",
+        file_path: Union[str, Path] = None,
+        desc_prot: Union[str, None] = None,
+        desc_chem: Union[str, None] = None,
+        **kwargs,
     ) -> None:
-        folder_path = file_path.parent
-        with open(file_path, "rb") as file:
-            self.data = pickle.load(file)
 
-        self.chem_xcol = chem_xcol.lower()
-        self.prot_xcol = prot_xcol.lower()
-        # TODO check if label_ycol is None
-        # if label_ycol is None: # MT
+        self.data = load_df(file_path, **kwargs)
+        dir_path = file_path.parent
 
-        self.label_ycol = label_ycol
-
-        if label_ycol is None:  # has to be changed if all and not MT
-            # Assuming your DataFrame is named "df"
-            target_col_path = folder_path / "target_col.pkl"
-            with open(target_col_path, "rb") as file:
-                target_col = pickle.load(file)
-
-        self.target_col = target_col
-
-        self.input_data = (
-            torch.from_numpy(np.stack(self.data[self.chem_xcol].values))
-            .to(torch.float)
-            .to(device)
+        labels_filepath = dir_path / "target_col.pkl"
+        self.MT = labels_filepath.is_file()
+        self.label_col = (
+            load_pickle(labels_filepath) if self.MT else "pchembl_value_Mean"
         )
-        self.target_data = (
-            torch.tensor(self.data[self.target_col].values).to(torch.float).to(device)
-        )
-
-        del self.data
+        self.desc_prot = desc_prot
+        self.desc_chem = desc_chem
 
     def __len__(self):
-        return len(self.input_data)
+        return len(self.data)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
+        sample = self.data.iloc[idx]
+        if self.MT:
+            # For multitask learning, use only chemical descriptors
+            chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
+            label = torch.tensor(sample[self.label_col], dtype=torch.float32)
+            return chem_desc, label
+        else:
+            # For single-task learning, use both protein and chemical descriptors
+            prot_desc = torch.tensor(sample[self.desc_prot], dtype=torch.float32)
+            chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
+            label = torch.tensor(sample[self.label_col], dtype=torch.float32)
+            return prot_desc, chem_desc, label
 
-        x_sample = self.input_data[idx]
-        y_sample = self.target_data[idx]
 
-        return x_sample, y_sample
-
-
-def run_all_combs(args):
-    # Define all possible values for each argument
-    activity_types = ["xc50", "kx"]
-    ntop = args.ntop
-    desc_prots = (
-        [
-            None,
-            "unirep",
-            "esm1_t34",
-            "esm1_t12",
-            "esm1_t6",
-            "esm1b",
-            "esm_msa1",
-            "esm_msa1b",
-            "esm1v",
-            "protbert",
-            "protbert_bfd",
-            "ankh-base",
-            "ankh-large",
-        ]
-        if ntop <= 0
-        else [None]
-    )
-
-    desc_chems = [
-        "ecfp1024",
-        "ecfp2048",
-        "mold2",
-        "mordred",
-        "cddd",
-        "fingerprint",
-        "moe",
-        "moldesc",
-        "graph2d",
-    ]
-
-    for act_key in activity_types:
-        papyrus = Papyrus(
-            activity_type=act_key,
-            std_smiles=True,
-            verbose_files=False,
+def get_datasets(
+    n_targets: int = -1,
+    activity_type: str = "xc50",
+    split_type: str = "random",
+    desc_prot: Union[str, None] = None,
+    desc_chem: Union[str, None] = None,
+    ext: str = "pkl",
+    logger: Union[None, logging.Logger] = None,
+):
+    activity_type = activity_type.lower()
+    desc_chem = desc_chem.lower()
+    desc_prot = desc_prot.lower() if desc_prot else None
+    if logger is None:
+        logger = create_logger(
+            name="Papyrus_get_datasets", file_level="debug", stream_level="info"
         )
-        call_args = list(itertools.product(desc_prots, desc_chems))
-        for call_arg in call_args:
-            # Call the instance with the current combination of call argument values
-            logging.info("Running Papyrus with the following arguments:")
-            logging.info(
-                f"act_key: {act_key}, n_top: {args.ntop}, call_arg: {call_arg}"
+
+    dir_path = DATASET_DIR / "papyrus" / activity_type
+    dir_path = dir_path / "all" if n_targets <= 0 else dir_path / f"top{n_targets}"
+
+    if n_targets > 0:
+        logger.info(
+            "Initializing dataset for multitask learning; only chemical descriptors will be used."
+        )
+        filename_prefix = f"{split_type}_{desc_chem}"
+    else:
+        if desc_prot:
+            logger.info(
+                "Initializing pcm dataset for single-task learning; both protein and chemical descriptors will be used."
             )
-            try:
-                papyrus(
-                    ntop=args.ntop,
-                    desc_prot=call_arg[0],
-                    desc_chem=call_arg[1],
-                    recalculate=False,
-                    first_run_all_splits=True,
-                    file_ext=args.file_ext,  # "pkl",
-                    batch_size=args.batch_size,  # 2,
-                )
-            except Exception as e:
-                print(f"Error: {e}")
-                print(f"act_key: {act_key}, n_top: {args.ntop}, call_arg: {call_arg}")
-                continue
+            filename_prefix = f"{split_type}_{desc_prot}_{desc_chem}"
+        else:
+            logger.info(
+                "Initializing dataset for single-task learning; only chemical descriptors will be used."
+            )
+            filename_prefix = f"{split_type}_{desc_chem}"
+
+    datasets = {}
+    for subset in ["train", "val", "test"]:
+        file_path = dir_path / f"{filename_prefix}_{subset}.{ext}"
+        if not file_path.is_file():
+            # TODO calculate them here if not found
+            raise FileNotFoundError(
+                f"File {subset} not found: {file_path} - you need to precalculate the dataset "
+                f"features and splits first."
+            )
+        datasets[subset] = PapyrusDataset(
+            file_path, desc_prot=desc_prot, desc_chem=desc_chem
+        )
+
+    return datasets
+    # try:
+    #     paths = {
+    #         split: os.path.join(DATASET_DIR, activity, split_type, f"{split}.pkl")
+    #         for split in ["train", "val", "test"]
+    #     }
+    #     datasets = {}
+    #
+    #     for input_col in ["ecfp1024", "ecfp2048"]:
+    #         for split, dataset_path in paths.items():
+    #             key = f"{split}_{input_col}"
+    #             datasets[key] = PapyrusDatasetMT(
+    #                 dataset_path, input_col=input_col, device=device
+    #             )
+    #     return datasets
+
+    # except Exception as e:
+    #     raise RuntimeError(f"Error loading datasets: {e}")
+
+
+# class _PapyrusDatasetMT(Dataset):
+#     def __init__(
+#         self,
+#         file_path: Union[str, Path] = DATASET_DIR
+#         / "xc50"
+#         / "all"
+#         / "random"
+#         / "train.pkl",
+#         input_col: str = "ecfp1024",
+#         target_col: Union[str, List, None] = None,
+#         device: str = "cuda",
+#     ) -> None:
+#         """
+#         Parameters
+#         ----------
+#         file_path: str or Path
+#         input_col: str
+#         target_col: str or List or None
+#         device: str
+#         """
+#         folder_path = file_path.parent
+#         with open(file_path, "rb") as file:
+#             self.data = pickle.load(file)
+#
+#         self.input_col = input_col.lower()
+#
+#         if target_col is None:  # has to be changed if all and not MT
+#             # Assuming your DataFrame is named "df"
+#             target_col_path = folder_path / "target_col.pkl"
+#             with open(target_col_path, "rb") as file:
+#                 target_col = pickle.load(file)
+#
+#         self.target_col = target_col
+#
+#         self.input_data = (
+#             torch.from_numpy(np.stack(self.data[self.input_col].values))
+#             .to(torch.float)
+#             .to(device)
+#         )
+#         self.target_data = (
+#             torch.tensor(self.data[self.target_col].values).to(torch.float).to(device)
+#         )
+#
+#         del self.data
+#
+#     def __len__(self):
+#         return len(self.input_data)
+#
+#     def __getitem__(self, idx):
+#         if torch.is_tensor(idx):
+#             idx = idx.tolist()
+#
+#         x_sample = self.input_data[idx]
+#         y_sample = self.target_data[idx]
+#
+#         return x_sample, y_sample
+#
+
+# class _PapyrusDataset(Dataset):
+#     def __init__(
+#         self,
+#         file_path: Union[str, Path] = DATASET_DIR
+#         / "xc50"
+#         / "all"
+#         / "random"
+#         / "train.pkl",
+#         chem_xcol: str = "ecfp1024",
+#         prot_xcol: str = "protein_embeddings",
+#         label_ycol: Union[str, List, None] = "pchembl_value_Mean",
+#         # input_col: str = "ecfp1024",
+#         device: object = "cuda",
+#     ) -> None:
+#         folder_path = file_path.parent
+#         with open(file_path, "rb") as file:
+#             self.data = pickle.load(file)
+#
+#         self.chem_xcol = chem_xcol.lower()
+#         self.prot_xcol = prot_xcol.lower()
+#         # TODO check if label_ycol is None
+#         # if label_ycol is None: # MT
+#
+#         self.label_ycol = label_ycol
+#
+#         if label_ycol is None:  # has to be changed if all and not MT
+#             # Assuming your DataFrame is named "df"
+#             target_col_path = folder_path / "target_col.pkl"
+#             with open(target_col_path, "rb") as file:
+#                 target_col = pickle.load(file)
+#
+#         self.target_col = target_col
+#
+#         self.input_data = (
+#             torch.from_numpy(np.stack(self.data[self.chem_xcol].values))
+#             .to(torch.float)
+#             .to(device)
+#         )
+#         self.target_data = (
+#             torch.tensor(self.data[self.target_col].values).to(torch.float).to(device)
+#         )
+#
+#         del self.data
+#
+#     def __len__(self):
+#         return len(self.input_data)
+#
+#     def __getitem__(self, idx):
+#         if torch.is_tensor(idx):
+#             idx = idx.tolist()
+#
+#         x_sample = self.input_data[idx]
+#         y_sample = self.target_data[idx]
+#
+#         return x_sample, y_sample
+#
+
+# def run_all_combs(args):
+#     # Define all possible values for each argument
+#     activity_types = ["xc50", "kx"]
+#     n_targets = args.n_targets
+#     desc_prots = (
+#         [
+#             None,
+#             "unirep",
+#             "esm1_t34",
+#             "esm1_t12",
+#             "esm1_t6",
+#             "esm1b",
+#             "esm_msa1",
+#             "esm_msa1b",
+#             "esm1v",
+#             "protbert",
+#             "protbert_bfd",
+#             "ankh-base",
+#             "ankh-large",
+#         ]
+#         if n_targets <= 0
+#         else [None]
+#     )
+#
+#     desc_chems = [
+#         "ecfp1024",
+#         "ecfp2048",
+#         "mold2",
+#         "cddd",
+#         "fingerprint",
+#         "moldesc",
+#         # "mordred",
+#         # "moe",
+#         # "graph2d",
+#     ]
+#     i = 0
+#     for act_key in activity_types:
+#         papyrus = Papyrus(
+#             activity_type=act_key,
+#             std_smiles=True,
+#             verbose_files=False,
+#         )
+#         call_args = list(itertools.product(desc_prots, desc_chems))
+#         for call_arg in call_args:
+#             # Call the instance with the current combination of call argument values
+#             papyrus.log.info(f"{i} Running Papyrus with the following arguments:")
+#             papyrus.log.info(
+#                 f"act_key: {act_key}, n_top: {args.n_targets}, call_arg: {call_arg}"
+#             )
+#             i += 1
+#             try:
+#                 papyrus(
+#                     n_targets=args.n_targets,
+#                     desc_prot=call_arg[0],
+#                     desc_chem=call_arg[1],
+#                     recalculate=args.recalculate,
+#                     first_run_all_splits=True,
+#                     file_ext=args.file_ext,  # "pkl",
+#                     batch_size=args.batch_size,  # 2,
+#                 )
+#             except Exception as e:
+#                 papyrus.log.error(f"Error: {e}")
+#                 papyrus.log.error(
+#                     f"act_key: {act_key}, n_top: {args.n_targets}, call_arg: {call_arg}"
+#                 )
+#                 continue
+#
 
 
 def run_papyrus(args):
@@ -660,13 +891,14 @@ def run_papyrus(args):
         else None
     )
     papyrus(
-        ntop=args.ntop,
+        n_targets=args.n_targets,
         desc_prot=args.desc_prot,
         desc_chem=args.desc_chem,
         recalculate=args.recalculate,
         split_type=args.split_type,
         split_proportions=split_proportions,
         first_run_all_splits=args.first_run_all_splits,
+        first_run_all_descs=args.all_combinations,
         file_ext=args.file_ext,
         batch_size=args.batch_size,
     )
@@ -681,12 +913,6 @@ def main():
         action="store_true",
         help="Calculate all combinations of arguments",
     )
-    # parser.add_argument(
-    #     "--all_combinations",
-    #     type=bool,
-    #     default=False,
-    #     help="Calculate all combinations of arguments",
-    # )
 
     # Arguments for Papyrus class initialization
     parser.add_argument("--accession", type=str, default=None, help="Accession")
@@ -709,7 +935,9 @@ def main():
     )
 
     # optional arguments even with all combs
-    parser.add_argument("--ntop", type=int, default=-1, help="Number of top targets")
+    parser.add_argument(
+        "--n-targets", type=int, default=-1, help="Number of top targets"
+    )
 
     parser.add_argument("--recalculate", action="store_true", help="Recalculate")
     parser.add_argument(
@@ -723,11 +951,13 @@ def main():
 
     args = parser.parse_args()
 
-    if args.all_combinations:
-        run_all_combs(args)
+    run_papyrus(args)
 
-    else:
-        run_papyrus(args)
+    # if args.all_combinations:
+    #     run_all_combs(args)
+    #
+    # else:
+    #     run_papyrus(args)
 
 
 #
@@ -742,38 +972,67 @@ def main():
 #     "--first_run_all_splits", type=bool, default=False, help="First run all splits"
 # )
 #
-# if __name__ == "__main__":
-#     # init args
-#     activity_type = "xc50"
-#     std_smiles = True
-#     verbose_files = False
+if __name__ == "__main__":
+    # main()
+    # init args
+    activity_type = "xc50"
+    std_smiles = True
+    verbose_files = False
+
+    # call args
+    n_targets = -1
+    desc_prot = None  # "esm1_t12"  # "ankh-base"
+    # "esm1b"
+    # ValueError: You cant't pass sequence with length
+    # more than 1024 with esm1b_t33_650M_UR50S, use esm1_t34_670M_UR100 or filter the sequence length
+
+    desc_chem = None  # "ecfp2048"
+    first_run_all_splits = True
+    first_run_all_descs = True
+    recalculate = True
+    split_type = "random"
+    split_proportions = [0.7, 0.15, 0.15]
+    file_ext = "pkl"
+
+    papyrus = Papyrus(
+        activity_type=activity_type,
+        std_smiles=std_smiles,
+        verbose_files=verbose_files,
+    )
+
+    papyrus(
+        n_targets=n_targets,
+        desc_prot=desc_prot,
+        desc_chem=desc_chem,
+        recalculate=recalculate,
+        split_type=split_type,
+        split_proportions=split_proportions,
+        first_run_all_splits=first_run_all_splits,
+        first_run_all_descs=first_run_all_descs,
+        file_ext=file_ext,
+    )
+# #
+# train_loader = PapyrusDataset(
+#     file_path=DATASET_DIR
+#     / "papyrus"
+#     / "xc50"
+#     / "all"
+#     / "random_ankh-base_ecfp2048_train.pkl",
+#     desc_prot="ankh-base",
+#     desc_chem="ecfp2048",
+# )
+# print(train_loader)
+# print(train_loader[0])
+# print(len(train_loader))
+# print(train_loader[0][0].shape)
 #
-#     # call args
-#     ntop = -1
-#     desc_prot = "ankh-base"
-#     # "esm1b"
-#     # ValueError: You cant't pass sequence with length more than 1024 with esm1b_t33_650M_UR50S, use esm1_t34_670M_UR100 or filter the sequence length
+# datasets = get_papyrus_datasets(
+#     n_targets=-1,
+#     activity_type="xc50",
+#     split_type="random",
+#     desc_prot="ankh-base",
+#     desc_chem="ecfp2048",
+#     ext="pkl",
+# )
 #
-#     desc_chem = "ecfp2048"
-#     first_run_all_splits = True
-#     recalculate = True
-#     split_type = "random"
-#     split_proportions = [0.7, 0.15, 0.15]
-#     file_ext = "pkl"
-#
-#     papyrus = Papyrus(
-#         activity_type=activity_type,
-#         std_smiles=std_smiles,
-#         verbose_files=verbose_files,
-#     )
-#
-#     papyrus(
-#         ntop=ntop,
-#         desc_prot=desc_prot,
-#         desc_chem=desc_chem,
-#         recalculate=recalculate,
-#         split_type=split_type,
-#         split_proportions=split_proportions,
-#         first_run_all_splits=first_run_all_splits,
-#         file_ext=file_ext,
-#     )
+# print(datasets)

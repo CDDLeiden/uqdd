@@ -1,5 +1,6 @@
 import os
 import json
+from pathlib import Path
 from typing import List, Union, Tuple  # , List, Tuple, Any, Set, Dict
 import logging
 import pandas as pd
@@ -39,9 +40,9 @@ def create_logger(name="logger", file_level="debug", stream_level="info"):
     return log
 
 
-def get_config(config_name: str, config_dir: str = CONFIG_DIR, **kwargs):
-    config_path = os.path.join(config_dir, f"{config_name}.json")
-    if not os.path.exists(config_path):
+def get_config(config_name: str, config_dir: Union[str, Path] = CONFIG_DIR, **kwargs):
+    config_path = Path(config_dir) / f"{config_name}.json"
+    if not config_path.exists():
         raise FileNotFoundError(
             f"Config file '{config_path}' does not exist. Ensure the file is present in '{CONFIG_DIR}'."
         )

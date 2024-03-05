@@ -1,11 +1,9 @@
 import copy
-import time
 from typing import Union, List, Tuple, Dict, Any
 
 from PIL import Image
 import numpy as np
 import pandas as pd
-from pandas import DataFrame
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
@@ -31,9 +29,9 @@ all_models = [
     "mordred",
     "cddd",
     "fingerprint",
-    "moe",
-    "moldesc",
-    "graph2d",
+    # "moldesc",
+    # "moe",
+    # "graph2d",
 ]
 
 descriptors = [
@@ -481,7 +479,7 @@ def standardize_df(
 
 # define function that transforms SMILES strings into ECFPs
 def ecfp_from_smiles(
-    smiles, radius=2, length=2**10, use_features=False, use_chirality=False
+    smiles, radius=4, length=2**10, use_features=False, use_chirality=False
 ):
     """
     Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
@@ -526,9 +524,13 @@ def ecfp_from_smiles(
     return np.array(feature_list)
 
 
+def wrapper_ecfp_from_smiles(args):
+    return ecfp_from_smiles(*args)
+
+
 def generate_ecfp(
     smiles,
-    radius=2,
+    radius=4,
     length=2**10,
     use_features=False,
     use_chirality=False,
@@ -573,26 +575,15 @@ def generate_ecfp(
     with ProcessPoolExecutor() as executor:
         results = list(
             tqdm(
-                executor.map(ecfp_from_smiles, args_list),
+                executor.map(wrapper_ecfp_from_smiles, args_list),
                 total=len(args_list),
-                desc="Generating ECFP",
+                desc=f"Generating ECFP {length} fingerprints",
             )
         )
     ecfp_result = {smi: result for smi, result in zip(smiles, results)}
     # This should be used as
     # df_filtered[smiles_col] = df_filtered[smiles_col].map(standardized_result)
     return ecfp_result
-
-    # df[f"ecfp{length}"] = df[smiles_col].apply(
-    #     lambda x: ecfp_from_smiles(
-    #         x,
-    #         radius=radius,
-    #         length=length,
-    #         use_features=use_features,
-    #         use_chirality=use_chirality,
-    #     )
-    # )
-    # return df
 
 
 def get_mol_descriptors(smiles: str, chosen_descriptors: List[str] = None):
@@ -637,6 +628,10 @@ def get_mol_descriptors(smiles: str, chosen_descriptors: List[str] = None):
     return desc_array
 
 
+def wrapper_get_mol_descriptors(args):
+    return get_mol_descriptors(*args)
+
+
 def generate_mol_descriptors(
     smiles, chosen_descriptors: List[str] = None
 ) -> dict[Any, Any]:
@@ -660,15 +655,12 @@ def generate_mol_descriptors(
         to add the descriptors to the dataframe
     """
 
-    if chosen_descriptors is None:
-        chosen_descriptors = descriptors
-
     args_list = [(smi, chosen_descriptors) for smi in smiles]
 
     with ProcessPoolExecutor() as executor:
         results = list(
             tqdm(
-                executor.map(get_mol_descriptors, args_list),
+                executor.map(wrapper_get_mol_descriptors, args_list),
                 total=len(args_list),
                 desc="Generating Molecular Descriptors",
             )
@@ -753,18 +745,16 @@ def get_chem_desc(
     desc_type = desc_type.lower()
     unique_entries = df[query_col].unique().tolist()
 
-    if desc_type in ["mold2", "mordred", "cddd", "fingerprint", "moe"]:
+    if desc_type is None:
+        return df
+    elif desc_type in ["mold2", "mordred", "cddd", "fingerprint"]:  # , "moe"
         desc_mapper = get_papyrus_descriptors(
             connectivity_ids=unique_entries, desc_type=desc_type
         )
     elif desc_type.startswith("ecfp"):
         length = int(desc_type[4:])
-        desc_mapper = generate_ecfp(unique_entries, radius=2, length=length, **kwargs)
-    # elif desc_type == "ecfp1024":
-    #     desc_mapper = generate_ecfp(unique_entries, radius=2, length=1024, **kwargs)
-    # elif desc_type == "ecfp2048":
-    #     desc_mapper = generate_ecfp(unique_entries, radius=2, length=2048, **kwargs)
-    elif desc_type == "moldesc":
+        desc_mapper = generate_ecfp(unique_entries, radius=4, length=length, **kwargs)
+    elif desc_type == "moldesc":  # errorness
         desc_mapper = generate_mol_descriptors(unique_entries, **kwargs)
     elif desc_type == "graph2d":
         raise NotImplementedError

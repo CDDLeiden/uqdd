@@ -101,8 +101,8 @@ def load_df(input_path, **kwargs):
         raise ValueError(f"Unsupported file extension for loading: {ext} provided")
 
 
-def export_tasks(data_name, activity, ntop, label_col):
-    topx = f"top{ntop}" if ntop > 0 else "all"
+def export_tasks(data_name, activity, n_targets, label_col):
+    topx = f"top{n_targets}" if n_targets > 0 else "all"
     target_col_path = DATASET_DIR / data_name / activity / topx / "target_col.pkl"
     os.makedirs(target_col_path.parent, exist_ok=True)
     # export to pickle
@@ -111,8 +111,8 @@ def export_tasks(data_name, activity, ntop, label_col):
     logging.info(f"Tasks exported to {target_col_path}")
 
 
-def get_tasks(data_name, activity, ntop):
-    topx = f"top{ntop}" if ntop > 0 else "all"
+def get_tasks(data_name, activity, n_targets):
+    topx = f"top{n_targets}" if n_targets > 0 else "all"
     target_col_path = DATASET_DIR / data_name / activity / topx / "target_col.pkl"
     target_col = load_pickle(target_col_path)
     if target_col is None:
@@ -126,27 +126,6 @@ def get_dataset_sizes(datasets):
     """
     for name, dataset in datasets.items():
         logging.info(f"{name} set size: {len(dataset)}")
-
-
-# TODO check this function
-# def get_datasets(activity, split_type, device=DEVICE):
-#     try:
-#         paths = {
-#             split: os.path.join(DATASET_DIR, activity, split_type, f"{split}.pkl")
-#             for split in ["train", "val", "test"]
-#         }
-#         datasets = {}
-#
-#         for input_col in ["ecfp1024", "ecfp2048"]:
-#             for split, dataset_path in paths.items():
-#                 key = f"{split}_{input_col}"
-#                 datasets[key] = PapyrusDatasetMT(
-#                     dataset_path, input_col=input_col, device=device
-#                 )
-#         return datasets
-#
-#     except Exception as e:
-#         raise RuntimeError(f"Error loading datasets: {e}")
 
 
 def get_data_info(train_data, val_data, test_data):
@@ -420,14 +399,14 @@ def split_data(
 def check_if_processed_file(
     data_name="papyrus",
     activity_type="xc50",
-    ntop=-1,
+    n_targets=-1,
     split_type="random",
     desc_prot=None,
     desc_chem="ecfp1024",
     file_ext="pkl",
 ):
 
-    topx = f"top{ntop}" if ntop > 0 else "all"
+    topx = f"top{n_targets}" if n_targets > 0 else "all"
     output_path = DATASET_DIR / data_name / activity_type / topx
     prefix = (
         f"{split_type}_{desc_prot}_{desc_chem}"
@@ -449,20 +428,20 @@ def check_if_processed_file(
 # def _check_if_processed_file(
 #     data_name="papyrus",
 #     activity_type="xc50",
-#     ntop=-1,
+#     n_targets=-1,
 #     split_type="random",
 #     desc_prot=None,
 #     desc_chem="ecfp1024",
 #     file_ext="pkl",
 # ):
 #
-#     topx = f"top{ntop}" if ntop > 0 else "all"
+#     topx = f"top{n_targets}" if n_targets > 0 else "all"
 #     # if split_type == "all":
 #     #     all_files_exist = []
 #     #     all_file_paths = {}
 #     #     for st in ["random", "scaffold", "time"]:
 #     #         files_exist, files_paths = check_if_processed_file(
-#     #             data_name, activity_type, ntop, st, desc_prot, desc_chem, file_ext
+#     #             data_name, activity_type, n_targets, st, desc_prot, desc_chem, file_ext
 #     #         )
 #     #
 #     #         all_files_exist.append(files_exist)

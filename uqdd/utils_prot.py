@@ -197,9 +197,12 @@ def get_embeddings(
     query_col: str = "Sequence",
     batch_size: int = 4,
 ) -> pd.DataFrame:
+
     embedding_type = embedding_type.lower()
     protein_sequences = df[query_col].unique().tolist()
-    if embedding_type in [
+    if embedding_type is None:
+        return df
+    elif embedding_type in [
         "esm1_t34",
         "esm1_t12",
         "esm1_t6",
@@ -222,6 +225,7 @@ def get_embeddings(
             "UniRep can only be extracted from Papyrus and not computed on the fly for new input."
         )
         embeddings = get_papyrus_embeddings(protein_sequences, embedding_type)
+
     else:
         raise ValueError(f"Unsupported embedding type: {embedding_type}")
 
