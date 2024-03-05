@@ -1,0 +1,60 @@
+{
+  "method": "random",
+  "metric": {
+    "name": "val/rmse",
+    "goal": "minimize"
+  },
+  "parameters": {
+    "chem_input_dim": 2048,
+    "prot_input_dim": 768,
+    "chem_layers": {
+      "values": [
+        [2048, 1024, 512, 256],
+        [2048, 1024, 512],
+        [1024, 512, 256],
+        [1024, 256]
+      ]
+    },
+    "prot_layers": {
+      "values": [
+        [768, 512, 256, 128],
+        [768, 512, 256],
+        [512, 256, 128],
+        [512, 128]
+      ]
+    },
+    "dropout": {
+      "values": [0.1, 0.2]
+    },
+    "batch_size": {
+      "values": [64, 128, 256]
+    },
+    "epochs": {
+      "value": 300
+    },
+    "early_stop": {
+      "value": 20
+    },
+    "loss": {
+      "values": ["huber", "mse"]
+    },
+    "optimizer": {
+      "values": ["adam", "adamw", "sgd"]
+    },
+    "lr": {
+      "values": [0.001, 0.01]
+    },
+    "weight_decay": {
+      "value": 1e-4
+    },
+    "lr_scheduler": {
+      "value": "ReduceLROnPlateau"
+    },
+    "lr_scheduler_patience": {
+      "value": 20
+    },
+    "lr_scheduler_factor": {
+      "value": 0.5
+    }
+  }
+}

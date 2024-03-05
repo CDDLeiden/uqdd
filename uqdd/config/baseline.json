@@ -1,0 +1,19 @@
+{
+  "chem_input_dim": 2048,
+  "prot_input_dim": 768,
+  "chem_layers": [1024, 512, 256],
+  "prot_layers": [512, 256, 128],
+  "regressor_layers": [512, 256, 128],
+  "dropout": 0.2,
+  "batch_size": 128,
+  "epochs": 3000,
+  "early_stop": 100,
+  "loss": "huber",
+  "loss_reduction": "none",
+  "optimizer": "adam",
+  "lr": 1e-3,
+  "weight_decay": 1e-4,
+  "lr_scheduler": "plateau",
+  "lr_scheduler_patience": 20,
+  "lr_scheduler_factor": 0.2
+}
