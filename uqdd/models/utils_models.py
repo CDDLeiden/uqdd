@@ -59,7 +59,7 @@ def get_desc_len(dataset):  # , desc_prot=True):
     desc_chem_len: int
         Length of the chemical descriptors
     """
-    # desc_prot then desc_chem
+    # desc_prot then descriptor_chemical
     # if desc_prot:
     #     return dataset[0][0].shape[0], dataset[0][1].shape[0]
     # else:

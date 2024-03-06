@@ -148,12 +148,16 @@ def create_split_dict(split_type, train_df, val_df, test_df):  # , **kwargs):
             "test": test_df,
         }
     }
-    # out[split_type].update(kwargs)
     return out
 
 
 def random_split(
-    df: pd.DataFrame, train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42
+    df: pd.DataFrame,
+    train_frac=0.7,
+    val_frac=0.15,
+    test_frac=0.15,
+    return_indices=False,
+    seed=42,
 ) -> dict:
     """
     Splits a DataFrame into training, validation, and test sets based on specified fractions.
@@ -172,12 +176,12 @@ def random_split(
         The random seed for reproducible splits.
     Returns:
     --------
-    train_df : pandas.DataFrame
-        The training dataframe.
-    val_df : pandas.DataFrame
-        The validation dataframe.
-    test_df : pandas.DataFrame
-        The testing dataframe.
+    train_df : pandas.DataFrame or list
+        The training dataframe or list of indices.
+    val_df : pandas.DataFrame or list
+        The validation dataframe or list of indices.
+    test_df : pandas.DataFrame or list
+        The testing dataframe or list of indices.
     """
     # First split: separate the training set from the rest
     rest_frac = val_frac + test_frac
@@ -191,11 +195,24 @@ def random_split(
     val_df, test_df = train_test_split(
         temp_df, test_size=1 - adjusted_val_frac, random_state=seed
     )
+    if return_indices:
+        return create_split_dict(
+            "random",
+            train_df.index.tolist(),
+            val_df.index.tolist(),
+            test_df.index.tolist(),
+        )
     return create_split_dict("random", train_df, val_df, test_df)
 
 
 def scaffold_split(
-    df, smiles_col="smiles", train_frac=0.7, val_frac=0.15, test_frac=0.15, seed=42
+    df,
+    smiles_col="smiles",
+    train_frac=0.7,
+    val_frac=0.15,
+    test_frac=0.15,
+    return_indices=False,
+    seed=42,
 ) -> dict:
     """
     Splits dataframe into scaffold splits.
@@ -212,17 +229,19 @@ def scaffold_split(
         The fraction of the data to use for validation. Default is 0.15.
     test_frac : float, optional
         The fraction of the data to use for testing. Default is 0.15.
+    return_indices : bool, optional
+        If True, returns the indices of the split dataframes instead of the dataframes themselves.
     seed : int, optional
         The random seed to use for splitting the data. Default is 42.
 
     Returns
     -------
-    train_df : pandas.DataFrame
-        The training dataframe.
-    val_df : pandas.DataFrame
-        The validation dataframe.
-    test_df : pandas.DataFrame
-        The testing dataframe.
+    train_df : pandas.DataFrame or list
+        The training dataframe or list of indices.
+    val_df : pandas.DataFrame or list
+        The validation dataframe or list of indices.
+    test_df : pandas.DataFrame or list
+        The testing dataframe or list of indices.
     """
     # set random seed
     np.random.seed(seed)
@@ -261,12 +280,25 @@ def scaffold_split(
     val_df = df[df["scaffold"].isin(scaffold_val)]
     test_df = df[df["scaffold"].isin(scaffold_test)]
 
+    if return_indices:
+        return create_split_dict(
+            "scaffold",
+            train_df.index.tolist(),
+            val_df.index.tolist(),
+            test_df.index.tolist(),
+        )
     # create result dictionary for return
     return create_split_dict("scaffold", train_df, val_df, test_df)
 
 
 def time_split(
-    df, time_col="year", train_frac=0.7, val_frac=0.15, test_frac=0.15, **kwargs
+    df,
+    time_col="year",
+    train_frac=0.7,
+    val_frac=0.15,
+    test_frac=0.15,
+    return_indices=False,
+    **kwargs,
 ):
     """
     Splits a DataFrame into training, validation, and test sets based on a time column.
@@ -283,15 +315,17 @@ def time_split(
         The fraction of the dataset to be used as the validation set.
     test_frac: float
         The fraction of the dataset to be used as the test set.
+    return_indices: bool
+        If True, returns the indices of the split dataframes instead of the dataframes themselves.
 
     Returns
     -------
-    train_df : pandas.DataFrame
-        The training dataframe.
-    val_df : pandas.DataFrame
-        The validation dataframe.
-    test_df : pandas.DataFrame
-        The testing dataframe.
+    train_df : pandas.DataFrame or list
+        The training dataframe or list of indices.
+    val_df : pandas.DataFrame or list
+        The validation dataframe or list of indices.
+    test_df : pandas.DataFrame or list
+        The testing dataframe or list of indices.
     """
 
     # order df by time_col and split
@@ -299,7 +333,13 @@ def time_split(
     train_df = df.iloc[: int(train_frac * len(df))]
     val_df = df.iloc[int(train_frac * len(df)) : int((train_frac + val_frac) * len(df))]
     test_df = df.iloc[int((train_frac + val_frac) * len(df)) :]
-
+    if return_indices:
+        return create_split_dict(
+            "time",
+            train_df.index.tolist(),
+            val_df.index.tolist(),
+            test_df.index.tolist(),
+        )
     # create result dictionary for return
     return create_split_dict("time", train_df, val_df, test_df)
 
@@ -310,6 +350,7 @@ def split_data(
     smiles_col: str = "smiles",
     time_col: str = "year",
     fractions: Union[List[float], None] = None,
+    return_indices: bool = False,
     seed: int = 42,
 ) -> dict:
     """
@@ -357,6 +398,7 @@ def split_data(
     }
 
     # POSTPONED for now - only one split at a time can be done here
+
     all_data = {}
     if split_type == "all":
         for t in ["random", "scaffold", "time"]:
@@ -367,13 +409,12 @@ def split_data(
                 smiles_col=smiles_col,
                 time_col=time_col,
                 fractions=fractions,
+                return_indices=return_indices,
                 seed=seed,
             )
             all_data.update(sub_dict)
 
     elif split_type in func_key.keys():
-        # here we either get output_path from kwargs or use the default DATASET_DIR; either merged with split_type # TODO I dont like it here
-        # output_path = os.path.join(kwargs.pop("output_path", DATASET_DIR), split_type)
         try:
             split_func, split_kwargs = func_key[split_type]
             sub_dict = split_func(
@@ -382,6 +423,7 @@ def split_data(
                 train_frac=train_frac,
                 val_frac=val_frac,
                 test_frac=test_frac,
+                return_indices=return_indices,
                 seed=seed,
             )
             all_data.update(sub_dict)
@@ -414,14 +456,40 @@ def check_if_processed_file(
         else f"{split_type}_{desc_chem}"
     )
 
-    files_paths = [
-        output_path / f"{prefix}_{subset}.{file_ext}"
+    files_paths = {
+        subset: output_path / f"{prefix}_{subset}.{file_ext}"
         for subset in ["train", "val", "test"]
-    ]
+    }
 
-    files_exist = all(file_p.exists() for file_p in files_paths)
+    files_exist = all(Path(file_p).exists() for file_p in files_paths)
 
     return files_exist, files_paths
+
+
+def apply_label_scaling(df, label_col, label_scaling_func=None):
+    """
+    Applies a scaling function to the label column(s) of a DataFrame.
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input DataFrame.
+    label_col: str or list
+        The name of the column(s) to be scaled.
+    label_scaling_func: function, optional
+        The scaling function to be applied to the label column(s). Default is None.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The DataFrame with the label column(s) scaled.
+    """
+    if label_scaling_func is not None:
+        if isinstance(label_col, list):
+            for col in label_col:
+                df[col] = df[col].apply(label_scaling_func)
+        else:
+            df[label_col] = df[label_col].apply(label_scaling_func)
+    return df
 
 
 # deprecated
@@ -431,7 +499,7 @@ def check_if_processed_file(
 #     n_targets=-1,
 #     split_type="random",
 #     desc_prot=None,
-#     desc_chem="ecfp1024",
+#     descriptor_chemical="ecfp1024",
 #     file_ext="pkl",
 # ):
 #
@@ -441,7 +509,7 @@ def check_if_processed_file(
 #     #     all_file_paths = {}
 #     #     for st in ["random", "scaffold", "time"]:
 #     #         files_exist, files_paths = check_if_processed_file(
-#     #             data_name, activity_type, n_targets, st, desc_prot, desc_chem, file_ext
+#     #             data_name, activity_type, n_targets, st, desc_prot, descriptor_chemical, file_ext
 #     #         )
 #     #
 #     #         all_files_exist.append(files_exist)
@@ -449,7 +517,7 @@ def check_if_processed_file(
 #     #     return True, []
 #     output_path = DATASET_DIR / data_name / activity_type / topx / split_type
 #
-#     desc = f"{desc_prot}_{desc_chem}" if desc_prot else desc_chem
+#     desc = f"{desc_prot}_{descriptor_chemical}" if desc_prot else descriptor_chemical
 #
 #     results = {
 #         split_type: {

@@ -711,7 +711,7 @@ def generate_mol_descriptors(
     # return new_df
 
 
-def get_papyrus_descriptors(connectivity_ids=None, desc_type="cddd"):
+def get_papyrus_descriptors(connectivity_ids=None, desc_type="cddd", logger=None):
     # "mold2", "mordred", "cddd", "fingerprint", "moe", "all"
     def _merge_cols(row):
         return np.array(row[1:])
@@ -725,6 +725,8 @@ def get_papyrus_descriptors(connectivity_ids=None, desc_type="cddd"):
         ids=connectivity_ids,
         verbose=True,
     )
+    if logger:
+        logger.info(f"Loading Papyrus {desc_type} descriptors...")
 
     mol_descriptors = consume_chunks(mol_descriptors, progress=True, total=60)
 
@@ -740,7 +742,7 @@ def get_papyrus_descriptors(connectivity_ids=None, desc_type="cddd"):
 
 
 def get_chem_desc(
-    df, desc_type: str = "ecfp1024", query_col: str = "SMILES", **kwargs
+    df, desc_type: str = "ecfp1024", query_col: str = "SMILES", logger=None, **kwargs
 ) -> pd.DataFrame:
     desc_type = desc_type.lower()
     unique_entries = df[query_col].unique().tolist()
@@ -749,7 +751,7 @@ def get_chem_desc(
         return df
     elif desc_type in ["mold2", "mordred", "cddd", "fingerprint"]:  # , "moe"
         desc_mapper = get_papyrus_descriptors(
-            connectivity_ids=unique_entries, desc_type=desc_type
+            connectivity_ids=unique_entries, desc_type=desc_type, logger=logger
         )
     elif desc_type.startswith("ecfp"):
         length = int(desc_type[4:])

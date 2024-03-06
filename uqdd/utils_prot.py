@@ -88,21 +88,10 @@ def compute_ankh_embeddings(
     model.eval()
     print(f"Number of parameters: {get_num_params(model)}")
 
-    # encoded_batches = tokenizer.batch_encode_plus(
-    #     protein_sequences,
-    #     add_special_tokens=True,
-    #     padding=True,
-    #     return_tensors="pt",
-    # )
-    # dataset = TensorDataset(
-    #     encoded_batches["input_ids"], encoded_batches["attention_mask"]
-    # )
-    # dataloader = DataLoader(dataset, batch_size=batch_size)
-
     embeddings = []
     for batch_seqs in tqdm(
         batch_generator(protein_sequences, batch_size),
-        desc="Processing Protein Embedding batches",
+        desc=f"Processing Protein Embedding batches {embedding_type}",
         total=len(protein_sequences) // batch_size,
     ):
         # Tokenize the current batch of sequences
