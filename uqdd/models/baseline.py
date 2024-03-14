@@ -1,20 +1,17 @@
 import argparse
-import sys
 from datetime import datetime
 from functools import partial
 import wandb
 import torch
 import torch.nn as nn
-from uqdd import TODAY, DEVICE, LOGS_DIR, WANDB_MODE
+from uqdd import TODAY, DEVICE, WANDB_MODE, WANDB_DIR
 from uqdd.utils import create_logger
 from uqdd.models.utils_models import (
-    build_datasets,
-    get_desc_len,
     get_model_config,
     get_sweep_config,
-    set_seed,
+    save_model,
 )
-from uqdd.models.utils_train import run_model
+from uqdd.models.utils_train import run_model, premodel_init
 
 
 class BaselineDNN(nn.Module):
@@ -25,6 +22,7 @@ class BaselineDNN(nn.Module):
         prot_input_dim=None,
         task_type="regression",
         n_targets=-1,
+        logger=None,
         **kwargs,
     ):
         super(BaselineDNN, self).__init__()
@@ -34,12 +32,16 @@ class BaselineDNN(nn.Module):
         ], "task_type must be either 'regression' or 'classification'"
         self.task_type = task_type
         self.MT = n_targets > 0
-        self.feature_extractors = {}
+        self.prot_feature_extractor = None
+        self.chem_feature_extractor = None
         self.regressor_or_classifier = None
 
-        self.log = create_logger(
-            name="baseline", file_level="debug", stream_level="info"
+        self.logger = (
+            create_logger(name="baseline", file_level="debug", stream_level="info")
+            if not logger
+            else logger
         )
+
         if config is None:
             config = get_model_config(model_name="baseline", **kwargs)
 
@@ -57,41 +59,52 @@ class BaselineDNN(nn.Module):
         if isinstance(module, nn.Linear):
             nn.init.xavier_normal_(module.weight, gain=nn.init.calculate_gain("relu"))
 
-    def forward(self, chem_input, prot_input):
-        chem_features = self.feature_extractors["chem"](chem_input)
+    def forward(self, inputs):
         if not self.MT:
-            prot_features = self.feature_extractors["prot"](prot_input)
+            prot_input, chem_input = inputs
+            chem_features = self.chem_feature_extractor(chem_input)
+            prot_features = self.prot_feature_extractor(prot_input)
             combined_features = torch.cat((chem_features, prot_features), dim=1)
         else:
-            combined_features = chem_features
+            chem_input = inputs
+            combined_features = self.chem_feature_extractor(chem_input)
 
         output = self.regressor_or_classifier(combined_features)
         return output
 
     @staticmethod
-    def create_feature_extractor(input_dim, layer_dims, dropout):
-        modules = [nn.Linear(input_dim, layer_dims[0]), nn.ReLU()]
-        for i in range(len(layer_dims) - 1):
-            modules += [nn.Linear(layer_dims[i], layer_dims[i + 1]), nn.ReLU()]
+    def create_mlp(input_dim, layer_dims, dropout, output_dim=None):
+        modules = []
+        for i in range(len(layer_dims)):
+            if i == 0:
+                modules.append(nn.Linear(input_dim, layer_dims[i]))
+            else:
+                modules.append(nn.Linear(layer_dims[i - 1], layer_dims[i]))
+                modules.append(nn.BatchNorm1d(layer_dims[i]))  # Add batch normalization
+            modules.append(nn.ReLU())
             if dropout > 0:
                 modules.append(nn.Dropout(dropout))
+        if output_dim:
+            modules.append(nn.Linear(layer_dims[-1], output_dim))
         return nn.Sequential(*modules)
 
     def init_layers(self, config, chem_input_dim, prot_input_dim, output_dim):
         # Chemical feature extractor
         chem_layers = config["chem_layers"]
-        self.feature_extractors["chem"] = self.create_feature_extractor(
+        self.chem_feature_extractor = self.create_mlp(
             chem_input_dim, chem_layers, config["dropout"]
         )
-        self.log.debug(f"Chemical feature extractor: {chem_input_dim} -> {chem_layers}")
+        self.logger.debug(
+            f"Chemical feature extractor: {chem_input_dim} -> {chem_layers}"
+        )
 
         if not self.MT:
             # Protein feature extractor (only for single-task learning)
             prot_layers = config["prot_layers"]
-            self.feature_extractors["prot"] = self.create_feature_extractor(
+            self.prot_feature_extractor = self.create_mlp(
                 prot_input_dim, prot_layers, config["dropout"]
             )
-            self.log.debug(
+            self.logger.debug(
                 f"Protein feature extractor: {prot_input_dim} -> {prot_layers}"
             )
 
@@ -104,79 +117,213 @@ class BaselineDNN(nn.Module):
             # Only chemical features for MTL
             combined_input_dim = config["chem_layers"][-1]
 
-        self.log.debug(f"Combined input dimension: {combined_input_dim}")
-        self.log.debug(f"Output dimension: {output_dim}")
+        self.logger.debug(f"Combined input dimension: {combined_input_dim}")
+        regressor_layers = config["regressor_layers"]
+        self.regressor_or_classifier = self.create_mlp(
+            combined_input_dim, regressor_layers, config["dropout"], output_dim
+        )
+        self.logger.debug(f"Output dimension: {output_dim}")
 
-        self.regressor_or_classifier = nn.Linear(combined_input_dim, output_dim)
+
+#
+# def run_baseline(
+#     config=None,
+#     data_kwargs=None,
+#     wandb_project_name=f"{TODAY}-baseline",
+#     logger=None,
+#     **kwargs,
+# ):
+#     config = get_model_config("baseline", **kwargs) if not config else config
+#     desc_chem_len, desc_prot_len = get_desc_len()
+#     # Initiate the model
+#     model = BaselineDNN(
+#         config=config,
+#         chem_input_dim=desc_chem_len,
+#         prot_input_dim=desc_prot_len,
+#         task_type=task_type,
+#         n_targets=n_targets,
+#     ).to(DEVICE)
+#     baseline_model =
+#     best_model, test_loss = run_model_e2e(
+#         model,
+#         "baseline",
+#         config,
+#         data_kwargs,
+#         wandb_project_name,
+#         logger,
+#     )
+#
 
 
 def run_baseline(
-    datasets,
     config=None,
-    chem_input_dim=None,
-    prot_input_dim=None,
-    task_type="regression",
+    data_name="papyrus",
+    activity_type="xc50",
     n_targets=-1,
+    descriptor_protein=None,
+    descriptor_chemical=None,
+    median_scaling=False,
+    split_type="random",
+    ext="pkl",
+    task_type="regression",
     wandb_project_name=f"{TODAY}-baseline",
-    seed=42,
+    logger=None,
     **kwargs,
 ):
-    set_seed(seed)
-    config = get_model_config("baseline", **kwargs) if not config else config
+    # label_scaling_func=None,
+    (
+        dataloaders,
+        config,
+        logger,
+        desc_prot_len,
+        desc_chem_len,
+        start_time,
+        data_specific_path,
+    ) = premodel_init(
+        config,
+        "baseline",
+        data_name,
+        activity_type,
+        n_targets,
+        descriptor_protein,
+        descriptor_chemical,
+        split_type,
+        median_scaling,
+        task_type,
+        ext,
+        logger,
+        **kwargs,
+    )
+    # seed = 42
+    # set_seed(seed)
+    # config = get_model_config("baseline", **kwargs) if not config else config
+    # logger = (
+    #     create_logger(name="baseline", file_level="debug", stream_level="info")
+    #     if not logger
+    #     else logger
+    # )
+    #
+    # start_time = datetime.now()
+    # logger.info(f"Baseline - start time: {start_time}")
+    #
+    # # get datasets
+    # datasets = build_datasets(
+    #     data_name=data_name,
+    #     n_targets=n_targets,
+    #     activity_type=activity_type,
+    #     split_type=split_type,
+    #     desc_prot=descriptor_protein,
+    #     desc_chem=descriptor_chemical,
+    #     label_scaling_func=label_scaling_func,
+    #     ext=ext,
+    #     logger=logger,
+    # )
+    # # build dataloaders
+    #
+    # # get descriptor lengths
+    # desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein, descriptor_chemical)
+    # # desc_prot_len, desc_chem_len = get_desc_len_from_dataset(datasets["train"])
+    # logger.info(f"Chemical descriptor {descriptor_chemical} of length: {desc_chem_len}")
+    # logger.info(f"Protein descriptor {descriptor_protein} of length: {desc_prot_len}")
+    m_tag = "median_scaling" if median_scaling else "no_median_scaling"
+    mt_tag = "MT" if n_targets > 1 else "ST"
+    wandb_tags = [
+        "baseline",
+        data_name,
+        activity_type,
+        descriptor_protein,
+        descriptor_chemical,
+        split_type,
+        task_type,
+        m_tag,
+        mt_tag,
+    ]
     with wandb.init(
-        dir=LOGS_DIR, mode=WANDB_MODE, project=wandb_project_name, config=config
+        dir=WANDB_DIR,
+        mode=WANDB_MODE,
+        project=wandb_project_name,
+        config=config,
+        tags=wandb_tags,
     ):
         config = wandb.config
 
         # Initiate the model
         model = BaselineDNN(
             config=config,
-            chem_input_dim=chem_input_dim,
-            prot_input_dim=prot_input_dim,
+            chem_input_dim=desc_chem_len,
+            prot_input_dim=desc_prot_len,
             task_type=task_type,
             n_targets=n_targets,
+            logger=logger,
         ).to(DEVICE)
 
         best_model, test_loss = run_model(
             config,
-            datasets,
             model,
-            model_name="baseline",
+            dataloaders,
             n_targets=n_targets,
-            seed=42,
             device=DEVICE,
+            logger=logger,
         )
 
-        return best_model, test_loss
+        model_name = f"{TODAY}-baseline_{split_type}_{descriptor_protein}_{descriptor_chemical}-{wandb.run.name}"
+        save_model(
+            config,
+            best_model,
+            model_name,
+            data_specific_path,
+            desc_prot_len,
+            desc_chem_len,
+            onnx=True,
+        )
+
+    logger.info(f"Baseline - end time: {datetime.now()}")
+    logger.info(f"Baseline - duration: {datetime.now() - start_time}")
+
+    return best_model, test_loss
 
 
 def run_baseline_sweeper(
-    datasets,
-    chem_input_dim=None,
-    prot_input_dim=None,
-    task_type="regression",
-    n_targets=-1,
-    wandb_project_name=f"{TODAY}-baseline",
+    sweep_config=None,
     sweep_count=1,
-    seed=42,
+    data_name="papyrus",
+    activity_type="xc50",
+    n_targets=-1,
+    descriptor_protein=None,
+    descriptor_chemical=None,
+    median_scaling=False,
+    split_type="random",
+    ext="pkl",
+    task_type="regression",
+    wandb_project_name=f"{TODAY}-baseline-sweep",
     **kwargs,
 ):
-    sweep_config = get_sweep_config("baseline", **kwargs)
+    logger = create_logger(
+        name="baseline-sweep", file_level="debug", stream_level="info"
+    )
+    sweep_config = (
+        get_sweep_config("baseline", **kwargs) if not sweep_config else sweep_config
+    )
+    wandb.init(dir=WANDB_DIR, mode=WANDB_MODE)
     sweep_id = wandb.sweep(
         sweep_config,
         project=wandb_project_name,
     )
-    # Recursion to run the sweep
     wandb_train_func = partial(
         run_baseline,
-        datasets=datasets,
         config=sweep_config,
-        chem_input_dim=chem_input_dim,
-        prot_input_dim=prot_input_dim,
-        task_type=task_type,
+        data_name=data_name,
+        activity_type=activity_type,
         n_targets=n_targets,
+        descriptor_protein=descriptor_protein,
+        descriptor_chemical=descriptor_chemical,
+        median_scaling=median_scaling,
+        # label_scaling_func=label_scaling_func,
+        split_type=split_type,
+        ext=ext,
+        task_type=task_type,
         wandb_project_name=wandb_project_name,
-        seed=seed,
+        logger=logger,
     )
     wandb.agent(sweep_id, function=wandb_train_func, count=sweep_count)
 
@@ -191,37 +338,24 @@ def main():
         help="Data name argument",
     )
     parser.add_argument(
-        "--n-targets",
-        type=int,
-        default=-1,
-        help="Number of targets argument (default=-1 for all targets)",
-    )
-    parser.add_argument(
-        "--task-type",
-        type=str,
-        default="regression",
-        choices=["regression", "classification"],
-        help="Task type argument",
-    )
-    parser.add_argument(
-        "--activity",
+        "--activity-type",
         type=str,
         default="xc50",
         choices=["xc50", "kx"],
         help="Activity argument",
     )
     parser.add_argument(
-        "--split",
-        type=str,
-        default="random",
-        choices=["random", "scaffold", "time"],
-        help="Split argument",
+        "--n-targets",
+        type=int,
+        default=-1,
+        help="Number of targets argument (default=-1 for all targets)",
     )
     parser.add_argument(
-        "--desc-prot",
+        "--descriptor-protein",
         type=str,
-        default="unirep",
+        default=None,
         choices=[
+            None,
             "ankh-base",
             "ankh-large",
             "unirep",
@@ -238,7 +372,7 @@ def main():
         help="Protein descriptor argument",
     )
     parser.add_argument(
-        "--desc-chem",
+        "--descriptor-chemical",
         type=str,
         default="ecfp2048",
         choices=[
@@ -251,16 +385,39 @@ def main():
         ],
         help="Chemical descriptor argument",
     )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--baseline", action="store_true", help="Run baseline")
-    group.add_argument(
-        "--hyperparam", action="store_true", help="Run hyperparameter search"
+    parser.add_argument(
+        "--median-scaling",
+        type=bool,
+        default=False,
+        help="Label Median scaling function argument",
+    )
+    # parser.add_argument(
+    #     "--label-scaling-func",
+    #     type=str,
+    #     default=None,
+    #     choices=[None, "median", "standard", "minmax", "robust"],
+    #     help="Label scaling function argument",
+    # )
+    parser.add_argument(
+        "--split-type",
+        type=str,
+        default="random",
+        choices=["random", "scaffold", "time"],
+        help="Split argument",
     )
     parser.add_argument(
-        "--sweep-count",
-        type=int,
-        default=250,
-        help="Sweep count argument",
+        "--ext",
+        type=str,
+        default="pkl",
+        choices=["pkl", "parquet", "csv", "feather"],
+        help="File extension argument",
+    )
+    parser.add_argument(
+        "--task-type",
+        type=str,
+        default="regression",
+        choices=["regression", "classification"],
+        help="Task type argument",
     )
     parser.add_argument(
         "--wandb-project-name",
@@ -269,96 +426,84 @@ def main():
         help="Wandb project name argument",
     )
 
-    args = parser.parse_args()
-    start_time = datetime.now()
-
-    datasets = build_datasets(
-        data_name=args.data_name,
-        n_targets=args.n_targets,
-        activity_type=args.activity,
-        split_type=args.split,
-        desc_prot=args.desc_prot,
-        desc_chem=args.desc_chem,
-        ext=args.ext,
+    # group = parser.add_mutually_exclusive_group()
+    # group.add_argument("--baseline", action="store_true", help="Run baseline")
+    # group.add_argument(
+    #     "--hyperparam", action="store_true", help="Run hyperparameter search"
+    # )
+    parser.add_argument(
+        "--sweep-count",
+        type=int,
+        default=None,
+        help="Sweep count argument",
     )
-    desc_prot_len, desc_chem_len = get_desc_len(datasets)  # TODO fix this for MT
-    if args.baseline:
+
+    args = parser.parse_args()
+    kwargs = vars(args)
+    # pop the sweep_count from kwargs
+    sweep_count = kwargs.pop("sweep_count")
+
+    if sweep_count:
+        run_baseline_sweeper(
+            sweep_count=sweep_count,
+            **kwargs,
+        )
+
+    elif sweep_count is None or sweep_count == 0:
         _, test_loss = run_baseline(
-            datasets,
-            chem_input_dim=desc_chem_len,
-            prot_input_dim=desc_prot_len,
-            task_type=args.task_type,
-            n_targets=args.n_targets,
-            wandb_project_name=f"{TODAY}-{args.wandb_project_name}",
-            seed=42,
+            **kwargs,
         )
         print(f"Test loss: {test_loss}")
 
-    elif args.hyperparam:
-        run_baseline_sweeper(
-            datasets,
-            chem_input_dim=desc_chem_len,
-            prot_input_dim=desc_prot_len,
-            task_type=args.task_type,
-            n_targets=args.n_targets,
-            wandb_project_name=f"{TODAY}-{args.wandb_project_name}",
-            sweep_count=args.sweep_count,
-        )
-
     else:
-        sys.exit("Error: Please specify either --baseline or --hyperparam")
-
-    end_time = datetime.now()
-    duration = end_time - start_time
-    print(f"Script execution time: {duration}")
+        print("Invalid sweep count")
 
 
 if __name__ == "__main__":
-    # main()
-    data_name = "papyrus"
-    n_targets = -1
-    task_type = "regression"
-    activity = "xc50"
-    split = "random"
-    desc_prot = "ankh-base"
-    desc_chem = "ecfp2048"
-    ext = "pkl"
-    wandb_project_name = f"{TODAY}-baseline-test"
-    sweep_count = 250
+    main()
+    # data_name = "papyrus"
+    # n_targets = -1
+    # task_type = "regression"
+    # activity = "xc50"
+    # split = "random"
+    # desc_prot = "ankh-base"
+    # desc_chem = "ecfp2048"
+    # median_scaling = True
+    # ext = "pkl"
+    # wandb_project_name = f"{TODAY}-baseline"
+    # sweep_count = 0  # 250
+    # # epochs=1
+    #
+    # run_baseline(
+    #     data_name=data_name,
+    #     activity_type=activity,
+    #     n_targets=n_targets,
+    #     descriptor_protein=desc_prot,
+    #     descriptor_chemical=desc_chem,
+    #     median_scaling=median_scaling,
+    #     split_type=split,
+    #     ext=ext,
+    #     task_type=task_type,
+    #     wandb_project_name=wandb_project_name,
+    #     logger=None,
+    # )
+    #
+    # run_baseline_sweeper(
+    #     sweep_count=sweep_count,
+    #     data_name=data_name,
+    #     activity_type=activity,
+    #     n_targets=n_targets,
+    #     descriptor_protein=desc_prot,
+    #     descriptor_chemical=desc_chem,
+    #     split_type=split,
+    #     ext=ext,
+    #     task_type=task_type,
+    #     wandb_project_name=wandb_project_name,
+    #     seed=42,
+    # )
+    # print("Done")
 
-    datasets = build_datasets(
-        data_name=data_name,
-        n_targets=n_targets,
-        activity_type=activity,
-        split_type=split,
-        desc_prot=desc_prot,
-        desc_chem=desc_chem,
-        ext=ext,
-    )
-    desc_prot_len, desc_chem_len = get_desc_len(datasets["train"])
-    run_baseline(
-        datasets,
-        chem_input_dim=desc_chem_len,
-        prot_input_dim=desc_prot_len,
-        task_type=task_type,
-        n_targets=n_targets,
-        wandb_project_name=wandb_project_name,
-        seed=42,
-    )
 
-    run_baseline_sweeper(
-        datasets,
-        chem_input_dim=desc_chem_len,
-        prot_input_dim=desc_prot_len,
-        task_type=task_type,
-        n_targets=n_targets,
-        wandb_project_name=wandb_project_name + "_sweeper",
-        sweep_count=sweep_count,
-    )
-    print("Done")
-
-
-#
 # def _run_baseline(
 #     datasets=None,
 #     config=None,

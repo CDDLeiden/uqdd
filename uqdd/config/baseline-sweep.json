@@ -1,12 +1,10 @@
 {
-  "method": "random",
+  "method": "bayes",
   "metric": {
-    "name": "val/rmse",
-    "goal": "minimize"
+    "goal": "minimize",
+    "name": "val/rmse"
   },
   "parameters": {
-    "chem_input_dim": 2048,
-    "prot_input_dim": 768,
     "chem_layers": {
       "values": [
         [2048, 1024, 512, 256],
@@ -23,38 +21,49 @@
         [512, 128]
       ]
     },
+    "regressor_layers": {
+      "values": [
+        [512, 256, 128, 64],
+        [512, 256, 128],
+        [256, 128, 64],
+        [256, 128]
+      ]
+    },
     "dropout": {
       "values": [0.1, 0.2]
     },
     "batch_size": {
-      "values": [64, 128, 256]
+      "values": [256, 512]
     },
     "epochs": {
-      "value": 300
+      "value": 3000
     },
     "early_stop": {
-      "value": 20
+      "value": 50
     },
     "loss": {
       "values": ["huber", "mse"]
     },
+    "loss_reduction": {
+      "value": "mean"
+    },
     "optimizer": {
-      "values": ["adam", "adamw", "sgd"]
+      "values": ["adagrad", "adamw", "sgd"]
     },
     "lr": {
-      "values": [0.001, 0.01]
+      "values": [1e-3, 5e-4, 1e-4]
     },
     "weight_decay": {
       "value": 1e-4
     },
     "lr_scheduler": {
-      "value": "ReduceLROnPlateau"
+      "value": "plateau"
     },
     "lr_scheduler_patience": {
       "value": 20
     },
     "lr_scheduler_factor": {
-      "value": 0.5
+      "value": 0.2
     }
   }
 }
