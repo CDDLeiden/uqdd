@@ -21,6 +21,9 @@ def create_logger(name="logger", file_level="debug", stream_level="info"):
     stream_level = levels.get(stream_level.lower(), logging.INFO)
 
     log = logging.getLogger(name)
+    # Set logger's level to the lower between file_level and stream_level
+    log.setLevel(min(file_level, stream_level))
+
     formatter = logging.Formatter(
         fmt="%(asctime)s:%(levelname)s:%(name)s:%(message)s:%(relativeCreated)d",
         datefmt="%Y-%m-%d %H:%M:%S",

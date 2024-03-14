@@ -243,6 +243,10 @@ class TDC_DTI:
                 pickle.dump(v, file)
 
 
+def get_datasets():
+    raise NotImplementedError
+
+
 # Dataset Statistics: (# of DTI pairs, # of drugs, # of proteins)
 
 data_kd = DTI(path="uqdd/data/tdc/", name="BindingDB_Kd")  # 52,284/10,665/1,413 for Kd,

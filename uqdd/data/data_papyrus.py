@@ -23,12 +23,15 @@ from uqdd.utils_chem import standardize_df, get_chem_desc
 from uqdd.utils_prot import get_embeddings
 from uqdd.data.utils_data import (
     split_data,
-    export_df,
+    export_dataset,
     load_df,
     load_pickle,
+    export_pickle,
+    load_desc_preprocessed,
     check_if_processed_file,
     export_tasks,
     apply_label_scaling,
+    apply_median_scaling,
 )
 
 
@@ -61,28 +64,27 @@ class Papyrus:
         ) = self.setup_path(self.activity_key)
         self.std_smiles, self.verbose_files = std_smiles, verbose_files
         self.df_filtered, self.papyrus_protein_data = self.load_or_process_papyrus()
-
-        self.desc_chems = [
-            "ecfp1024",
-            "ecfp2048",
-            "mold2",
-            "cddd",
-            "fingerprint",
-            "moldesc",
-        ]
         self.desc_prots = [
             "ankh-base",
             "ankh-large",
             "esm1_t12",
             "esm1_t34",
             "esm1_t6",
-            "esm1b",
             "esm_msa1",
             "esm_msa1b",
             "esm1v",
             "protbert",
             "protbert_bfd",
             "unirep",
+            # "esm1b",
+        ]
+        self.desc_chems = [
+            "ecfp1024",
+            "ecfp2048",
+            "mold2",
+            "cddd",
+            "fingerprint",
+            # "moldesc",
         ]
 
     def __call__(
@@ -117,43 +119,72 @@ class Papyrus:
                 if n_targets <= 0
                 else list(itertools.product([None], self.desc_chems, split_types))
             )
+            d = len(split_types) * len(self.desc_chems)
+
         else:
             args_combinations = [
                 (descriptor_protein, descriptor_chemical, s_type)
                 for s_type in split_types
             ]
+            d = len(split_types)
 
-        for descriptor_protein, descriptor_chemical, s_type in args_combinations:
-            files_exist, files_paths = check_if_processed_file(
-                data_name="papyrus",
-                activity_type=self.activity_key,
-                n_targets=n_targets,
-                split_type=s_type,
-                desc_prot=descriptor_protein,
-                desc_chem=descriptor_chemical,
-                file_ext=file_ext,
-            )
-            # search for the file otherwise it will be calculated
-            if not recalculate and files_exist:
-                self.logger.warning(
-                    "Found the processed files, if you want to recalculate set recalculate=True"
+        for i, (descriptor_protein, descriptor_chemical, s_type) in enumerate(
+            args_combinations, start=1
+        ):
+            try:
+                self.logger.info(
+                    f"Processing {descriptor_protein} and {descriptor_chemical} descriptors"
                 )
+                files_exist, files_paths = check_if_processed_file(
+                    data_name="papyrus",
+                    activity_type=self.activity_key,
+                    n_targets=n_targets,
+                    split_type=s_type,
+                    desc_prot=descriptor_protein,
+                    desc_chem=descriptor_chemical,
+                    file_ext=file_ext,
+                )
+                # search for the file otherwise it will be calculated
+                if not recalculate and files_exist:
+                    self.logger.warning(
+                        "Found the processed files, if you want to recalculate set recalculate=True"
+                    )
+                    df = load_desc_preprocessed(
+                        df,
+                        files_paths,
+                        descriptor_protein,
+                        descriptor_chemical,
+                        "target_id",
+                        "SMILES",
+                    )
+                    continue
+
+                df = self.merge_descriptors(
+                    df, descriptor_protein, descriptor_chemical, batch_size
+                )
+
+                res_dict = {
+                    sub: df.iloc[split_idx[s_type][sub]]
+                    for sub in ["train", "val", "test"]
+                }
+
+                cols_to_include = self.get_cols_to_include(
+                    descriptor_protein, descriptor_chemical, n_targets, label_col
+                )
+
+                # step 5: export the data
+                export_dataset(res_dict, files_paths, cols_to_include)
+
+                if i % d == 0:
+                    self.logger.info(
+                        f"Processed all {i} combinations of {descriptor_protein},"
+                        f" deleting the column from the dataframe to save memory"
+                    )
+                    df.drop(columns=[descriptor_protein], inplace=True)
+
+            except Exception as e:
+                self.logger.error(f"Error: {e}")
                 continue
-
-            df = self.merge_descriptors(
-                df, descriptor_protein, descriptor_chemical, batch_size
-            )
-
-            res_dict = {
-                sub: df.iloc[split_idx[s_type][sub]] for sub in ["train", "val", "test"]
-            }
-
-            cols_to_include = self.get_cols_to_include(
-                descriptor_protein, descriptor_chemical, n_targets, label_col
-            )
-
-            # step 5: export the data
-            self.export_dataset(res_dict, files_paths, cols_to_include)
 
     @staticmethod
     def setup_path(activity_key):
@@ -211,20 +242,32 @@ class Papyrus:
 
         return df, label_col
 
-    @staticmethod
-    def split(df, split_type, split_proportions, return_indices=False):
-        if split_proportions is None:
-            split_proportions = [0.7, 0.15, 0.15]
-
-        split_data_dict = split_data(
-            df,
-            split_type=split_type,
-            smiles_col="SMILES",
-            time_col="Year",
-            fractions=split_proportions,
-            return_indices=return_indices,
-            seed=42,
+    def split(self, df, split_type, split_proportions, return_indices=False):
+        # calculate the splits or load them if they exist
+        split_path = (
+            self.output_path
+            / f"split_data_dict{'_indices' if return_indices else ''}.pkl"
         )
+        if split_path.is_file():
+            self.logger.info("Loading previously calculated splits")
+            split_data_dict = load_pickle(split_path)
+        else:
+            self.logger.info("Calculating the splits")
+            if split_proportions is None:
+                split_proportions = [0.7, 0.15, 0.15]
+            split_data_dict = split_data(
+                df,
+                split_type=split_type,
+                smiles_col="SMILES",
+                time_col="Year",
+                fractions=split_proportions,
+                return_indices=return_indices,
+                seed=42,
+            )
+            # save the splits
+            self.logger.info(f"Exporting the splits to {split_path}")
+            export_pickle(split_data_dict, split_path)
+
         return split_data_dict
 
     @staticmethod
@@ -240,13 +283,6 @@ class Papyrus:
         cols_to_include += label_col
 
         return list(filter(None, cols_to_include))
-
-    @staticmethod
-    def export_dataset(subsets_dict, files_paths, cols_to_include=None):
-        for subset in ["train", "val", "test"]:
-            export_df(
-                subsets_dict[subset][cols_to_include], file_path=files_paths[subset]
-            )
 
     def merge_protein_sequences(self, df, target_id_col="target_id"):
         if "Sequence" in df.columns:
@@ -270,7 +306,7 @@ class Papyrus:
             df = self._merge_desc(df, desc_chem, get_chem_desc)
         except Exception as e:
             self.logger.error(
-                f"Error: {e} - {desc_prot} and/or {desc_chem} not calculated"
+                f"Error within merge_descriptors func: {e} \n {desc_prot} and/or {desc_chem} not calculated"
             )
         return df
 
@@ -458,12 +494,17 @@ class PapyrusDataset(Dataset):
         file_path: Union[str, Path] = None,
         desc_prot: Union[str, None] = None,
         desc_chem: Union[str, None] = None,
-        label_scaling_func: Callable[[torch.Tensor], torch.Tensor] = None,
+        task_type: str = "regression",
+        calc_median: bool = False,
+        median_scaling: bool = False,
+        median_point: float = 6.0,
+        logger: Union[None, logging.Logger] = None,
+        # subdata_type: str = "train",
+        # label_scaling_func: Callable[[torch.Tensor], torch.Tensor] = None,
         **kwargs,
     ) -> None:
-
         self.data = load_df(file_path, **kwargs)
-        dir_path = file_path.parent
+        dir_path = Path(file_path).parent
 
         labels_filepath = dir_path / "target_col.pkl"
         self.MT = labels_filepath.is_file()
@@ -472,30 +513,88 @@ class PapyrusDataset(Dataset):
         )
         self.desc_prot = desc_prot
         self.desc_chem = desc_chem
-        self.label_scaling_func = label_scaling_func
+        # self.label_scaling_func = label_scaling_func
+        self.task_type = task_type
 
-        self.data = apply_label_scaling(
-            self.data, self.label_col, self.label_scaling_func
+        self.median_point = median_point
+        self.median_scaling = median_scaling
+        self.calc_median = calc_median
+
+        self.data, self.median_point = apply_median_scaling(
+            self.data,
+            self.label_col,
+            self.median_point,
+            calc_median=self.calc_median,
+            median_scaling=self.median_scaling,
+            logger=logger,
         )
+
+        if self.task_type == "classification":
+            self.data[self.label_col] = np.where(
+                self.data[self.label_col] > self.median_point, 1, 0
+            )
+            # self.data[self.label_col] = self.data[self.label_col].apply(
+            #     lambda x: 1 if x > 6.0 else 0
+            # )
+            self.data[self.label_col] = self.data[self.label_col].astype("category")
+
+        # self.subdata_type = subdata_type
+        # if self.calc_median:
+        #     self.median_point = self.data[self.label_col].median().tolist()
+        #     self.median_scaling = True
+        # if self.median_scaling:
+        #     self.data = apply_median_scaling(
+        #         self.data, self.label_col, self.median_point
+        #     )
+        # self.data = apply_label_scaling(
+        #     self.data, self.label_col, self.label_scaling_func
+        # )
+
+        if self.desc_chem is not None:
+            chem_desc_np = np.array(self.data[self.desc_chem].tolist())
+            self.chem_desc = torch.from_numpy(chem_desc_np).float()
+        if not self.MT and self.desc_prot is not None:
+            prot_desc_np = np.array(self.data[self.desc_prot].tolist())
+            self.prot_desc = torch.from_numpy(prot_desc_np).float()
+
+        self.labels = torch.from_numpy(self.data[self.label_col].values).float()
+
+        # if self.desc_chem is not None:
+        #     self.chem_desc = torch.tensor(
+        #         self.data[self.desc_chem].values.tolist(), dtype=torch.float32
+        #     )
+        # if not self.MT and self.desc_prot is not None:
+        #     self.prot_desc = torch.tensor(
+        #         self.data[self.desc_prot].values.tolist(), dtype=torch.float32
+        #     )
+        #
+        # self.labels = torch.tensor(
+        #     self.data[self.label_col].values.tolist(), dtype=torch.float32
+        # )
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        sample = self.data.iloc[idx]
         if self.MT:
-            # For multitask learning, use only chemical descriptors
-            chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
-            label = torch.tensor(sample[self.label_col], dtype=torch.float32)
-            return chem_desc, label
+            return self.chem_desc[idx], self.labels[idx]
         else:
-            # For single-task learning, use both protein and chemical descriptors
-            prot_desc = torch.tensor(sample[self.desc_prot], dtype=torch.float32)
-            chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
-            label = torch.tensor(sample[self.label_col], dtype=torch.float32)
-            return prot_desc, chem_desc, label
+            return (self.prot_desc[idx], self.chem_desc[idx]), self.labels[idx]
+
+        # if torch.is_tensor(idx):
+        #     idx = idx.tolist()
+        # sample = self.data.iloc[idx]
+        # if self.MT:
+        #     # For multitask learning, use only chemical descriptors
+        #     chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
+        #     label = torch.tensor(sample[self.label_col], dtype=torch.float32)
+        #     return chem_desc, label
+        # else:
+        #     # For single-task learning, use both protein and chemical descriptors
+        #     prot_desc = torch.tensor(sample[self.desc_prot], dtype=torch.float32)
+        #     chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
+        #     label = torch.tensor(sample[self.label_col], dtype=torch.float32)
+        #     return (prot_desc, chem_desc), label
 
 
 def get_datasets(
@@ -504,6 +603,9 @@ def get_datasets(
     split_type: str = "random",
     desc_prot: Union[str, None] = None,
     desc_chem: Union[str, None] = None,
+    median_scaling: bool = False,
+    task_type: str = "regression",
+    # label_scaling_func: Callable[[torch.Tensor], torch.Tensor] = None,
     ext: str = "pkl",
     logger: Union[None, logging.Logger] = None,
 ):
@@ -536,17 +638,31 @@ def get_datasets(
             filename_prefix = f"{split_type}_{desc_chem}"
 
     datasets = {}
+    median_point = 6.0
     for subset in ["train", "val", "test"]:
         file_path = dir_path / f"{filename_prefix}_{subset}.{ext}"
         if not file_path.is_file():
-            # TODO calculate them here if not found
+            ### TODO calculate them here if not found
             raise FileNotFoundError(
                 f"File {subset} not found: {file_path} - you need to precalculate the dataset "
                 f"features and splits first with Papyrus class."
             )
-        datasets[subset] = PapyrusDataset(
-            file_path, desc_prot=desc_prot, desc_chem=desc_chem
+
+        calc_median = True if subset == "train" else False
+
+        dataset = PapyrusDataset(
+            file_path,
+            desc_prot=desc_prot,
+            desc_chem=desc_chem,
+            task_type=task_type,
+            calc_median=calc_median,
+            median_scaling=median_scaling,
+            median_point=median_point,
+            logger=logger,
+            # label_scaling_func=label_scaling_func,
         )
+        median_point = dataset.median_point
+        datasets[subset] = dataset
 
     return datasets
 
@@ -582,10 +698,11 @@ def main():
     parser.add_argument(
         "--n-targets", type=int, default=-1, help="Number of top targets"
     )
-
+    # Argument to specify whether to recalculate the descriptors True or False
     parser.add_argument(
-        "--recalculate", action="store_true", help="Force recalculation"
+        "--recalculate", type=bool, default=False, help="Recalculate descriptors"
     )
+
     parser.add_argument(
         "--splits",
         type=str,
@@ -623,4 +740,38 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+
+    activity_type = "xc50"
+    std_smiles = True
+    verbose_files = False
+
+    # call args
+    n_targets = -1
+    desc_prot = "ankh-base"
+    # "esm1b"
+    desc_chem = "ecfp2048"
+    all_descs = False
+    recalculate = False
+    split_type = "all"
+    split_proportions = [0.7, 0.15, 0.15]
+    file_ext = "pkl"
+
+    papyrus = Papyrus(
+        activity_type=activity_type,
+        std_smiles=std_smiles,
+        verbose_files=verbose_files,
+    )
+
+    papyrus(
+        n_targets=n_targets,
+        descriptor_protein=desc_prot,
+        descriptor_chemical=desc_chem,
+        all_descriptors=all_descs,
+        recalculate=recalculate,
+        split_type=split_type,
+        split_proportions=split_proportions,
+        file_ext=file_ext,
+    )
+
+    print("Done")

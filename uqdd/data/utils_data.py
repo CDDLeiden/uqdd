@@ -15,6 +15,13 @@ from concurrent.futures import ProcessPoolExecutor
 string_types = (type(b""), type(""))
 
 
+def export_pickle(data, file_path):
+    """Helper function to export a pickle file."""
+    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "wb") as file:
+        pickle.dump(data, file)
+
+
 def load_pickle(filepath):
     """Helper function to load a pickle file."""
     try:
@@ -111,8 +118,69 @@ def export_tasks(data_name, activity, n_targets, label_col):
     logging.info(f"Tasks exported to {target_col_path}")
 
 
+def export_dataset(subsets_dict, files_paths, cols_to_include=None):
+    for subset in ["train", "val", "test"]:
+        export_df(subsets_dict[subset][cols_to_include], file_path=files_paths[subset])
+
+
+def merge_preprocessed_desc(df, preprocessed_df, matching_col, desc_col):
+    desc_mapper = (
+        preprocessed_df[[matching_col, desc_col]]
+        .set_index(matching_col)[desc_col]
+        .to_dict()
+    )
+    df[desc_col] = df[matching_col].map(desc_mapper)
+    return df
+
+
+def load_desc_preprocessed(
+    df,
+    files_paths,
+    desc_prot=None,
+    desc_chem=None,
+    prot_matching_col="target_id",
+    chem_matching_col="SMILES",
+    **kwargs,
+):
+    dfs = []
+    for f in files_paths.values():
+        if not f.is_file():
+            raise FileNotFoundError(f"File not found: {f}")
+        dfs.append(load_df(f, **kwargs))
+    file_df = pd.concat(dfs, axis=0)
+    del dfs  # saving memory
+    if desc_prot is not None and desc_prot not in df.columns:
+        df = merge_preprocessed_desc(df, file_df, prot_matching_col, desc_prot)
+        # # we create a dictionary mapper here for unique desc_prot values
+        # protein_descriptors = protein_descriptors[["target_id", desc_type]]
+        # protein_descriptors_mapper = protein_descriptors.set_index("target_id")[
+        #     desc_type
+        # ].to_dict()
+        # df = df.merge(
+        #     file_df[[prot_matching_col, desc_prot]],
+        #     left_on=prot_matching_col,
+        #     right_on=prot_matching_col,
+        #     how="left",
+        # )
+
+    if desc_chem is not None and desc_chem not in df.columns:
+        df = merge_preprocessed_desc(df, file_df, chem_matching_col, desc_chem)
+        # df = df.merge(
+        #     file_df[[chem_matching_col, desc_chem]],
+        #     left_on=chem_matching_col,
+        #     right_on=chem_matching_col,
+        #     how="left",
+        # )
+
+    return df
+
+
+def get_topx(n_targets):
+    return f"top{n_targets}" if n_targets > 0 else "all"
+
+
 def get_tasks(data_name, activity, n_targets):
-    topx = f"top{n_targets}" if n_targets > 0 else "all"
+    topx = get_topx(n_targets)
     target_col_path = DATASET_DIR / data_name / activity / topx / "target_col.pkl"
     target_col = load_pickle(target_col_path)
     if target_col is None:
@@ -461,7 +529,7 @@ def check_if_processed_file(
         for subset in ["train", "val", "test"]
     }
 
-    files_exist = all(Path(file_p).exists() for file_p in files_paths)
+    files_exist = all(Path(file_p).exists() for file_p in files_paths.values())
 
     return files_exist, files_paths
 
@@ -483,13 +551,81 @@ def apply_label_scaling(df, label_col, label_scaling_func=None):
     pandas.DataFrame
         The DataFrame with the label column(s) scaled.
     """
+    # if label_scaling_func == subtract_label_median:
+    #     kwargs = {"median": median}
+    #
+    # else:
+    #     kwargs = {}
+
     if label_scaling_func is not None:
         if isinstance(label_col, list):
             for col in label_col:
-                df[col] = df[col].apply(label_scaling_func)
+                df[col] = label_scaling_func(df[col])
         else:
-            df[label_col] = df[label_col].apply(label_scaling_func)
+            df[label_col] = label_scaling_func(df[label_col])
+            # df[label_col] = df[label_col].apply(label_scaling_func)
     return df
+
+
+def apply_median_scaling(
+    df,
+    label_col,
+    train_median=6.0,
+    calc_median=False,
+    median_scaling=False,
+    logger=None,
+):
+    if isinstance(train_median, float):
+        train_median = [train_median]
+    if isinstance(label_col, str):
+        label_col = [label_col]
+
+    if calc_median:
+        train_median = df[label_col].median().tolist()
+
+    if median_scaling:
+        logger.info(f"Applying median scaling to label columns: {label_col}")
+        # for col, median in zip(label_col, train_median):
+        df[label_col] = df[label_col] - train_median
+    return df, train_median
+
+
+def subtract_label_median(df_label_series, median=None):
+    if not median:
+        median = df_label_series.median()
+    print(f"Subtracting median {median} from label series")
+    return df_label_series - median, median
+
+
+# TODO : check this func and add it to get_datasets
+def get_label_scaling_func(scaling_type, **kwargs):
+    if scaling_type == "median":
+        return subtract_label_median
+
+    elif scaling_type == "standard":
+        from sklearn.preprocessing import StandardScaler
+
+        return StandardScaler(**kwargs).fit
+    elif scaling_type == "minmax":
+        from sklearn.preprocessing import MinMaxScaler
+
+        return MinMaxScaler(**kwargs).fit
+    elif scaling_type == "robust":
+        from sklearn.preprocessing import RobustScaler
+
+        return RobustScaler(**kwargs).fit
+    elif scaling_type == "log":
+        return np.log
+    elif scaling_type == "log1p":
+        return np.log1p
+    elif scaling_type == "log2":
+        return np.log2
+    elif scaling_type == "log10":
+        return np.log10
+    elif scaling_type == "none":
+        return None
+    else:
+        raise ValueError(f"Unsupported scaling type: {scaling_type}")
 
 
 # deprecated
