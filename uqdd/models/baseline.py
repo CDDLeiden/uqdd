@@ -44,13 +44,13 @@ class BaselineDNN(nn.Module):
 
         if config is None:
             config = get_model_config(model_name="baseline", **kwargs)
-
+        self.config = config
         n_targets = 1 if not self.MT else n_targets
         # active inactive per each target if classification
-        output_dim = n_targets if task_type == "regression" else 2 * n_targets
+        self.output_dim = n_targets if task_type == "regression" else 2 * n_targets
 
         # Initialize feature extractors
-        self.init_layers(config, chem_input_dim, prot_input_dim, output_dim)
+        self.init_layers(config, chem_input_dim, prot_input_dim, self.output_dim)
 
         self.apply(self.init_wt)
 
