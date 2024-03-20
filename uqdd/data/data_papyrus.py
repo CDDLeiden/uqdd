@@ -17,7 +17,7 @@ from papyrus_scripts.preprocess import (
     consume_chunks,
 )
 from papyrus_scripts.reader import read_papyrus, read_protein_set
-from uqdd import DATA_DIR, DATASET_DIR
+from uqdd import DATA_DIR, DATASET_DIR, DEVICE
 from uqdd.utils import create_logger, get_config
 from uqdd.utils_chem import standardize_df, get_chem_desc
 from uqdd.utils_prot import get_embeddings
@@ -499,21 +499,20 @@ class PapyrusDataset(Dataset):
         median_scaling: bool = False,
         median_point: float = 6.0,
         logger: Union[None, logging.Logger] = None,
-        # subdata_type: str = "train",
-        # label_scaling_func: Callable[[torch.Tensor], torch.Tensor] = None,
+        device=DEVICE,
         **kwargs,
     ) -> None:
+        self.device = device
         self.data = load_df(file_path, **kwargs)
         dir_path = Path(file_path).parent
 
         labels_filepath = dir_path / "target_col.pkl"
         self.MT = labels_filepath.is_file()
         self.label_col = (
-            load_pickle(labels_filepath) if self.MT else "pchembl_value_Mean"
+            load_pickle(labels_filepath) if self.MT else ["pchembl_value_Mean"]
         )
         self.desc_prot = desc_prot
         self.desc_chem = desc_chem
-        # self.label_scaling_func = label_scaling_func
         self.task_type = task_type
 
         self.median_point = median_point
@@ -530,46 +529,26 @@ class PapyrusDataset(Dataset):
         )
 
         if self.task_type == "classification":
-            self.data[self.label_col] = np.where(
-                self.data[self.label_col] > self.median_point, 1, 0
-            )
-            # self.data[self.label_col] = self.data[self.label_col].apply(
-            #     lambda x: 1 if x > 6.0 else 0
-            # )
-            self.data[self.label_col] = self.data[self.label_col].astype("category")
+            self.data[self.label_col] = (
+                self.data[self.label_col] > self.median_point
+            ).astype(int)
 
-        # self.subdata_type = subdata_type
-        # if self.calc_median:
-        #     self.median_point = self.data[self.label_col].median().tolist()
-        #     self.median_scaling = True
-        # if self.median_scaling:
-        #     self.data = apply_median_scaling(
-        #         self.data, self.label_col, self.median_point
-        #     )
-        # self.data = apply_label_scaling(
-        #     self.data, self.label_col, self.label_scaling_func
-        # )
+            # self.data[self.label_col] = np.where(
+            #     self.data[self.label_col] > self.median_point, 1, 0
+            # )
+            # self.data[self.label_col] = self.data[self.label_col].astype("category")
 
         if self.desc_chem is not None:
             chem_desc_np = np.array(self.data[self.desc_chem].tolist())
-            self.chem_desc = torch.from_numpy(chem_desc_np).float()
+            self.chem_desc = torch.from_numpy(chem_desc_np).float().to(device)
         if not self.MT and self.desc_prot is not None:
             prot_desc_np = np.array(self.data[self.desc_prot].tolist())
-            self.prot_desc = torch.from_numpy(prot_desc_np).float()
+            self.prot_desc = torch.from_numpy(prot_desc_np).float().to(device)
 
-        self.labels = torch.from_numpy(self.data[self.label_col].values).float()
+        self.labels = (
+            torch.from_numpy(self.data[self.label_col].values).float().to(device)
+        )
 
-        # if self.desc_chem is not None:
-        #     self.chem_desc = torch.tensor(
-        #         self.data[self.desc_chem].values.tolist(), dtype=torch.float32
-        #     )
-        # if not self.MT and self.desc_prot is not None:
-        #     self.prot_desc = torch.tensor(
-        #         self.data[self.desc_prot].values.tolist(), dtype=torch.float32
-        #     )
-        #
-        # self.labels = torch.tensor(
-        #     self.data[self.label_col].values.tolist(), dtype=torch.float32
         # )
 
     def __len__(self):
@@ -580,21 +559,6 @@ class PapyrusDataset(Dataset):
             return self.chem_desc[idx], self.labels[idx]
         else:
             return (self.prot_desc[idx], self.chem_desc[idx]), self.labels[idx]
-
-        # if torch.is_tensor(idx):
-        #     idx = idx.tolist()
-        # sample = self.data.iloc[idx]
-        # if self.MT:
-        #     # For multitask learning, use only chemical descriptors
-        #     chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
-        #     label = torch.tensor(sample[self.label_col], dtype=torch.float32)
-        #     return chem_desc, label
-        # else:
-        #     # For single-task learning, use both protein and chemical descriptors
-        #     prot_desc = torch.tensor(sample[self.desc_prot], dtype=torch.float32)
-        #     chem_desc = torch.tensor(sample[self.desc_chem], dtype=torch.float32)
-        #     label = torch.tensor(sample[self.label_col], dtype=torch.float32)
-        #     return (prot_desc, chem_desc), label
 
 
 def get_datasets(
@@ -648,7 +612,11 @@ def get_datasets(
                 f"features and splits first with Papyrus class."
             )
 
-        calc_median = True if subset == "train" else False
+        calc_median = (
+            True
+            if subset == "train" and (median_scaling or task_type == "classification")
+            else False
+        )
 
         dataset = PapyrusDataset(
             file_path,
@@ -740,38 +708,67 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-
-    activity_type = "xc50"
-    std_smiles = True
-    verbose_files = False
-
-    # call args
-    n_targets = -1
-    desc_prot = "ankh-base"
-    # "esm1b"
-    desc_chem = "ecfp2048"
-    all_descs = False
-    recalculate = False
-    split_type = "all"
-    split_proportions = [0.7, 0.15, 0.15]
-    file_ext = "pkl"
-
-    papyrus = Papyrus(
-        activity_type=activity_type,
-        std_smiles=std_smiles,
-        verbose_files=verbose_files,
-    )
-
-    papyrus(
-        n_targets=n_targets,
-        descriptor_protein=desc_prot,
-        descriptor_chemical=desc_chem,
-        all_descriptors=all_descs,
-        recalculate=recalculate,
-        split_type=split_type,
-        split_proportions=split_proportions,
-        file_ext=file_ext,
-    )
-
-    print("Done")
+    main()
+    #
+    # activity_type = "xc50"
+    # std_smiles = True
+    # verbose_files = False
+    #
+    # # call args
+    # n_targets = -1
+    # desc_prot = "ankh-base"
+    # # "esm1b"
+    # desc_chem = "ecfp2048"
+    # all_descs = False
+    # recalculate = False
+    # split_type = "time"
+    # split_proportions = [0.7, 0.15, 0.15]
+    # file_ext = "pkl"
+    #
+    # # papyrus = Papyrus(
+    # #     activity_type=activity_type,
+    # #     std_smiles=std_smiles,
+    # #     verbose_files=verbose_files,
+    # # )
+    # #
+    # # papyrus(
+    # #     n_targets=n_targets,
+    # #     descriptor_protein=desc_prot,
+    # #     descriptor_chemical=desc_chem,
+    # #     all_descriptors=all_descs,
+    # #     recalculate=recalculate,
+    # #     split_type=split_type,
+    # #     split_proportions=split_proportions,
+    # #     file_ext=file_ext,
+    # # )
+    # #
+    # # reg_dataset = get_datasets(
+    # #     n_targets=n_targets,
+    # #     activity_type=activity_type,
+    # #     split_type=split_type,
+    # #     desc_prot=desc_prot,
+    # #     desc_chem=desc_chem,
+    # #     median_scaling=True,
+    # #     task_type="regression",
+    # # )
+    #
+    # cl_dataset = get_datasets(
+    #     n_targets=n_targets,
+    #     activity_type=activity_type,
+    #     split_type=split_type,
+    #     desc_prot=desc_prot,
+    #     desc_chem=desc_chem,
+    #     median_scaling=False,
+    #     task_type="classification",
+    # )
+    # cl_dataset_med = get_datasets(
+    #     n_targets=n_targets,
+    #     activity_type=activity_type,
+    #     split_type=split_type,
+    #     desc_prot=desc_prot,
+    #     desc_chem=desc_chem,
+    #     median_scaling=True,
+    #     task_type="classification",
+    # )
+    #
+    # print("Done")
