@@ -22,7 +22,7 @@ FIGS_DIR = BASE_DIR / "figures"
 # Date variable
 TODAY = date.today().strftime("%Y%m%d")
 
-
+WANDB_DIR = LOGS_DIR / "wandb"
 WANDB_MODE = "online"  # 'offline'
 
 __all__ = [
@@ -33,10 +33,11 @@ __all__ = [
     "CONFIG_DIR",
     "SCRIPTS_DIR",
     "MODELS_DIR",
+    "WANDB_MODE",
+    "WANDB_DIR",
     "FIGS_DIR",
     "TODAY",
     "DEVICE",
-    "WANDB_MODE",
 ]
 
 __author__ = "Bola Khalil"
