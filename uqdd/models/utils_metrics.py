@@ -1,5 +1,6 @@
+import logging
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Union
 
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ from sklearn.metrics import r2_score, mean_squared_error, explained_variance_sco
 
 from uqdd import FIGS_DIR, TODAY, DATA_DIR
 from uqdd.data.utils_data import export_pickle, export_df
+from uqdd.utils import create_logger
 from uqdd.utils_chem import smi_to_pil_image
 
 import math
@@ -23,6 +25,7 @@ import scipy.stats as ss
 
 from sklearn.linear_model import LinearRegression
 from scipy.stats import pearsonr
+from scipy.stats import spearmanr
 from scipy.stats import norm
 from scipy.stats import bootstrap
 from scipy.integrate import quad
@@ -115,9 +118,9 @@ def calc_regr_metrics(targets, outputs):
     if outputs.dim() > targets.dim():
         outputs = outputs.mean(dim=-1)
 
-    # Adjust dimensions if necessary (for MTL to STL comparison)
-    if targets.dim() < outputs.dim():
-        targets = targets.unsqueeze(-1)
+    # # Adjust dimensions if necessary (for MTL to STL comparison)
+    # if targets.dim() < outputs.dim():
+    #     targets = targets.unsqueeze(-1)
 
     targets = targets.cpu().numpy()
     outputs = outputs.cpu().numpy()
@@ -125,7 +128,6 @@ def calc_regr_metrics(targets, outputs):
     # no reduction here because we want to calc per task metrics
     rmse = mean_squared_error(targets, outputs, squared=False, multioutput="raw_values")
     r2 = r2_score(targets, outputs, multioutput="raw_values")
-    # TODO sometimes negative doesnt make sense
     evs = explained_variance_score(targets, outputs, multioutput="raw_values")
 
     return rmse, r2, evs
@@ -177,7 +179,7 @@ def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
 
 
 def process_preds(
-    predictions: torch.Tensor, targets: torch.Tensor, task_idx: int = None
+    predictions: torch.Tensor, targets: torch.Tensor, task_idx: Union[int, None] = None
 ):
     """
     Process predictions to extract mean, standard deviation, and align with targets,
@@ -200,41 +202,41 @@ def process_preds(
     """
 
     # Get the predictions mean and std
-    preds_mu = predictions.mean(dim=-1)  # (dim=2)
-    preds_std = predictions.std(dim=-1)  # (dim=2)
-
+    y_pred = predictions.mean(dim=-1)  # (dim=2)
+    y_std = predictions.std(dim=-1)  # (dim=2)
+    y_true = targets.squeeze()
     if task_idx is not None:
         # For MTL, select predictions for the specific task
-        preds_mu, preds_std, targets = (
-            preds_mu[:, task_idx],
-            preds_std[:, task_idx],
-            targets[:, task_idx],
+        y_pred, y_std, y_true = (
+            y_pred[:, task_idx],
+            y_std[:, task_idx],
+            y_true[:, task_idx],
         )
-    elif predictions.dim() > 2 and targets.dim() == 1:
-        preds_mu, preds_std = preds_mu.flatten(), preds_std.flatten()
+    # elif predictions.dim() > 2 and targets.dim() == 1: # TODO I dont remember what was this for - check the MTL for all targets run.
+    #     preds_mu, preds_std = preds_mu.flatten(), preds_std.flatten()
 
-        # else:
-        #     # flatten # TODO I dont think this works for STL
-        #     preds_mu = torch.flatten(preds_mu.transpose(0, 1))
-        #     preds_std = torch.flatten(preds_std.transpose(0, 1))
-        #     targets = torch.flatten(targets.transpose(0, 1))
+    # else:
+    #     # flatten # TODO I dont think this works for STL
+    #     preds_mu = torch.flatten(preds_mu.transpose(0, 1))
+    #     preds_std = torch.flatten(preds_std.transpose(0, 1))
+    #     targets = torch.flatten(targets.transpose(0, 1))
 
     # nan mask filter
     # Filter out NaN values from targets and corresponding predictions
-    nan_mask = ~torch.isnan(targets)
-    preds_mu, preds_std, targets = (
-        preds_mu[nan_mask],
-        preds_std[nan_mask],
-        targets[nan_mask],
+    nan_mask = ~torch.isnan(y_true)
+    y_pred, y_std, y_true = (
+        y_pred[nan_mask],
+        y_std[nan_mask],
+        y_true[nan_mask],
     )
     # Calculate the absolute error
-    y_err = torch.abs(preds_mu - targets)
+    y_err = torch.abs(y_pred - y_true)
     # Convert to numpy arrays
     y_pred, y_std, y_true, y_err = map(
-        lambda x: x.cpu().numpy(), (preds_mu, preds_std, targets, y_err)
+        lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err)
     )
 
-    return y_pred, y_std, y_true, y_err
+    return y_true, y_pred, y_std, y_err
 
 
 def get_preds_export_path(data_specific_path, model_name):
@@ -288,7 +290,7 @@ def make_df_preds(
     return df
 
 
-def make_true_vs_preds_plot(
+def plot_true_vs_preds(
     y_pred,
     y_true,
     n_subset=None,
@@ -461,7 +463,7 @@ def make_uct_plots(
         ),
         ("sharpness", plot_sharpness, {}),
         ("residuals_vs_stds", uct_viz.plot_residuals_vs_stds, {}),
-        ("true_vs_predictions", make_true_vs_preds_plot, {}),
+        ("true_vs_predictions", plot_true_vs_preds, {}),
     ]
 
     for plot_name, plot_func, kwargs in plot_functions:
@@ -482,202 +484,14 @@ def make_uct_plots(
         plots[plot_name] = fig
 
         if savefig:
-            fig_save_path = save_dir / f"{plot_save_str}_{plot_name}.png"
-            plt.savefig(fig_save_path, format="png", bbox_inches="tight")
+            fig_save_path = save_dir / f"{plot_save_str}_{plot_name}"
+            uct.viz.save_figure(
+                str(fig_save_path), ext_list=["png", "svg"], white_background=True
+            )
+            # plt.savefig(fig_save_path, format="png", bbox_inches="tight")
     #
 
     return plots
-
-
-def _make_uct_plots(
-    y_preds: np.ndarray,
-    y_std: np.ndarray,
-    y_true: np.ndarray,
-    task_name: str = None,
-    n_subset: int = 100,
-    ylims: Tuple[float, float] | None = (-3.0, 3.0),
-    num_stds_confidence_bound: float = 2.0,  # 1.96 for 95% CI for normal distribution
-    plot_save_str: str = "uct_plot",
-    savefig: bool = True,
-    save_dir: Path = FIGS_DIR,
-) -> plt.Figure:
-    """
-    Generate a set of UCT plots including prediction intervals, calibration, adversarial
-    group calibration, sharpness, and residuals vs. predictive standard deviation.
-
-    Parameters
-    ----------
-    y_preds : np.ndarray
-        Predicted values.
-    y_std : np.ndarray
-        Standard deviations of predictions.
-    y_true : np.ndarray
-        True target values.
-    task_name : str, optional
-        Name of the task, used in plot titles.
-    n_subset : int, optional
-        Number of points to subset for plotting.
-    ylims : tuple, optional
-        Y-limits for the plots.
-    num_stds_confidence_bound : float, optional
-        Number of standard deviations for confidence interval.
-    plot_save_str : str, optional
-        String to be used in the plot's save path.
-    savefig : bool, optional
-        Whether to save the figure.
-    save_dir : Path, optional
-        Directory to save the figure.
-
-    Returns
-    -------
-    plt.Figure
-        The matplotlib figure object containing all UCT plots.
-    """
-    if not all(isinstance(arr, np.ndarray) for arr in [y_preds, y_std, y_true]):
-        raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
-
-    task_name = task_name if task_name is not None else "PCM"
-
-    fig, axs = plt.subplots(2, 4, figsize=(30, 10))
-    axs = axs.flatten()  # Flatten to index easily
-    # Prediction Intervals plot
-    uct_viz.plot_intervals(
-        y_preds,
-        y_std,
-        y_true,
-        n_subset=n_subset,
-        ylims=ylims,
-        num_stds_confidence_bound=num_stds_confidence_bound,
-        ax=axs[0],
-    )
-    axs[0].set_title(f"Prediction Intervals - {task_name}")
-    rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
-    axs[0].text(
-        0.05,
-        0.95,
-        f"RMSE: {rmse:.2f}",
-        transform=axs[0].transAxes,
-        verticalalignment="top",
-    )
-
-    # Calibration plot
-    uct_viz.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
-    axs[1].set_title(f"Average Calibration - {task_name}")
-
-    # Adversarial group calibration plot
-    uct_viz.plot_adversarial_group_calibration(
-        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
-    )
-    axs[2].set_title(f"Adversarial Group Calibration - {task_name}")
-
-    # Sharpness plot
-    uct_viz.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
-    axs[3].set_title(f"Sharpness - {task_name}")
-
-    # Residuals vs. Predictive Std plot
-    uct_viz.plot_residuals_vs_stds(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4])
-    axs[4].set_title(f"Residuals vs. Predictive Std - {task_name}")
-
-    # New plot: Ordered Prediction Intervals
-    uct_viz.plot_intervals_ordered(
-        y_preds,
-        y_std,
-        y_true,
-        n_subset=n_subset,
-        ylims=ylims,
-        num_stds_confidence_bound=num_stds_confidence_bound,
-        ax=axs[5],
-    )
-    axs[5].set_title(f"Ordered Prediction Intervals - {task_name}")
-
-    # New plot: True vs Predictions Plot
-    make_true_vs_preds_plot(y_preds, y_true, task_name=task_name, ax=axs[6])
-
-    plt.tight_layout(pad=2.0)
-
-    # Save figure if required
-    if savefig:
-        full_save_path = Path(save_dir) / plot_save_str
-        uct_viz.save_figure(
-            str(full_save_path), ext_list=["png", "svg"], white_background=True
-        )
-
-    return fig
-
-
-def _2make_uct_plots(
-    y_preds,
-    y_std,
-    y_true,
-    task_name=None,
-    n_subset=100,
-    ylims=(-3, 3),
-    num_stds_confidence_bound=2.0,  # Use 1.96 for 95% confidence interval for normal distribution
-    plot_save_str="uct_plot",  # "row",
-    savefig=True,
-    save_dir=FIGS_DIR,
-):
-    """
-    Make set of plots.
-    Adapted from https://github.com/uncertainty-toolbox/uncertainty-toolbox/blob/main/examples/viz_readme_figures.py
-    """
-    if (
-        not isinstance(y_preds, np.ndarray)
-        or not isinstance(y_std, np.ndarray)
-        or not isinstance(y_true, np.ndarray)
-    ):
-        raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
-    task_name = str(task_name) if task_name else "PCM"
-
-    fig, axs = plt.subplots(1, 5, figsize=(25, 5))  # (28, 8)
-
-    axs[0] = uct.plot_intervals(
-        y_preds,
-        y_std,
-        y_true,
-        n_subset=n_subset,
-        ylims=ylims,
-        num_stds_confidence_bound=num_stds_confidence_bound,
-        ax=axs[0],
-    )
-    axs[0].set_title("Prediction Intervals - {}".format(task_name))
-    # calculate RMSE and add it to the plot left upper corner
-    rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
-    axs[0].text(0.05, 0.95, "RMSE: {:.2f}".format(rmse), transform=axs[0].transAxes)
-
-    # Make calibration plot
-    axs[1] = uct.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
-    axs[1].set_title("Average Calibration - {}".format(task_name))
-
-    # Make adversarial group calibration plot
-    axs[2] = uct.plot_adversarial_group_calibration(
-        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
-    )
-    axs[2].set_title("Adversarial Group Calibration - {}".format(task_name))
-
-    # Make sharpness plot
-    axs[3] = uct.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
-    axs[3].set_title("Sharpness - {}".format(task_name))
-
-    # Make residual vs stds plot
-    axs[4] = uct.plot_residuals_vs_stds(
-        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4]
-    )
-    axs[4].set_title("Residuals vs. Predictive Std - {}".format(task_name))
-
-    # Adjust subplots spacing
-    fig.subplots_adjust(wspace=0.5)
-    # Adjust the spacing between subplots
-    plt.tight_layout()
-
-    # Save figure
-    if savefig:
-        full_save_path = Path(save_dir) / f"{plot_save_str}"
-        uct.viz.save_figure(
-            str(full_save_path), ext_list=["png", "svg"], white_background=True
-        )
-
-    return fig
 
 
 def calculate_uct_metrics(
@@ -685,7 +499,7 @@ def calculate_uct_metrics(
     y_std,
     y_true,
     task_name=None,
-    data_specific_path="papyrus/xc50/all/",
+    figpath=FIGS_DIR,
 ):
     """
     Calculate metrics for the predictions.
@@ -700,15 +514,15 @@ def calculate_uct_metrics(
         True values.
     task_name : str
         Name of the task.
-    data_specific_path : str
-        Path to the specific data directory. The default is "papyrus/xc50/all/".
+    figpath : Path or str
+        Path to save the figures. Default is FIGS_DIR.
 
     Returns
     -------
     metrics : dict
         Dictionary containing calculated metrics.
-    img     : wandb.Image
-        Image of the UCT plot - ready for logging
+    plots : dict
+        Dictionary containing the generated plots.
     """
     metrics = get_all_metrics(
         y_pred=y_pred,
@@ -719,9 +533,9 @@ def calculate_uct_metrics(
         scaled=True,
         verbose=False,
     )
-    figures_path = FIGS_DIR / data_specific_path
-    figures_path.mkdir(parents=True, exist_ok=True)
-    metrics_filepath = figures_path / f"{task_name}_metrics.pkl"
+    # figures_path = FIGS_DIR / data_specific_path / model_name
+    # figures_path.mkdir(parents=True, exist_ok=True)
+    metrics_filepath = Path(figpath) / f"{task_name}_metrics.pkl"
     export_pickle(metrics, metrics_filepath)
 
     plots = make_uct_plots(
@@ -734,7 +548,7 @@ def calculate_uct_metrics(
         num_stds_confidence_bound=1.96,
         plot_save_str=f"{task_name}_uct",
         savefig=True,
-        save_dir=figures_path,
+        save_dir=Path(figpath),
     )
 
     # img = wandb.Image(fig)
@@ -776,88 +590,23 @@ def calculate_tdc_classification_metrics(
     # print(f"{m} score: {score:.4f}")
 
 
-def log_mol_table(smiles, inputs, targets, outputs, targets_names):
-
-    data = []
-    for smi, inp, tar, out in zip(
-        smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")
-    ):
-        row = {
-            "smiles": smi,
-            "molecule": wandb.Molecule.from_smiles(smi),
-            "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
-            "ECFP": inp,
-            "fp_length": len(inp),
-        }
-
-        # Iterate over each pair of output and target
-        for targetName, target, output in zip(targets_names, tar, out):
-            row[f"{targetName}_label"] = target.item()
-            row[f"{targetName}_predicted"] = output.item()
-
-        data.append(row)
-
-    dataframe = pd.DataFrame.from_records(data)
-    table = wandb.Table(dataframe=dataframe)
-    wandb.log({"mols_table": table}, commit=False)
-
-
-### SOURCE: UQtools.py https://github.com/jensengroup/UQ_validation_methods/blob/main/UQtools.py ###
-
-
-def order_sig_and_errors(sigmas, errors):
-    ordered_df = pd.DataFrame()
-    ordered_df["uq"] = sigmas
-    ordered_df["errors"] = errors
-    ordered_df["abs_z"] = np.abs(ordered_df.errors) / ordered_df.uq
-    ordered_df = ordered_df.sort_values(by="uq")
-    return ordered_df
-
-
-def calculate_uqtools_metrics(
-    uncertainties, errors, Nbins=20, include_bootstrap=True, figpath=FIGS_DIR
+def make_uq_plots(
+    ordered_df,
+    gaus_pred,
+    errors_observed,
+    mis_cal,
+    Nbins=20,
+    include_bootstrap=True,
+    figpath=FIGS_DIR,
+    logger=logging.Logger("uqtools"),
 ):
-    # Order uncertainties and errors according to uncertainties
-    ordered_df = order_sig_and_errors(uncertainties, errors)
-    # calculate rho_rank and rho_rank_sim
-    rho_rank, _ = spearman_rank_corr(np.abs(errors), uncertainties)
-    print(f"rho_rank = {rho_rank:.2f}")
-    exp_rhos_temp = []
-    for i in range(1000):
-        exp_rho, _ = expected_rho(uncertainties)
-        exp_rhos_temp.append(exp_rho)
-    rho_rank_sim = np.mean(exp_rhos_temp)
-    rho_rank_sim_std = np.std(exp_rhos_temp)
-    print(f"rho_rank_sim = {rho_rank_sim:.2f} +/- {rho_rank_sim_std:.2f}")
-
-    # Calculate the miscalibration area
-    gaus_pred, errors_observed = calibration_curve(ordered_df.abs_z)
-    mis_cal = calibration_area(errors_observed, gaus_pred)
-    print(f"miscalibration area = {mis_cal:.2f}")
-
-    # Calculate NLL and simulated NLL
-    _NLL = NLL(uncertainties, errors)
-    print(f"NLL = {_NLL:.2f}")
-    exp_NLL = []
-    for i in range(1000):
-        sim_errors = []
-        for sigma in uncertainties:
-            rng = np.random.default_rng(42)
-            sim_error = rng.normal(0, sigma)
-            # sim_error = np.random.normal(0, sigma)
-            sim_errors.append(sim_error)
-        NLL_sim = NLL(uncertainties, sim_errors)
-        exp_NLL.append(NLL_sim)
-    NLL_sim = np.mean(exp_NLL)
-    NLL_sim_std = np.std(exp_NLL)
-    print(f"NLL_sim = {NLL_sim:.2f} +/- {NLL_sim_std:.2f}")
-
     # generate error-based calibration plot
     fig, _, _, _ = get_slope_metric(
         ordered_df.uq,
         ordered_df.errors,
         Nbins=Nbins,
         include_bootstrap=include_bootstrap,
+        logger=logger,
     )
     fig.savefig(Path(figpath) / "rmv_vs_rmse.png")
 
@@ -866,16 +615,75 @@ def calculate_uqtools_metrics(
     fig2.savefig(Path(figpath) / "Z_scores.png")
 
     fig3 = plot_calibration_curve(gaus_pred, errors_observed, mis_cal)
-    fig3.savefig(Path(figpath) / "calibration_curve.png")
+    fig3.savefig(Path(figpath) / "uq_calibration_curve.png")
+    plots = {"rmv_vs_rmse": fig, "Z_scores": fig2, "calibration_curve": fig3}
+    return plots
+
+
+def calculate_uqtools_metrics(
+    uncertainties,
+    errors,
+    Nbins=20,
+    include_bootstrap=True,
+    figpath=FIGS_DIR,
+    logger=logging.Logger("uqtools"),
+):
+    # Order uncertainties and errors according to uncertainties
+    ordered_df = order_sig_and_errors(uncertainties, errors)
+    # calculate rho_rank and rho_rank_sim # TODO spearmanr is already implemented in scipy
+    # rho_rank, _ = spearman_rank_corr(np.abs(errors), uncertainties)
+    rho_rank, _ = spearmanr(np.abs(errors), uncertainties)
+    logger.info(f"rho_rank = {rho_rank:.2f}")
+    exp_rhos_temp = []
+    for i in range(1000):
+        exp_rho, _ = expected_rho(uncertainties)
+        exp_rhos_temp.append(exp_rho)
+    rho_rank_sim = np.mean(exp_rhos_temp)
+    rho_rank_sim_std = np.std(exp_rhos_temp)
+    logger.info(f"rho_rank_sim = {rho_rank_sim:.2f} +/- {rho_rank_sim_std:.2f}")
+
+    # Calculate the miscalibration area
+    gaus_pred, errors_observed = calibration_curve(ordered_df.abs_z)
+    mis_cal = calibration_area(errors_observed, gaus_pred)
+    logger.info(f"miscalibration area = {mis_cal:.2f}")
+
+    # Calculate NLL and simulated NLL
+    _NLL = NLL(uncertainties, errors)
+    logger.info(f"NLL = {_NLL:.2f}")
+    exp_NLL = []
+    rng = np.random.default_rng()
+    for i in range(1000):
+        sim_errors = np.abs(rng.normal(0, uncertainties))
+        # sim_errors = []
+        # for sigma in uncertainties:
+        #     sim_error = rng.normal(0, sigma)
+        #     # sim_error = np.random.normal(0, sigma)
+        #     sim_errors.append(sim_error)
+        NLL_sim = NLL(uncertainties, sim_errors)
+        exp_NLL.append(NLL_sim)
+    NLL_sim = np.mean(exp_NLL)
+    NLL_sim_std = np.std(exp_NLL)
+    logger.info(f"NLL_sim = {NLL_sim:.2f} +/- {NLL_sim_std:.2f}")
+
+    plots = make_uq_plots(
+        ordered_df,
+        gaus_pred,
+        errors_observed,
+        mis_cal,
+        Nbins=Nbins,
+        include_bootstrap=include_bootstrap,
+        figpath=figpath,
+        logger=logger,
+    )
 
     # Z-metrics
     Z = errors / uncertainties
     Z_var = np.var(Z)
     interval_var = bootstrap((Z,), np.var)
-    print(f"var(Z) = {Z_var:.2f} CI = {interval_var.confidence_interval}")
+    logger.info(f"var(Z) = {Z_var:.2f} CI = {interval_var.confidence_interval}")
     Z_mean = np.mean(Z)
     interval_mean = bootstrap((Z,), np.mean)
-    print(f"mean(Z) = {Z_mean:.2f} CI = {interval_mean.confidence_interval}")
+    logger.info(f"mean(Z) = {Z_mean:.2f} CI = {interval_mean.confidence_interval}")
 
     metrics = {
         "rho_rank": rho_rank,
@@ -886,13 +694,15 @@ def calculate_uqtools_metrics(
         "uq_NLL_sim": NLL_sim,
         "uq_NLL_sim_std": NLL_sim_std,
         "Z_var": Z_var,
-        "Z_var_CI": interval_var.confidence_interval,
+        "Z_var_CI_low": interval_var.confidence_interval.low,
+        "Z_var_CI_high": interval_var.confidence_interval.high,
         "Z_mean": Z_mean,
-        "Z_mean_CI": interval_mean.confidence_interval,
+        "Z_mean_CI_low": interval_mean.confidence_interval.low,
+        "Z_mean_CI_high": interval_mean.confidence_interval.high,
     }
 
-    plots = {"rmv_vs_rmse": fig, "Z_scores": fig2, "calibration_curve": fig3}
     return metrics, plots
+
     # return (
     #     fig,
     #     fig2,
@@ -933,14 +743,20 @@ def calculate_uqtools_metrics(
     # raise NotImplementedError
 
 
-def spearman_rank_corr(v1, v2):
-    v1_ranked = ss.rankdata(v1)
-    v2_ranked = ss.rankdata(v2)
-    return pearsonr(v1_ranked, v2_ranked)
+def order_sig_and_errors(sigmas, errors):
+    ordered_df = pd.DataFrame()
+    ordered_df["uq"] = sigmas
+    ordered_df["errors"] = errors
+    ordered_df["abs_z"] = np.abs(ordered_df.errors) / ordered_df.uq
+    ordered_df = ordered_df.sort_values(by="uq")
+    return ordered_df
 
 
 def rmse(x, axis=None):
     return np.sqrt((x**2).mean())
+
+
+### SOURCE: UQtools.py https://github.com/jensengroup/UQ_validation_methods/blob/main/UQtools.py ###
 
 
 def get_bootstrap_intervals(errors_ordered, Nbins=10):
@@ -965,16 +781,24 @@ def expected_rho(uncertainties):
     for each uncertainty we draw a random Gaussian error to simulate the expected errors
     the spearman rank coeff. is then calculated between uncertainties and errors.
     """
-    sim_errors = []
-    for sigma in uncertainties:
-        # random normal generator
-        rng = np.random.default_rng(42)
-        error = np.abs(rng.normal(0, sigma))
-        # error = np.abs(np.random.normal(0, sigma))
-        sim_errors.append(error)
+    # sim_errors = []
+    rng = np.random.default_rng()
+    sim_errors = np.abs(rng.normal(0, uncertainties))
+    # for sigma in uncertainties:
+    #     # random normal generator
+    #     error = np.abs(rng.normal(0, sigma))
+    #     error = np.abs(np.random.normal(0, sigma))
+    #     sim_errors.append(error)
 
-    rho, _ = spearman_rank_corr(uncertainties, sim_errors)
+    # rho, _ = spearman_rank_corr(uncertainties, sim_errors)
+    rho, _ = spearmanr(uncertainties, sim_errors)
     return rho, sim_errors
+
+
+# def spearman_rank_corr(v1, v2):
+#     v1_ranked = ss.rankdata(v1)
+#     v2_ranked = ss.rankdata(v2)
+#     return pearsonr(v1_ranked, v2_ranked)
 
 
 def NLL(uncertainties, errors):
@@ -1099,7 +923,13 @@ def chi_squared(x_values, x_sigmas, target_values):
     return chi_value, chi_prob
 
 
-def get_slope_metric(uq_ordered, errors_ordered, Nbins=10, include_bootstrap=True):
+def get_slope_metric(
+    uq_ordered,
+    errors_ordered,
+    Nbins=10,
+    include_bootstrap=True,
+    logger=logging.Logger("uqtools"),
+):
     """
     Calculates the error-based calibration metrices
 
@@ -1118,15 +948,15 @@ def get_slope_metric(uq_ordered, errors_ordered, Nbins=10, include_bootstrap=Tru
 
     # Obtain the coefficient of determination by calling the model with the score() function, then print the coefficient:
     r_sq = model.score(x, y)
-    print("R squared:", r_sq)
+    logger.info("R squared:", r_sq)
 
     # Print the Intercept:
     intercept = model.intercept_
-    print("intercept:", intercept)
+    logger.info("intercept:", intercept)
 
     # Print the Slope:
     slope = model.coef_[0]
-    print("slope:", slope)
+    logger.info("slope:", slope)
 
     # Predict a Response and print it:
     y_pred = model.predict(x)
@@ -1196,6 +1026,7 @@ class MetricsTable:
         task_type="regression",
         data_specific_path="papyrus/xc50/all/",
         model_name=None,
+        logger=None,
     ):
         """
         Initialize the metrics table.
@@ -1208,6 +1039,8 @@ class MetricsTable:
             "regression",
             "classification",
         ], "Invalid task type {}.".format(task_type)
+        self.logger = logger or create_logger("MetricsTable")
+
         cols = []
         self.config = config
         self.model_type = model_type
@@ -1252,9 +1085,11 @@ class MetricsTable:
                     "uq_NLL_sim",
                     "uq_NLL_sim_std",
                     "Z_var",
-                    "Z_var_CI",
+                    "Z_var_CI_low",
+                    "Z_var_CI_high",
                     "Z_mean",
-                    "Z_mean_CI",
+                    "Z_mean_CI_low",
+                    "Z_mean_CI_high",
                 ]
             )
             # plots
@@ -1328,7 +1163,7 @@ class MetricsTable:
             task_name=task_name, config=self.config, metrics=metrics, plots=plots
         )
 
-        return metrics
+        return metrics, plots
         # if self.task_type == "regression":
         #     metrics, img = self.calculate_metrics(
         #         y_pred=y_pred,
@@ -1354,17 +1189,25 @@ class MetricsTable:
     def calculate_metrics(
         self, y_pred, y_std, y_true, y_err, data_specific_path, task_name=None
     ):
+        figures_path = FIGS_DIR / data_specific_path / self.model_name
+        figures_path.mkdir(parents=True, exist_ok=True)
+
         if self.task_type == "regression":
             uctmetrics, uctplots = calculate_uct_metrics(
                 y_pred=y_pred,
                 y_std=y_std,
                 y_true=y_true,
                 task_name=task_name,
-                data_specific_path=data_specific_path,
+                figpath=figures_path,
             )
             # calculate other uqtools metrics
             uqmetrics, uqplots = calculate_uqtools_metrics(
-                y_std, y_err, Nbins=20, include_bootstrap=True
+                y_std,
+                y_err,
+                Nbins=10,
+                include_bootstrap=True,
+                figpath=figures_path,
+                logger=self.logger,
             )
             metrics = {**uctmetrics, **uqmetrics}
             plots = {**uctplots, **uqplots}
@@ -1379,6 +1222,12 @@ class MetricsTable:
             )
             # TODO classification plots
             plots = {}
+
+        # for k, v in plots.items():
+        #     plots[k] = wandb.Image(v)
+        #     plt.close(v)
+
+        plots = {k: wandb.Image(v) for k, v in plots.items()}
 
         return metrics, plots
 
@@ -1442,9 +1291,11 @@ class MetricsTable:
                     metrics["uq_NLL_sim"],
                     metrics["uq_NLL_sim_std"],
                     metrics["Z_var"],
-                    metrics["Z_var_CI"],
+                    metrics["Z_var_CI_low"],
+                    metrics["Z_var_CI_high"],
                     metrics["Z_mean"],
-                    metrics["Z_mean_CI"],
+                    metrics["Z_mean_CI_low"],
+                    metrics["Z_mean_CI_high"],
                 ]
             )
 
@@ -1486,3 +1337,220 @@ class MetricsTable:
         Export the UCT metrics table to wandb.
         """
         wandb.log({f" Uncertainty Metrics Table - {self.model_type}": self.table})
+
+
+def log_mol_table(smiles, inputs, targets, outputs, targets_names):
+
+    data = []
+    for smi, inp, tar, out in zip(
+        smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")
+    ):
+        row = {
+            "smiles": smi,
+            "molecule": wandb.Molecule.from_smiles(smi),
+            "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
+            "ECFP": inp,
+            "fp_length": len(inp),
+        }
+
+        # Iterate over each pair of output and target
+        for targetName, target, output in zip(targets_names, tar, out):
+            row[f"{targetName}_label"] = target.item()
+            row[f"{targetName}_predicted"] = output.item()
+
+        data.append(row)
+
+    dataframe = pd.DataFrame.from_records(data)
+    table = wandb.Table(dataframe=dataframe)
+    wandb.log({"mols_table": table}, commit=False)
+
+
+def _make_uct_plots(
+    y_preds: np.ndarray,
+    y_std: np.ndarray,
+    y_true: np.ndarray,
+    task_name: str = None,
+    n_subset: int = 100,
+    ylims: Tuple[float, float] | None = (-3.0, 3.0),
+    num_stds_confidence_bound: float = 2.0,  # 1.96 for 95% CI for normal distribution
+    plot_save_str: str = "uct_plot",
+    savefig: bool = True,
+    save_dir: Path = FIGS_DIR,
+) -> plt.Figure:
+    """
+    Generate a set of UCT plots including prediction intervals, calibration, adversarial
+    group calibration, sharpness, and residuals vs. predictive standard deviation.
+
+    Parameters
+    ----------
+    y_preds : np.ndarray
+        Predicted values.
+    y_std : np.ndarray
+        Standard deviations of predictions.
+    y_true : np.ndarray
+        True target values.
+    task_name : str, optional
+        Name of the task, used in plot titles.
+    n_subset : int, optional
+        Number of points to subset for plotting.
+    ylims : tuple, optional
+        Y-limits for the plots.
+    num_stds_confidence_bound : float, optional
+        Number of standard deviations for confidence interval.
+    plot_save_str : str, optional
+        String to be used in the plot's save path.
+    savefig : bool, optional
+        Whether to save the figure.
+    save_dir : Path, optional
+        Directory to save the figure.
+
+    Returns
+    -------
+    plt.Figure
+        The matplotlib figure object containing all UCT plots.
+    """
+    if not all(isinstance(arr, np.ndarray) for arr in [y_preds, y_std, y_true]):
+        raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
+
+    task_name = task_name if task_name is not None else "PCM"
+
+    fig, axs = plt.subplots(2, 4, figsize=(30, 10))
+    axs = axs.flatten()  # Flatten to index easily
+    # Prediction Intervals plot
+    uct_viz.plot_intervals(
+        y_preds,
+        y_std,
+        y_true,
+        n_subset=n_subset,
+        ylims=ylims,
+        num_stds_confidence_bound=num_stds_confidence_bound,
+        ax=axs[0],
+    )
+    axs[0].set_title(f"Prediction Intervals - {task_name}")
+    rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
+    axs[0].text(
+        0.05,
+        0.95,
+        f"RMSE: {rmse:.2f}",
+        transform=axs[0].transAxes,
+        verticalalignment="top",
+    )
+
+    # Calibration plot
+    uct_viz.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
+    axs[1].set_title(f"Average Calibration - {task_name}")
+
+    # Adversarial group calibration plot
+    uct_viz.plot_adversarial_group_calibration(
+        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
+    )
+    axs[2].set_title(f"Adversarial Group Calibration - {task_name}")
+
+    # Sharpness plot
+    uct_viz.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
+    axs[3].set_title(f"Sharpness - {task_name}")
+
+    # Residuals vs. Predictive Std plot
+    uct_viz.plot_residuals_vs_stds(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4])
+    axs[4].set_title(f"Residuals vs. Predictive Std - {task_name}")
+
+    # New plot: Ordered Prediction Intervals
+    uct_viz.plot_intervals_ordered(
+        y_preds,
+        y_std,
+        y_true,
+        n_subset=n_subset,
+        ylims=ylims,
+        num_stds_confidence_bound=num_stds_confidence_bound,
+        ax=axs[5],
+    )
+    axs[5].set_title(f"Ordered Prediction Intervals - {task_name}")
+
+    # New plot: True vs Predictions Plot
+    plot_true_vs_preds(y_preds, y_true, task_name=task_name, ax=axs[6])
+
+    plt.tight_layout(pad=2.0)
+
+    # Save figure if required
+    if savefig:
+        full_save_path = Path(save_dir) / plot_save_str
+        uct_viz.save_figure(
+            str(full_save_path), ext_list=["png", "svg"], white_background=True
+        )
+
+    return fig
+
+
+def _2make_uct_plots(
+    y_preds,
+    y_std,
+    y_true,
+    task_name=None,
+    n_subset=100,
+    ylims=(-3, 3),
+    num_stds_confidence_bound=2.0,  # Use 1.96 for 95% confidence interval for normal distribution
+    plot_save_str="uct_plot",  # "row",
+    savefig=True,
+    save_dir=FIGS_DIR,
+):
+    """
+    Make set of plots.
+    Adapted from https://github.com/uncertainty-toolbox/uncertainty-toolbox/blob/main/examples/viz_readme_figures.py
+    """
+    if (
+        not isinstance(y_preds, np.ndarray)
+        or not isinstance(y_std, np.ndarray)
+        or not isinstance(y_true, np.ndarray)
+    ):
+        raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
+    task_name = str(task_name) if task_name else "PCM"
+
+    fig, axs = plt.subplots(1, 5, figsize=(25, 5))  # (28, 8)
+
+    axs[0] = uct.plot_intervals(
+        y_preds,
+        y_std,
+        y_true,
+        n_subset=n_subset,
+        ylims=ylims,
+        num_stds_confidence_bound=num_stds_confidence_bound,
+        ax=axs[0],
+    )
+    axs[0].set_title("Prediction Intervals - {}".format(task_name))
+    # calculate RMSE and add it to the plot left upper corner
+    rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
+    axs[0].text(0.05, 0.95, "RMSE: {:.2f}".format(rmse), transform=axs[0].transAxes)
+
+    # Make calibration plot
+    axs[1] = uct.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
+    axs[1].set_title("Average Calibration - {}".format(task_name))
+
+    # Make adversarial group calibration plot
+    axs[2] = uct.plot_adversarial_group_calibration(
+        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
+    )
+    axs[2].set_title("Adversarial Group Calibration - {}".format(task_name))
+
+    # Make sharpness plot
+    axs[3] = uct.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
+    axs[3].set_title("Sharpness - {}".format(task_name))
+
+    # Make residual vs stds plot
+    axs[4] = uct.plot_residuals_vs_stds(
+        y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4]
+    )
+    axs[4].set_title("Residuals vs. Predictive Std - {}".format(task_name))
+
+    # Adjust subplots spacing
+    fig.subplots_adjust(wspace=0.5)
+    # Adjust the spacing between subplots
+    plt.tight_layout()
+
+    # Save figure
+    if savefig:
+        full_save_path = Path(save_dir) / f"{plot_save_str}"
+        uct.viz.save_figure(
+            str(full_save_path), ext_list=["png", "svg"], white_background=True
+        )
+
+    return fig

@@ -93,7 +93,7 @@ def evaluate(model, dataloader, loss_fn, device=DEVICE, pbar=None, epoch=0):
         targets_all = torch.cat(targets_all, dim=0)
         outputs_all = torch.cat(outputs_all, dim=0)
         # Calculate metrics
-        rmse, r2, evs = calc_regr_metrics(targets_all, outputs_all)
+        rmse, r2, evs = calc_regr_metrics(targets_all.squeeze(), outputs_all)
     # Here we want to report total_loss to pbar
     # if pbar:
     #     pbar.set_postfix(val_loss=total_loss, refresh=True)
@@ -257,7 +257,7 @@ def train_model(
         )
 
         # "none", "mean", "sum"
-        for epoch in tqdm(range(config.epochs + 1), desc="Epochs"):
+        for epoch in tqdm(range(config.epochs), desc="Epochs"):
             # for epoch in range(config.epochs + 1):
             try:
                 epoch, train_loss, val_loss, val_rmse, val_r2, val_evs = run_one_epoch(

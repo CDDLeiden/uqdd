@@ -199,7 +199,9 @@ def build_loader(datasets, batch_size, shuffle=False):
         dataloaders = {}
         for k, v in datasets.items():
             dataloaders[k] = DataLoader(
-                v, batch_size=batch_size, shuffle=shuffle, num_workers=8
+                v,
+                batch_size=batch_size,
+                shuffle=shuffle,  # num_workers=8
             )
         logging.info("Data loaders created")
     except Exception as e:
@@ -582,7 +584,7 @@ def save_model(
 #     return fig
 #
 #
-# def make_true_vs_preds_plot(
+# def plot_true_vs_preds(
 #     y_preds,
 #     y_true,
 #     task_name,

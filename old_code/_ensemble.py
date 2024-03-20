@@ -1,6 +1,10 @@
 # get today's date as yyyy/mm/dd format
 import os
-import sys; sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import sys
+
+sys.path.append(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 import wandb
 from tqdm import tqdm
@@ -8,40 +12,59 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from uqdd.models.models_utils import get_model_config, set_seed, build_loader, build_optimizer, build_loss, save_models, \
-    calc_loss_notnan, calc_regr_metrics, get_datasets, MultiTaskLoss
-from uqdd.models.baselines import MTBaselineDNN, train, evaluate
+from uqdd.models.models_utils import (
+    get_model_config,
+    set_seed,
+    build_loader,
+    build_optimizer,
+    build_loss,
+    save_models,
+    calc_loss_notnan,
+    calc_regr_metrics,
+    get_datasets,
+    MultiTaskLoss,
+)
+from uqdd.models.baseline import MTBaselineDNN, train, evaluate
 
-from torchensemble import FusionRegressor, VotingRegressor, BaggingRegressor, GradientBoostingRegressor, \
-    NeuralForestRegressor, SnapshotEnsembleRegressor, AdversarialTrainingRegressor, FastGeometricRegressor, \
-    SoftGradientBoostingRegressor
+from torchensemble import (
+    FusionRegressor,
+    VotingRegressor,
+    BaggingRegressor,
+    GradientBoostingRegressor,
+    NeuralForestRegressor,
+    SnapshotEnsembleRegressor,
+    AdversarialTrainingRegressor,
+    FastGeometricRegressor,
+    SoftGradientBoostingRegressor,
+)
 
 
 # get today's date as yyyy/mm/dd format
 from datetime import date
+
 today = date.today()
 today = today.strftime("%Y%m%d")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(device))
-print(torch.version.cuda) if device == 'cuda' else None
+print(torch.version.cuda) if device == "cuda" else None
 
-LOG_DIR = os.environ.get('LOG_DIR')
-DATA_DIR = os.environ.get('DATA_DIR')
-DATASET_DIR = os.path.join(DATA_DIR, 'dataset')
-CONFIG_DIR = os.environ.get('CONFIG_DIR')
-wandb_mode = 'online'  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
+LOG_DIR = os.environ.get("LOG_DIR")
+DATA_DIR = os.environ.get("DATA_DIR")
+DATASET_DIR = os.path.join(DATA_DIR, "dataset")
+CONFIG_DIR = os.environ.get("CONFIG_DIR")
+wandb_mode = "online"  # 'data/papyrus_filtered_high_quality_xc50_01_standardized.csv'
 
 methods = {
-    'fusion': FusionRegressor,
-    'voting': VotingRegressor,
-    'bagging': BaggingRegressor,
-    'gbdt': GradientBoostingRegressor,
-    'neuralforest': NeuralForestRegressor,
-    'snapshot': SnapshotEnsembleRegressor,
-    'adversarial': AdversarialTrainingRegressor,
-    'fastgeometric': FastGeometricRegressor,
-    'softgbdt': SoftGradientBoostingRegressor
+    "fusion": FusionRegressor,
+    "voting": VotingRegressor,
+    "bagging": BaggingRegressor,
+    "gbdt": GradientBoostingRegressor,
+    "neuralforest": NeuralForestRegressor,
+    "snapshot": SnapshotEnsembleRegressor,
+    "adversarial": AdversarialTrainingRegressor,
+    "fastgeometric": FastGeometricRegressor,
+    "softgbdt": SoftGradientBoostingRegressor,
 }
 
 
@@ -62,7 +85,7 @@ def build_ensemble(config=wandb.config):
             config.hidden_dim_2,
             config.hidden_dim_3,
             config.output_dim,
-            config.dropout
+            config.dropout,
         )
         ensemble_models.append(model)
         seed += 1
@@ -71,37 +94,41 @@ def build_ensemble(config=wandb.config):
 
 
 def run_ensemble(
-        datasets=None,
-        config='uqdd/config/ensemble/ensemble.json',
-        activity='xc50',
-        split='random',
-        ensemble_size=100,
-        ensemble_method='fusion',
-        wandb_project_name='multitask-learning-ensemble',
-        seed=42,
-        **kwargs
-        # optimizer,
-        # loss_fn,
+    datasets=None,
+    config="uqdd/config/ensemble/ensemble.json",
+    activity="xc50",
+    split="random",
+    ensemble_size=100,
+    ensemble_method="fusion",
+    wandb_project_name="multitask-learning-ensemble",
+    seed=42,
+    **kwargs
+    # optimizer,
+    # loss_fn,
 ):
     # Load the config
-    config = get_model_config(config=config, activity=activity, split=split, ensemble_size=ensemble_size, **kwargs)
+    config = get_model_config(
+        config=config,
+        activity=activity,
+        split=split,
+        ensemble_size=ensemble_size,
+        **kwargs
+    )
 
     # Load the dataset
     if datasets is None:
         datasets = get_datasets(activity=activity, split=split)
 
-
     # Initialize wandb for the ensemble models
     with wandb.init(
-            dir=LOG_DIR,
-            mode=wandb_mode,
-            project=wandb_project_name,
-            config=config
+        dir=LOG_DIR, mode=wandb_mode, project=wandb_project_name, config=config
     ):
         config = wandb.config
 
         # Define the data loaders
-        train_loader, val_loader, test_loader = build_loader(datasets, config.batch_size, config.input_dim)
+        train_loader, val_loader, test_loader = build_loader(
+            datasets, config.batch_size, config.input_dim
+        )
         # Define the ensemble models
         model = MTBaselineDNN(
             config.input_dim,
@@ -109,7 +136,7 @@ def run_ensemble(
             config.hidden_dim_2,
             config.hidden_dim_3,
             config.output_dim,
-            config.dropout
+            config.dropout,
         )
         model.to(device)
         # Get the ensemble method
@@ -122,21 +149,23 @@ def run_ensemble(
         # Define the loss function
         loss_fn = MultiTaskLoss(
             loss_type=config.loss,
-            reduction='none',
+            reduction="none",
         )
 
         # test_loader
         ensemble_model.set_criterion(loss_fn)
 
         # Define the optimizer with weight decay and learning rate scheduler
-        ensemble_model.set_optimizer(config.optimizer, lr=config.learning_rate, weight_decay=config.weight_decay)
+        ensemble_model.set_optimizer(
+            config.optimizer, lr=config.learning_rate, weight_decay=config.weight_decay
+        )
 
         ensemble_model.set_scheduler(
             config.lr_scheduler,
-            mode='min',
+            mode="min",
             factor=config.lr_factor,
             patience=config.lr_patience,
-            verbose=True
+            verbose=True,
         )
 
         ensemble_model.fit(
@@ -144,7 +173,7 @@ def run_ensemble(
             epochs=config.num_epochs,
             test_loader=val_loader,
             save_model=True,
-            save_dir=LOG_DIR
+            save_dir=LOG_DIR,
         )
 
         # Evaluate the model
@@ -210,9 +239,6 @@ def run_ensemble(
         # )
 
 
-
-
-
 # def train_ensemble(
 #         train_loader, val_loader, test_loader,
 #         input_size, hidden_size1, hidden_size2, hidden_size3,
@@ -250,11 +276,12 @@ def run_ensemble(
 #
 #     return ensemble
 
+
 def train(
-        model,
-        dataloader,
-        optimizer,
-        loss_fn,
+    model,
+    dataloader,
+    optimizer,
+    loss_fn,
 ):
     model.train()
     train_loss = 0
@@ -276,9 +303,9 @@ def train(
 
 
 def evaluate(
-        model,
-        dataloader,
-        loss_fn,
+    model,
+    dataloader,
+    loss_fn,
 ):
     model.eval()
     total_loss = 0.0
@@ -301,26 +328,34 @@ def evaluate(
         outputs_all = torch.cat(outputs_all, dim=0)
 
         # Calculate metrics for the ensemble
-        ensemble_rmse,ensemble_r2, ensemble_evs = calc_regr_metrics(targets_all, outputs_all)
+        ensemble_rmse, ensemble_r2, ensemble_evs = calc_regr_metrics(
+            targets_all, outputs_all
+        )
 
         # Calculate metrics for each individual model in the ensemble
         model_metrics = []
         for model_output in outputs_all:
-            model_rmse, model_r2, model_evs = calc_regr_metrics(targets_all, model_output)
+            model_rmse, model_r2, model_evs = calc_regr_metrics(
+                targets_all, model_output
+            )
             model_metrics.append((model_rmse, model_r2, model_evs))
 
         # Calculate uncertainties or variances
         uncertainties = torch.var(outputs_all, dim=0)
     # return total_loss, rmse, r2, evs
-    return total_loss, ensemble_rmse, ensemble_r2, ensemble_evs, model_metrics, uncertainties
+    return (
+        total_loss,
+        ensemble_rmse,
+        ensemble_r2,
+        ensemble_evs,
+        model_metrics,
+        uncertainties,
+    )
 
 
 def ensemble_pipeline(config=wandb.config, wandb_project_name="test-project"):
     with wandb.init(
-            dir=LOG_DIR,
-            mode=wandb_mode,
-            project=wandb_project_name,
-            config=config
+        dir=LOG_DIR, mode=wandb_mode, project=wandb_project_name, config=config
     ):
         config = wandb.config
 
@@ -334,45 +369,54 @@ def ensemble_pipeline(config=wandb.config, wandb_project_name="test-project"):
             hidden_dim_2=config.hidden_dim_2,
             hidden_dim_3=config.hidden_dim_3,
             num_tasks=config.num_tasks,
-            dropout=config.dropout
+            dropout=config.dropout,
         )
         model = model.to(device)
 
         # Define the loss function
-        loss_fn = build_loss(config.loss, reduction='none')
+        loss_fn = build_loss(config.loss, reduction="none")
 
         # Define the optimizer with weight decay and learning rate scheduler
-        optimizer = build_optimizer(model, config.optimizer, config.learning_rate, config.weight_decay)
+        optimizer = build_optimizer(
+            model, config.optimizer, config.learning_rate, config.weight_decay
+        )
 
         # Define Learning rate scheduler
         lr_scheduler = ReduceLROnPlateau(
             optimizer,
-            mode='min',
+            mode="min",
             factor=config.lr_factor,
             patience=config.lr_patience,
-            verbose=True
+            verbose=True,
         )
 
         # Train the model
-        best_val_loss = float('inf')
+        best_val_loss = float("inf")
         early_stop_counter = 0
         for epoch in tqdm(range(config.num_epochs)):
             # Training
             train_loss = train(model, train_loader, optimizer, loss_fn)
             # Validation
-            val_loss, ensemble_rmse, ensemble_r2, ensemble_evs, model_metrics, uncertainties = evaluate(model, test_loader, loss_fn)
+            (
+                val_loss,
+                ensemble_rmse,
+                ensemble_r2,
+                ensemble_evs,
+                model_metrics,
+                uncertainties,
+            ) = evaluate(model, test_loader, loss_fn)
             # val_loss, val_rmse, val_r2, val_evs = evaluate(model, val_loader, loss_fn)
             # Log the metrics
             wandb.log(
                 data={
-                    'epoch': epoch,
-                    'train_loss': train_loss,
-                    'val_loss': val_loss,
-                    'ensemble_rmse': ensemble_rmse,
-                    'ensemble_r2': ensemble_r2,
-                    'ensemble_evs': ensemble_evs,
-                    'model_metrics': model_metrics,
-                    'uncertainties': uncertainties
+                    "epoch": epoch,
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "ensemble_rmse": ensemble_rmse,
+                    "ensemble_r2": ensemble_r2,
+                    "ensemble_evs": ensemble_evs,
+                    "model_metrics": model_metrics,
+                    "uncertainties": uncertainties,
                 }
             )
 
@@ -389,7 +433,7 @@ def ensemble_pipeline(config=wandb.config, wandb_project_name="test-project"):
                 # best_model = copy.deepcopy(model)
 
                 # Save the best model
-                # save_models(config, model)
+                # save_model(config, model)
 
                 # optional: save model at the end to view in wandb
                 # inputs, _ = next(iter(train_loader)) # Takes so much time # TODO: put it before epochs loop
@@ -415,27 +459,31 @@ def ensemble_pipeline(config=wandb.config, wandb_project_name="test-project"):
         # Load the best model
         # model.load_state_dict(torch.load(f'models/{today}_best_model.pt'))
         # Test
-        test_loss, test_rmse, test_r2, test_evs = evaluate(best_model, test_loader, loss_fn)  # , last_batch_log=True
+        test_loss, test_rmse, test_r2, test_evs = evaluate(
+            best_model, test_loader, loss_fn
+        )  # , last_batch_log=True
         # Log the final test metrics
-        wandb.log({
-            'test_loss': test_loss,
-            'test_rmse': test_rmse,
-            'test_r2': test_r2,
-            'test_evs': test_evs
-        })
+        wandb.log(
+            {
+                "test_loss": test_loss,
+                "test_rmse": test_rmse,
+                "test_r2": test_r2,
+                "test_evs": test_evs,
+            }
+        )
 
         return test_loss, test_rmse, test_r2, test_evs
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # datasets = get_datasets('xc50', 'random')
     test_loss, test_predictions = run_ensemble(
-        config=os.path.join(CONFIG_DIR, 'ensemble/ensemble.json'),
-        activity='xc50',
-        split='random',
+        config=os.path.join(CONFIG_DIR, "ensemble/ensemble.json"),
+        activity="xc50",
+        split="random",
         ensemble_size=100,
-        ensemble_method='fusion',
-        wandb_project_name='mtl-ensemble-test',
+        ensemble_method="fusion",
+        wandb_project_name="mtl-ensemble-test",
         seed=42,
     )
 
@@ -554,5 +602,3 @@ if __name__ == '__main__':
 #     # 576 combinations
 #     return sweep_config
 #
-
-
