@@ -186,6 +186,9 @@ def get_embeddings(
     query_col: str = "Sequence",
     batch_size: int = 4,
 ) -> pd.DataFrame:
+    # Clear the CUDA cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     embedding_type = embedding_type.lower()
     protein_sequences = df[query_col].unique().tolist()
