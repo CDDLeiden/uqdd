@@ -503,24 +503,31 @@ class PapyrusDataset(Dataset):
         **kwargs,
     ) -> None:
         self.device = device
-        self.data = load_df(file_path, **kwargs)
+        data = load_df(file_path, **kwargs)
+
         dir_path = Path(file_path).parent
 
         labels_filepath = dir_path / "target_col.pkl"
         self.MT = labels_filepath.is_file()
+
         self.label_col = (
             load_pickle(labels_filepath) if self.MT else ["pchembl_value_Mean"]
         )
         self.desc_prot = desc_prot
         self.desc_chem = desc_chem
+        # relevant cols for the dataset
+        relevant_cols = [desc_prot, desc_chem, *self.label_col]
+        relevant_cols = list(filter(None, relevant_cols))
+        data = data[relevant_cols].dropna().reset_index(drop=True)
+
         self.task_type = task_type
 
         self.median_point = median_point
         self.median_scaling = median_scaling
         self.calc_median = calc_median
 
-        self.data, self.median_point = apply_median_scaling(
-            self.data,
+        data, self.median_point = apply_median_scaling(
+            data,
             self.label_col,
             self.median_point,
             calc_median=self.calc_median,
@@ -529,32 +536,45 @@ class PapyrusDataset(Dataset):
         )
 
         if self.task_type == "classification":
-            self.data[self.label_col] = (
-                self.data[self.label_col] > self.median_point
-            ).astype(int)
+            data[self.label_col] = (data[self.label_col] > self.median_point).astype(
+                int
+            )
 
             # self.data[self.label_col] = np.where(
             #     self.data[self.label_col] > self.median_point, 1, 0
             # )
             # self.data[self.label_col] = self.data[self.label_col].astype("category")
+        # self.data.to(device)
 
         if self.desc_chem is not None:
-            chem_desc_np = np.array(self.data[self.desc_chem].tolist())
-            self.chem_desc = torch.from_numpy(chem_desc_np).float().to(device)
+            self.chem_desc = (
+                torch.from_numpy(np.stack(data[self.desc_chem].values))
+                .float()
+                .to(device)
+            )
+            # chem_desc_np = np.array(data[self.desc_chem].tolist())
+            # self.chem_desc = torch.from_numpy(chem_desc_np).float()  # .to(device)
         if not self.MT and self.desc_prot is not None:
-            prot_desc_np = np.array(self.data[self.desc_prot].tolist())
-            self.prot_desc = torch.from_numpy(prot_desc_np).float().to(device)
+            self.prot_desc = (
+                torch.from_numpy(np.stack(data[self.desc_prot].values))
+                .float()
+                .to(device)
+            )
 
-        self.labels = (
-            torch.from_numpy(self.data[self.label_col].values).float().to(device)
-        )
-
+            # prot_desc_np = np.array(data[self.desc_prot].tolist())
+            # self.prot_desc = torch.from_numpy(prot_desc_np).float()  # .to(device)
+        self.labels = torch.tensor(data[self.label_col].values).float().to(device)
+        # self.labels = torch.from_numpy(data[self.label_col].values).float().to(device)
+        self.data = data
         # )
 
     def __len__(self):
-        return len(self.data)
+        return len(self.labels)
 
     def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
         if self.MT:
             return self.chem_desc[idx], self.labels[idx]
         else:
