@@ -1,6 +1,6 @@
 import copy
 from typing import Union, List, Tuple, Dict, Any
-
+from pathlib import Path
 from PIL import Image
 import numpy as np
 import pandas as pd
@@ -8,17 +8,37 @@ from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
 import rdkit
-from rdkit import Chem, RDLogger
-from rdkit.Chem import Draw, AllChem
+from rdkit import Chem, RDLogger, DataStructs
+from rdkit.Chem import Draw, AllChem, MACCSkeys, rdFMCS
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
-from uqdd import DATA_DIR
+
+from uqdd import DATA_DIR, FIGS_DIR
 from uqdd.utils import check_nan_duplicated, custom_agg
 
 from papyrus_scripts.reader import read_molecular_descriptors
 from papyrus_scripts.preprocess import consume_chunks
 
+# scipy hierarchy clustering
+from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.cluster.hierarchy import fcluster, cophenet
+import scipy.cluster.hierarchy as sch
+from scipy.spatial.distance import pdist
+
+# SKlearn metrics
+from sklearn.metrics import (
+    silhouette_samples,
+    silhouette_score,
+    adjusted_rand_score,
+    adjusted_mutual_info_score,
+)
+from sklearn.neighbors import NearestCentroid
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Disable RDKit warnings
 RDLogger.DisableLog("rdApp.info")
 print(f"rdkit {rdkit.__version__}")
 
@@ -847,3 +867,327 @@ def generate_scaffold(smiles, include_chirality=False):
         scaffold = None
         print(f"following error {e} \n occurred while processing smiles: {smiles}")
     return scaffold
+
+
+### adopted from https://github.com/nina23bom/NPS-Pharmacological-profile-fingerprint-prediction-using-ML/blob/main/001.%20NPS%20unique%20compounds%20MCS%20Hierarchical%20clustering%20-%20Class%20Label.ipynb
+def tanimoto_mcs(smi1, smi2):
+    # reading smiles of two molecules and create molecule
+    m1 = Chem.MolFromSmiles(smi1)
+    m2 = Chem.MolFromSmiles(smi2)
+    mols = [m1, m2]
+
+    # number heavy atoms of both molecules
+    a = m1.GetNumAtoms()
+    b = m2.GetNumAtoms()
+    # print(a,b)
+    # find heavy atoms in MCS
+    r = rdFMCS.FindMCS(
+        mols,
+        ringMatchesRingOnly=True,
+        bondCompare=Chem.rdFMCS.BondCompare.CompareAny,
+        atomCompare=rdFMCS.AtomCompare.CompareAny,
+        timeout=1,
+    )
+    c = r.numAtoms
+    # print(c)
+    if c < 0:
+        c = 0
+    mcs_tani = c / (a + b - c)
+    # get MCS smart
+    # mcs_sm = r.smartsString
+    # print(mcs_sm)
+    return mcs_tani
+
+
+def tanimoto_mcs_withH(smi1, smi2):
+    # reading smiles of two molecules and create molecule
+    m1 = Chem.MolFromSmiles(smi1)
+    m2 = Chem.MolFromSmiles(smi2)
+
+    m1H = Chem.AddHs(m1)
+    m2H = Chem.AddHs(m2)
+    mols = [m1H, m2H]
+
+    # number heavy atoms of both molecules
+    a = m1H.GetNumAtoms()
+    b = m2H.GetNumAtoms()
+    # print(a,b)
+    # find heavy atoms in MCS
+    r = rdFMCS.FindMCS(
+        mols,
+        ringMatchesRingOnly=True,
+        bondCompare=Chem.rdFMCS.BondCompare.CompareAny,
+        atomCompare=rdFMCS.AtomCompare.CompareAny,
+        timeout=1,
+    )
+    c = r.numAtoms
+    # print(c)
+    if c < 0:
+        c = 0
+    mcs_tani = c / (a + b - c)
+    # get MCS smart
+    # mcs_sm = r.smartsString
+    # print(mcs_sm)
+    return mcs_tani
+
+
+def hierarchical_clustering(df, smiles_col: str = "SMILES", names_col=None):
+    cid_list = df[smiles_col].tolist()
+    if names_col:
+        names_list = df[names_col].tolist()
+    else:
+        names_list = cid_list
+    list_len = df.shape[0]
+
+    df_cid = pd.DataFrame(0.0, index=names_list, columns=names_list)
+    df_pair = pd.DataFrame(0.0, index=names_list, columns=["Pair", "MaxValue"])
+    df_pair["Pair"] = df_pair["Pair"].astype(str)
+
+    # df_cid = pd.DataFrame(0.0, index=cid_list, columns=cid_list)
+    # df_pair = pd.DataFrame(0.0, index=cid_list, columns=["Pair", "MaxValue"])
+    # for loop with tqdm to show progress bar
+    for i in tqdm(range(list_len), desc="Calculating Tanimoto Similarity"):
+        df_cid.iloc[i, i] = 1.0
+        for j in range(i + 1, list_len):
+            df_cid.iloc[i, j] = tanimoto_mcs(cid_list[i], cid_list[j])
+            df_cid.iloc[j, i] = df_cid.iloc[i, j]
+        cid = names_list[i]
+        tmpInd = df_cid.loc[cid, cid != df_cid.columns].idxmax()
+        tmpValue = df_cid.loc[cid, tmpInd]
+        df_pair.iloc[i, 0] = tmpInd
+        df_pair.iloc[i, 1] = tmpValue
+    return df_cid, df_pair
+
+
+def form_linkage(df):
+    X = df.values
+    Z = linkage(X, method="ward")
+    Pdist = pdist(X)
+    c, coph_dists = cophenet(Z, Pdist)
+    print("Cophenetic coefficient: %0.4f" % c)
+    return X, Z
+
+
+def sil_K(X, Z, max_k=100):
+    sil, n_clu = [], []
+    for k in range(2, max_k):
+        cluster = fcluster(Z, k, criterion="maxclust")
+        silhouette_avg = silhouette_score(X, cluster)
+        sil.append(silhouette_avg)
+        n_clu.append(k)
+
+    optimal_clu = n_clu[sil.index(max(sil))]
+    print("Optimal number of clusters: ", optimal_clu)
+
+    return n_clu, sil, optimal_clu
+
+    #
+    # result = pd.DataFrame({"n_clusters": n_clu, "average_silouette": sil})
+    # print("Max Silhouette Score: ", result["average_silouette"].max())
+    # print(
+    #     "Optimal Number of Clusters: ",
+    #     result["n_clusters"][result["average_silouette"].idxmax()],
+    # )
+
+    # return result
+    # return n_clu, sil
+
+
+def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None):
+    """
+    Plots the silhouette analysis for determining the optimal number of clusters.
+
+    Parameters:
+    -----------
+    - cluster_counts : list
+        A list of integers representing the number of clusters for each silhouette score series.
+    - silhouette_scores : list
+        A list of floats representing the average silhouette scores for each series. Each series corresponds to a different number of clusters.
+    - labels : list
+        A list of strings representing the labels for each series.
+    - output_path : str
+        The path where the plot image will be saved.
+    """
+    # Initialize the plot
+    fig = plt.figure(figsize=(12, 5), dpi=600)
+    plt.rc("font", family="serif")
+
+    plt.scatter(cluster_counts, silhouette_scores, label="MCS")
+    # # Plot each series of cluster counts vs. silhouette scores
+    # for i in range(len(cluster_counts)):
+    #     plt.scatter(cluster_counts[i], silhouette_scores[i], label=labels[i])
+
+    # Adding plot details
+    plt.legend(loc="lower right", shadow=True, fontsize=16)
+    plt.xlabel("Number of Clusters", fontsize=16)
+    plt.ylabel("Average Silhouette Score", fontsize=16)
+
+    # Show and save the plot
+    if output_path:
+        fig.savefig(
+            Path(output_path)
+            / "Silhouette_analysis_for_determining_optimal_clusters_K.png",
+            bbox_inches="tight",
+        )
+
+    plt.show()
+
+
+def plot_cluster_heatmap(data_matrix, output_path=None):
+    yticklabels = data_matrix.index
+    plt.figure(figsize=(12, 30), dpi=600)
+    plt.rc("font", family="serif", size=8)
+    sns.set_style("white")
+
+    # Generate the clustermap
+    fig = sns.clustermap(
+        data_matrix,
+        method="ward",
+        cmap="coolwarm",
+        fmt="d",
+        linewidth=0.5,
+        xticklabels=False,
+        yticklabels=yticklabels,
+        figsize=(12, 20),
+    )
+
+    # Save the plot to the specified output path
+    if output_path:
+        fig.savefig(
+            Path(output_path) / "Heatmap_of_the_clustering.png",
+            dpi=600,
+            bbox_inches="tight",
+        )
+
+    # Show the plot
+    plt.show()
+
+
+def clustering(
+    df,
+    smiles_col: str = "scaffold",
+    names_col=None,
+    max_k=100,
+    fig_output_path=None,
+):
+    # pre cleaning
+    df_clean = df.copy()[[smiles_col]]
+    # dropp duplicates to avoid self comparison and reset index
+    df_clean.drop_duplicates(subset=smiles_col, keep="first", inplace=True)
+    df_clean.reset_index(inplace=True, drop=True)
+
+    df_mcs, df_pair = hierarchical_clustering(
+        df_clean, smiles_col=smiles_col, names_col=names_col
+    )
+    mcs_x, mcs_z = form_linkage(df_mcs)
+    mcs_k, mcs_sil, optimal_clu = sil_K(mcs_x, mcs_z, max_k=max_k)
+
+    if fig_output_path:
+        Path(fig_output_path).mkdir(parents=True, exist_ok=True)
+
+    plot_silhouette_analysis(mcs_k, mcs_sil, output_path=fig_output_path)
+
+    plot_cluster_heatmap(df_mcs, output_path=fig_output_path)
+
+    df_clean["cluster"] = fcluster(mcs_z, optimal_clu, criterion="maxclust")
+
+    # now we map the cluster to the original dataframe
+    df = pd.merge(df, df_clean, on=smiles_col, how="left", validate="many_to_many")
+
+    return df
+
+
+#
+# def (df):
+#
+#     fig = plt.figure(figsize=(12,5), dpi = 600)
+#     plt.rc('font', family='serif')
+#     #plt.scatter(MACCS_K, MACCS_sil,label="MACCS")
+#     plt.scatter(MCS_K, MCS_sil,label="MCS")
+#     #plt.scatter(AA_MCS_K, AA_MCS_sil,label="all-atom MCS")
+#
+#     plt.legend()
+#     legend = plt.legend(loc='lower right', shadow=True, fontsize=16)
+#     plt.xlabel("Number of clusters", fontsize=16)
+#     plt.ylabel("Average Silhouette Score", fontsize=16)
+#     plt.show()
+#     fig.savefig(output_path+"Silhouette analysis for determining optimal clusters K.png", bbox_inches='tight')
+
+# def hierarchical_clustering(
+#     df,
+#     smiles_col: str = "SMILES",
+#     method: str = "average",
+#     metric: str = "jaccard",
+#     threshold: float = 0.7,
+#     plot: bool = True,
+#     figsize: Tuple[int, int] = (10, 10),
+#     save_path: str = None,
+#     logger=None,
+# ):
+#     """
+#     Performs hierarchical clustering on a dataframe of SMILES strings.
+#
+#     Parameters
+#     ----------
+#     df : pandas.DataFrame
+#         The input dataframe, which should contain a 'smiles' column.
+#
+#     smiles_col : str, optional
+#         The name of the column containing the SMILES strings to cluster. Default is 'smiles'.
+#
+#     method : str, optional
+#         The linkage method to use for hierarchical clustering. Default is 'average'.
+#
+#     metric : str, optional
+#         The distance metric to use for hierarchical clustering. Default is 'jaccard'.
+#
+#     threshold : float, optional
+#         The threshold value to use for cutting the dendrogram. Default is 0.7.
+#
+#     plot : bool, optional
+#         Whether to plot the dendrogram. Default is True.
+#
+#     figsize : tuple of int, optional
+#         The size of the plot in inches. Default is (10, 10).
+#
+#     save_path : str, optional
+#         The path to save the plot to. Default is None.
+#
+#     Returns
+#     -------
+#     numpy.ndarray
+#         The cluster labels for each SMILES string.
+#
+#     source: https://www.rdkit.org/docs/Cookbook.html
+#     """
+#     # Calculate the distance matrix
+#     fps = [
+#         Chem.GetMorganFingerprintAsBitVect(Chem.MolFromSmiles(x), 2, nBits=2048)
+#         for x in df[smiles_col]
+#     ]
+#     dists = []
+#     nfps = len(fps)
+#     for i in range(1, nfps):
+#         sims = DataStructs.BulkTanimotoSimilarity(fps[i], fps[:i])
+#         dists.extend([1 - x for x in sims])
+#
+#     # Perform hierarchical clustering
+#     X = np.array(dists)
+#     X = X.reshape(-1, 1)
+#     Z = linkage(X, method=method, metric=metric)
+#
+#     # Cut the dendrogram at the threshold value
+#     clusters = fcluster(Z, t=threshold, criterion="distance")
+#
+#     # Plot the dendrogram
+#     if plot:
+#         plt.figure(figsize=figsize)
+#         dendrogram(Z)
+#         plt.title(f"Hierarchical Clustering of SMILES Strings")
+#         plt.xlabel("Index")
+#         plt.ylabel("Distance")
+#         if save_path:
+#             plt.savefig(save_path)
+#         plt.show()
+#
+#     return clusters

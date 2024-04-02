@@ -1,3 +1,5 @@
+import argparse
+import ast
 import os
 import json
 from pathlib import Path
@@ -10,6 +12,7 @@ string_types = (type(b""), type(""))
 
 
 def create_logger(name="logger", file_level="debug", stream_level="info"):
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
     levels = {
         "debug": logging.DEBUG,
         "info": logging.INFO,
@@ -301,3 +304,13 @@ def check_nan_duplicated(
     )
 
     return df_filtered, df_nan, df_dup
+
+
+def parse_list(argument):
+    try:
+        val = ast.literal_eval(argument)
+        if not (isinstance(val, list) or all(isinstance(x, int) for x in val)):
+            raise ValueError
+        return val
+    except ValueError:
+        raise argparse.ArgumentTypeError("Argument is not a list of integers")

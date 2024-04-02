@@ -1,3 +1,4 @@
+import os
 import random
 import logging
 from typing import Union
@@ -107,6 +108,7 @@ def get_model_config(model_name="baseline", **kwargs):
     assert model_name in [
         "baseline",
         "ensemble",
+        "evidential",
         "gp",
     ], f"Invalid model name: {model_name}"
     return get_config(config_name=model_name, config_dir=CONFIG_DIR, **kwargs)
@@ -137,13 +139,16 @@ def get_sweep_config(model_name="baseline", **kwargs):
     assert model_name in [
         "baseline",
         "ensemble",
+        "evidential",
         "gp",
     ], f"Invalid model name: {model_name}"
-    return get_config(
+    kwargs = {k: {"value": v} for k, v in kwargs.items()}
+    config = get_config(
         config_name=f"{model_name}-sweep",
         config_dir=CONFIG_DIR,
-        **kwargs,
     )
+    config["parameters"].update(kwargs)
+    return config
 
 
 def build_datasets(
@@ -196,12 +201,15 @@ def build_datasets(
 
 def build_loader(datasets, batch_size, shuffle=False):
     try:
+        # num_cpu_cores = os.cpu_count()
         dataloaders = {}
         for k, v in datasets.items():
             dataloaders[k] = DataLoader(
                 v,
                 batch_size=batch_size,
-                shuffle=shuffle,  # num_workers=8
+                shuffle=shuffle,
+                # num_workers=4,
+                # pin_memory=True,
             )
         logging.info("Data loaders created")
     except Exception as e:
@@ -271,19 +279,23 @@ def build_optimizer(model, optimizer, lr, weight_decay):
 #     return loss_fn
 
 
-def build_lr_scheduler(optimizer, lr_scheduler, patience=20, factor=0.2):
+def build_lr_scheduler(optimizer, lr_scheduler, patience=20, factor=0.2, **kwargs):
     if lr_scheduler.lower() == "plateau":
         lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, factor=factor, patience=patience, mode="min"
+            optimizer, factor=factor, patience=patience, mode="min", **kwargs
         )
     elif lr_scheduler.lower() == "step":
         lr_scheduler = optim.lr_scheduler.StepLR(
-            optimizer, step_size=patience, gamma=factor
+            optimizer, step_size=patience, gamma=factor, **kwargs
         )
     elif lr_scheduler.lower() == "exp":
-        lr_scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=factor)
+        lr_scheduler = optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=factor, **kwargs
+        )
     elif lr_scheduler.lower() == "cos":
-        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=patience)
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=patience, **kwargs
+        )
     else:
         raise ValueError("Unknown lr_scheduler: {}".format(lr_scheduler))
 

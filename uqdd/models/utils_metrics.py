@@ -98,7 +98,7 @@ def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
     return tensor_means
 
 
-def calc_regr_metrics(targets, outputs):
+def calc_regr_metrics(targets, outputs, metrics_per_task=False):
     """
     Calculates regression metrics between targets and outputs, including RMSE, R^2, and EVS.
 
@@ -108,7 +108,8 @@ def calc_regr_metrics(targets, outputs):
         The true target values.
     outputs : torch.Tensor
         The predicted output values by the model.
-
+    metrics_per_task : bool, optional
+        Whether to calculate the metrics per task in a multi-task learning scenario.
     Returns
     -------
     tuple of np.ndarray
@@ -116,66 +117,113 @@ def calc_regr_metrics(targets, outputs):
     """
     # Handle extra dimensions (ensembles) by averaging ensemble predictions
     if outputs.dim() > targets.dim():
-        outputs = outputs.mean(dim=-1)
+        outputs = outputs.nanmean(dim=-1)
 
-    # # Adjust dimensions if necessary (for MTL to STL comparison)
-    # if targets.dim() < outputs.dim():
-    #     targets = targets.unsqueeze(-1)
+    targets = targets.detach().cpu()
+    outputs = outputs.detach().cpu()
 
-    targets = targets.cpu().numpy()
-    outputs = outputs.cpu().numpy()
-
-    # no reduction here because we want to calc per task metrics
-    rmse = mean_squared_error(targets, outputs, squared=False, multioutput="raw_values")
-    r2 = r2_score(targets, outputs, multioutput="raw_values")
-    evs = explained_variance_score(targets, outputs, multioutput="raw_values")
+    if metrics_per_task:
+        # Calculate metrics per task
+        rmse = []
+        r2 = []
+        evs = []
+        for i in range(targets.shape[1]):
+            task_t = targets[:, i]
+            task_o = outputs[:, i]
+            nan_mask = ~torch.isnan(task_t)
+            task_t, task_o = task_t[nan_mask].numpy(), task_o[nan_mask].numpy()
+            rmse.append(mean_squared_error(task_t, task_o, squared=False))
+            r2.append(r2_score(task_t, task_o))
+            evs.append(explained_variance_score(task_t, task_o))
+        rmse, r2, evs = np.array(rmse), np.array(r2), np.array(evs)
+    else:
+        # Calculate metrics for all tasks
+        nan_mask = ~torch.isnan(targets)
+        targets, outputs = targets[nan_mask].numpy(), outputs[nan_mask].numpy()
+        rmse = mean_squared_error(targets, outputs, squared=False)
+        r2 = r2_score(targets, outputs)
+        evs = explained_variance_score(targets, outputs)
 
     return rmse, r2, evs
+    # Detect multitask learning scenario
+    # is_multitask = targets.shape[1] > 1
 
-
-def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
-    """
-    Calculates the loss for non-NaN values between outputs and targets using a given loss function.
-
-    Parameters
-    ----------
-    outputs : torch.Tensor
-        Predicted outputs from the model.
-    targets : torch.Tensor
-        True target values.
-    nan_mask : torch.Tensor
-        A boolean mask indicating NaN values in the targets.
-    loss_fn : function
-        A loss function compatible with torch.Tensors and supports 'none' reduction.
-
-    Returns
-    -------
-    torch.Tensor
-        The aggregated loss value excluding NaNs.
-    """
-    valid_targets = torch.where(
-        ~nan_mask, targets, torch.tensor(0.0, device=targets.device)
-    )
-    valid_outputs = torch.where(
-        ~nan_mask, outputs, torch.tensor(0.0, device=outputs.device)
-    )
-
-    loss_per_task = loss_fn(valid_outputs, valid_targets, reduction="none")
-    loss = calc_nanaware_metrics(loss_per_task, nan_mask, all_tasks_agg="sum")
-
-    return loss
-
-    # targets[nan_mask], outputs[nan_mask] = 0.0, 0.0
+    # targets = targets.squeeze().flatten()
+    # outputs = outputs.squeeze().flatten()
+    # nan_mask = torch.isnan(targets)
+    # targets = targets[~nan_mask]
+    # outputs = outputs[~nan_mask]
     #
-    # loss_per_task = loss_fn(outputs, targets)
+    # targets = targets.detach().cpu().numpy()
+    # outputs = outputs.detach().cpu().numpy()
     #
-    # # Now we only include the non-Nan targets in the mean calc.
-    # loss = calc_nanaware_metrics(
-    #     tensor=loss_per_task, nan_mask=nan_mask, all_tasks_agg="sum"
+    # # # Adjust dimensions if necessary (for MTL to STL comparison)
+    # # if targets.dim() < outputs.dim():
+    # #     targets = targets.unsqueeze(-1)
+    # # targets.requires_grad_(False)
+    # # outputs.requires_grad_(False)
+    # # targets = targets.detach()
+    # # outputs = outputs.detach()
+    # #
+    # # targets = targets.cpu().numpy()
+    # # outputs = outputs.cpu().numpy()
+    # # targets = targets.detach().numpy()
+    # # outputs = outputs.detach().numpy()
+    #
+    # # no reduction here because we want to calc per task metrics
+    # rmse = mean_squared_error(
+    #     targets,
+    #     outputs,
+    #     squared=False,
+    #     # , multioutput="uniform_average" # it doesn't matter as we take mean over prediction
     # )
-    # # task_losses = torch.sum(loss_per_task, dim=1) / torch.sum(~nan_mask, dim=1)
-    # # loss = torch.sum(task_losses)
-    # return loss
+    # r2 = r2_score(targets, outputs)  # , multioutput="uniform_average"
+    # evs = explained_variance_score(targets, outputs)  # , multioutput="uniform_average"
+
+
+# def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
+#     """
+#     Calculates the loss for non-NaN values between outputs and targets using a given loss function.
+#
+#     Parameters
+#     ----------
+#     outputs : torch.Tensor
+#         Predicted outputs from the model.
+#     targets : torch.Tensor
+#         True target values.
+#     nan_mask : torch.Tensor
+#         A boolean mask indicating NaN values in the targets.
+#     loss_fn : function
+#         A loss function compatible with torch.Tensors and supports 'none' reduction.
+#
+#     Returns
+#     -------
+#     torch.Tensor
+#         The aggregated loss value excluding NaNs.
+#     """
+#     valid_targets = torch.where(
+#         ~nan_mask, targets, torch.tensor(0.0, device=targets.device)
+#     )
+#     valid_outputs = torch.where(
+#         ~nan_mask, outputs, torch.tensor(0.0, device=outputs.device)
+#     )
+#
+#     loss_per_task = loss_fn(valid_outputs, valid_targets)
+#     loss = calc_nanaware_metrics(loss_per_task, nan_mask, all_tasks_agg="sum")
+#
+#     return loss
+
+# targets[nan_mask], outputs[nan_mask] = 0.0, 0.0
+#
+# loss_per_task = loss_fn(outputs, targets)
+#
+# # Now we only include the non-Nan targets in the mean calc.
+# loss = calc_nanaware_metrics(
+#     tensor=loss_per_task, nan_mask=nan_mask, all_tasks_agg="sum"
+# )
+# # task_losses = torch.sum(loss_per_task, dim=1) / torch.sum(~nan_mask, dim=1)
+# # loss = torch.sum(task_losses)
+# return loss
 
 
 def process_preds(
@@ -245,7 +293,7 @@ def get_preds_export_path(data_specific_path, model_name):
     return path / f"{model_name}_preds.csv"
 
 
-def make_df_preds(
+def create_df_preds(
     y_true,
     y_pred,
     y_std,
@@ -253,12 +301,14 @@ def make_df_preds(
     export: bool = True,
     data_specific_path: str = None,
     model_name: str = None,
+    logger: logging.Logger = None,
 ) -> pd.DataFrame:
     """
     Create a DataFrame from prediction data and optionally export it.
 
     Parameters
     ----------
+    logger
     y_true : array-like
         The true target values.
     y_pred : array-like
@@ -286,6 +336,7 @@ def make_df_preds(
     if export and data_specific_path and model_name:
         export_path = get_preds_export_path(data_specific_path, model_name)
         export_df(df, export_path)
+        logger.debug(f"Exported predictions to {export_path}")
 
     return df
 
@@ -1018,14 +1069,8 @@ def get_rmvs_and_rmses(uq_ordered, errors_ordered, Nbins=10, include_bootstrap=T
 class MetricsTable:
     def __init__(
         self,
-        model_type=None,
         config=None,
-        desc_prot=None,
-        desc_chem=None,
-        multitask=False,
-        task_type="regression",
-        data_specific_path="papyrus/xc50/all/",
-        model_name=None,
+        model_type=None,
         logger=None,
     ):
         """
@@ -1035,21 +1080,18 @@ class MetricsTable:
         --------
         None
         """
-        assert task_type in [
-            "regression",
-            "classification",
-        ], "Invalid task type {}.".format(task_type)
-        self.logger = logger or create_logger("MetricsTable")
-
-        cols = []
         self.config = config
+        self.logger = logger or create_logger("MetricsTable")
+        self.activity = config.get("activity_type", "xc50")
+        self.split = config.get("split_type", "time")
         self.model_type = model_type
-        self.desc_prot = desc_prot
-        self.desc_chem = desc_chem
-        self.mt = multitask
-        self.task_type = task_type
-        self.data_specific_path = data_specific_path
-        self.model_name = model_name
+        self.desc_prot = config.get("descriptor_protein", None)
+        self.desc_chem = config.get("descriptor_chemical", None)
+        self.mt = config.get("MT", False)
+        self.task_type = config.get("task_type", "regression")
+        self.data_specific_path = config.get("data_specific_path", None)
+        self.model_name = config.get("model_name", None)
+        cols = []
         if self.model_type:
             cols += ["Model type"]
         if self.mt:
@@ -1159,32 +1201,9 @@ class MetricsTable:
         )
 
         # self.export_plots(imgs, task_name)
-        self.add_data(
-            task_name=task_name, config=self.config, metrics=metrics, plots=plots
-        )
+        self.add_data(task_name=task_name, metrics=metrics, plots=plots)
 
         return metrics, plots
-        # if self.task_type == "regression":
-        #     metrics, img = self.calculate_metrics(
-        #         y_pred=y_pred,
-        #         y_std=y_std,
-        #         y_true=y_true,
-        #         task_name=task_name,
-        #         data_specific_path=self.data_specific_path,
-        #     )
-        #     self.add_data(
-        #         task_name=task_name, config=self.config, metrics=metrics, img=img
-        #     )
-        # else:
-        #     metrics = calculate_tdc_classification_metrics(
-        #         y_pred=y_pred,
-        #         y_true=y_true,
-        #         task_name=task_name,
-        #         data_specific_path=self.data_specific_path,
-        #     )
-        #     self.add_data(task_name=task_name, config=self.config, metrics=metrics)
-        #
-        # return metrics
 
     def calculate_metrics(
         self, y_pred, y_std, y_true, y_err, data_specific_path, task_name=None
@@ -1231,7 +1250,7 @@ class MetricsTable:
 
         return metrics, plots
 
-    def add_data(self, task_name, config, metrics, plots):
+    def add_data(self, task_name, metrics, plots):
         """
         Add data to the UCT metrics table.
 
@@ -1255,8 +1274,8 @@ class MetricsTable:
             vals.append(task_name)
         vals.extend(
             [
-                config.activity,
-                config.split,
+                self.activity,
+                self.split,
                 self.desc_prot,
                 self.desc_chem,
             ]
