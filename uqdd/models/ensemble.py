@@ -1,23 +1,19 @@
-# get today's date as yyyy/mm/dd format
 import argparse
-from datetime import datetime
-from functools import partial
+
 import wandb
 import torch
 import torch.nn as nn
-from uqdd import TODAY, DEVICE, WANDB_MODE, WANDB_DIR
-from uqdd.data.utils_data import get_tasks
 from uqdd.models.baseline import BaselineDNN
-from uqdd.utils import create_logger
+from uqdd.utils import create_logger, parse_list
 
-from uqdd.models.utils_train import run_model, premodel_init, predict
-from uqdd.models.utils_metrics import MetricsTable, process_preds, make_df_preds
-from typing import Union
+from uqdd.models.utils_train import (
+    train_model_e2e,
+    predict_uc_metrics,
+)
 
 from uqdd.models.utils_models import (
     get_model_config,
-    set_seed,
-    save_model,
+    get_sweep_config,
 )
 
 
@@ -40,223 +36,116 @@ class EnsembleDNN(nn.Module):
         return outputs
 
 
-def run_ensemble(
-    config=None,
-    ensemble_size=100,
-    data_name="papyrus",
-    activity_type="xc50",
-    n_targets=-1,
-    descriptor_protein=None,
-    descriptor_chemical=None,
-    median_scaling=False,
-    split_type="random",
-    ext="pkl",
-    task_type="regression",
-    wandb_project_name=f"{TODAY}-ensemble",
-    logger=None,
-    **kwargs,
-):
-    (
-        dataloaders,
+def run_ensemble(config=None):
+    best_model, dataloaders, config, logger = train_model_e2e(
         config,
-        logger,
-        desc_prot_len,
-        desc_chem_len,
-        start_time,
-        data_specific_path,
-    ) = premodel_init(
-        config,
-        "ensemble",
-        data_name,
-        activity_type,
-        n_targets,
-        descriptor_protein,
-        descriptor_chemical,
-        split_type,
-        median_scaling,
-        task_type,
-        ext,
-        logger,
-        **kwargs,
+        model=EnsembleDNN,
+        model_type="ensemble",
+        model_kwargs={
+            "model_class": BaselineDNN,
+            "ensemble_size": config.get("ensemble_size", 100),
+        },
+        logger=LOGGER,
     )
 
-    m_tag = "median_scaling" if median_scaling else "no_median_scaling"
-    mt = n_targets > 1
-    mt_tag = "MT" if mt else "ST"
-    wandb_tags = [
-        "ensemble",
-        data_name,
-        activity_type,
-        descriptor_protein,
-        descriptor_chemical,
-        split_type,
-        task_type,
-        m_tag,
-        mt_tag,
-    ]
-    with wandb.init(
-        dir=WANDB_DIR,
-        mode=WANDB_MODE,
+    ### Then comes the predict metrics part
+    metrics, plots = predict_uc_metrics(
+        config, best_model, dataloaders, "ensemble", logger
+    )
+
+    return best_model, metrics, plots
+
+
+def run_ensemble_wrapper(**kwargs):
+    global LOGGER
+    LOGGER = create_logger(name="ensemble", file_level="debug", stream_level="info")
+    config = get_model_config(model_name="ensemble", **kwargs)
+
+    best_model, metrics, plots = run_ensemble(config)
+    return best_model, metrics, plots
+
+
+def run_ensemble_hyperparm(**kwargs):
+    global LOGGER
+    LOGGER = create_logger(
+        name="ensemble-sweep", file_level="debug", stream_level="info"
+    )
+
+    sweep_count = kwargs.pop("sweep_count")
+    wandb_project_name = kwargs.pop("wandb_project_name")
+
+    config = get_sweep_config("ensemble", **kwargs)
+    config["project"] = wandb_project_name
+    sweep_id = wandb.sweep(
+        config,
         project=wandb_project_name,
-        config=config,
-        tags=wandb_tags,
-    ):
-        config = wandb.config
-
-        # Define the ensemble models
-        ensemble_model = EnsembleDNN(
-            config=config,
-            model_class=BaselineDNN,
-            ensemble_size=ensemble_size,
-            chem_input_dim=desc_chem_len,
-            prot_input_dim=desc_prot_len,
-            task_type=task_type,
-            n_targets=n_targets,
-            logger=logger,
-        ).to(DEVICE)
-
-        # Train the ensemble model
-        best_model, test_loss = run_model(
-            config,
-            ensemble_model,
-            dataloaders,
-            n_targets=n_targets,
-            device=DEVICE,
-            logger=logger,
-        )
-        model_name = (
-            f"{TODAY}-ensemble_{split_type}_{descriptor_protein}_{descriptor_chemical}"
-        )
-        # Save the best model
-        save_model(
-            config,
-            best_model,
-            model_name,
-            data_specific_path,
-            desc_prot_len,
-            desc_chem_len,
-            onnx=True,
-        )
-        # Predictions on Test set
-        # Initialize the table to store the metrics
-        config.activity = activity_type
-        config.split = split_type
-        uct_metrics_logger = MetricsTable(
-            model_type="ensemble",
-            config=config,
-            desc_prot=descriptor_protein,
-            desc_chem=descriptor_chemical,
-            multitask=mt,
-            task_type=task_type,
-            data_specific_path=data_specific_path,
-            model_name=model_name,
-            logger=logger,
-        )
-        ensemble_preds, targets = predict(
-            best_model, dataloaders["test"], return_targets=True
-        )
-
-        if mt:
-            tasks = get_tasks(
-                data_name=data_name, activity=activity_type, n_targets=n_targets
-            )
-
-            y_true, y_pred, y_std, y_err = process_preds(ensemble_preds, targets, None)
-            df = make_df_preds(
-                y_true,
-                y_pred,
-                y_std,
-                y_err,
-                True,
-                data_specific_path,
-                model_name + "_MT_AllTargets",
-            )
-            logger.debug(
-                f"Ensemble - predictions saved to Dataframe with shape {df.shape}"
-            )
-            metrics, plots = uct_metrics_logger(
-                y_pred=y_pred,
-                y_std=y_std,
-                y_true=y_true,
-                y_err=y_err,
-                task_name=f"All {n_targets} Targets",
-            )
-
-            for task_idx in range(len(tasks)):
-                task_y_true, task_y_pred, task_y_std, task_y_err = process_preds(
-                    ensemble_preds, targets, task_idx=task_idx
-                )
-                # Calculate and log the metrics
-                task_name = tasks[task_idx]
-                taskmetrics, taskplots = uct_metrics_logger(
-                    y_pred=task_y_pred,
-                    y_std=task_y_std,
-                    y_true=task_y_true,
-                    y_err=task_y_err,
-                    task_name=task_name,
-                )
-                metrics[taskmetrics] = taskmetrics
-                plots[taskplots] = taskplots
-
-        else:  # ST
-            task_name = f"PCM {task_type}"
-            # Process the predictions
-            y_true, y_pred, y_std, y_err = process_preds(ensemble_preds, targets, None)
-            df = make_df_preds(
-                y_true, y_pred, y_std, y_err, True, data_specific_path, model_name
-            )
-            logger.debug(
-                f"Ensemble - predictions saved to Dataframe with shape {df.shape}"
-            )
-
-            # Calculate and log the metrics
-            metrics, plots = uct_metrics_logger(
-                y_pred=y_pred,
-                y_std=y_std,
-                y_true=y_true,
-                y_err=y_err,
-                task_name=task_name,
-            )
-
-        uct_metrics_logger.wandb_log()
-
-    logger.info(f"Ensemble - end time: {datetime.now()}")
-    logger.info(f"Ensemble - duration: {datetime.now() - start_time}")
-    return test_loss, ensemble_preds, metrics, plots
+    )
+    print(f"Running sweep with SWEEP_ID: {sweep_id}")
+    wandb.agent(sweep_id, function=run_ensemble, count=sweep_count)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run Ensemble Model")
-
+    parser.add_argument(
+        "--ensemble_size",
+        type=int,
+        default=100,
+        help="Size of the ensemble",
+    )
     parser.add_argument(
         "--data_name",
         type=str,
         default="papyrus",
-        help="Name of the dataset",
+        choices=["papyrus", "tdc", "other"],
+        help="Data name argument",
     )
     parser.add_argument(
         "--activity_type",
         type=str,
         default="xc50",
-        help="Type of activity",
+        choices=["xc50", "kx"],
+        help="Activity argument",
     )
     parser.add_argument(
         "--n_targets",
         type=int,
         default=-1,
-        help="Number of targets",
+        help="Number of targets argument (default=-1 for all targets)",
     )
     parser.add_argument(
         "--descriptor_protein",
         type=str,
         default=None,
-        help="Type of protein descriptor",
+        choices=[
+            None,
+            "ankh-base",
+            "ankh-large",
+            "unirep",
+            "protbert",
+            "protbert_bfd",
+            "esm1_t34",
+            "esm1_t12",
+            "esm1_t6",
+            "esm1b",
+            "esm_msa1",
+            "esm_msa1b",
+            "esm1v",
+        ],
+        help="Protein descriptor argument",
     )
     parser.add_argument(
         "--descriptor_chemical",
         type=str,
-        default=None,
-        help="Type of chemical descriptor",
+        default="ecfp2048",
+        choices=[
+            "ecfp1024",
+            "ecfp2048",
+            "mold2",
+            "mordred",
+            "cddd",
+            "fingerprint",  # "moldesc"
+        ],
+        help="Chemical descriptor argument",
     )
     parser.add_argument(
         "--median_scaling",
@@ -267,40 +156,109 @@ def main():
         "--split_type",
         type=str,
         default="random",
-        help="Type of split",
+        choices=["random", "scaffold", "time"],
+        help="Split argument",
     )
     parser.add_argument(
         "--ext",
         type=str,
         default="pkl",
-        help="Extension of the dataset",
+        choices=["pkl", "parquet", "csv", "feather"],
+        help="File extension argument",
     )
     parser.add_argument(
         "--task_type",
         type=str,
         default="regression",
-        help="Type of task",
+        choices=["regression", "classification"],
+        help="Task type argument",
     )
     parser.add_argument(
-        "--ensemble_size",
-        type=int,
-        default=100,
-        help="Size of the ensemble",
-    )
-    parser.add_argument(
-        "--wandb_project_name",
+        "--wandb-project-name",
         type=str,
-        default=f"{TODAY}-ensemble",
-        help="Name of the wandb project",
+        default="ensemble-test",
+        help="Wandb project name argument",
+    )
+    parser.add_argument(
+        "--sweep-count",
+        type=int,
+        default=None,
+        help="Sweep count argument",
+    )
+    # take chem layers as list input
+    parser.add_argument(
+        "--chem_layers",
+        type=parse_list,
+        default=None,
+        help="Chem layers sizes",
+    )
+    parser.add_argument(
+        "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
+    )
+    parser.add_argument(
+        "--regressor_layers",
+        type=parse_list,
+        default=None,
+        help="Regressor layers sizes",
+    )
+    parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
+    parser.add_argument(
+        "--early_stop", type=int, default=None, help="Early stopping patience"
+    )
+    parser.add_argument("--loss", type=str, default=None, help="Loss function")
+    parser.add_argument(
+        "--loss_reduction", type=str, default=None, help="Loss reduction method"
+    )
+    parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+    parser.add_argument(
+        "--weight_decay", type=float, default=None, help="Weight decay rate"
+    )
+    parser.add_argument(
+        "--lr_scheduler", type=str, default=None, help="LR scheduler type"
+    )
+    parser.add_argument(
+        "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
+    )
+    parser.add_argument(
+        "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
     )
 
     args = parser.parse_args()
-    run_ensemble(**vars(args))
+    # Construct kwargs, excluding arguments that were not provided
+    kwargs = {k: v for k, v in vars(args).items() if v is not None}
+
+    sweep_count = args.sweep_count
+    if sweep_count is not None and sweep_count > 0:
+        run_ensemble_hyperparm(
+            **kwargs,
+        )
+    else:
+        run_ensemble_wrapper(
+            **kwargs,
+        )
 
 
 if __name__ == "__main__":
     main()
 
+    # run_ensemble_wrapper(
+    #     data_name="papyrus",
+    #     activity_type="xc50",
+    #     n_targets=-1,
+    #     descriptor_protein="ankh-base",
+    #     descriptor_chemical="ecfp2048",
+    #     median_scaling=False,
+    #     split_type="random",
+    #     ext="pkl",
+    #     task_type="regression",
+    #     wandb_project_name="ensemble-test",
+    #     ensemble_size=5,
+    # )
+    #
+    # print("Done!")
     # TEST
     # run_ensemble(
     #     data_name="papyrus",
@@ -616,3 +574,196 @@ if __name__ == "__main__":
 # # desc_prot_len, desc_chem_len = get_desc_len_from_dataset(datasets["train"])
 # # logger.info(f"Chemical descriptor {descriptor_chemical} of length: {desc_chem_len}")
 # # logger.info(f"Protein descriptor {descriptor_protein} of length: {desc_prot_len}")
+
+
+# def _run_ensemble(
+#     config=None,
+# ):
+#     if config is not None:
+#         wandb_project_name = config.get(
+#             "wandb_project_name"
+#         )  # add it to config only in baseline not the sweep
+#         run = wandb.init(
+#             config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name
+#         )
+#     else:
+#         run = wandb.init(config=config, dir=WANDB_DIR, mode=WANDB_MODE)
+#     config = wandb.config
+#
+#     data_name = config.get("data_name")
+#     activity_type = config.get("activity_type")
+#     n_targets = config.get("n_targets")
+#     descriptor_protein = config.get("descriptor_protein")
+#     descriptor_chemical = config.get("descriptor_chemical")
+#     median_scaling = config.get("median_scaling")
+#     split_type = config.get("split_type")
+#     ext = config.get("ext")
+#     task_type = config.get("task_type")
+#
+#     (
+#         dataloaders,
+#         config,
+#         logger,
+#         desc_prot_len,
+#         desc_chem_len,
+#         start_time,
+#         data_specific_path,
+#     ) = premodel_init(
+#         config,
+#         "ensemble",
+#         data_name,
+#         activity_type,
+#         n_targets,
+#         descriptor_protein,
+#         descriptor_chemical,
+#         split_type,
+#         median_scaling,
+#         task_type,
+#         ext,
+#         LOGGER,
+#     )
+#
+#     m_tag = "median_scaling" if median_scaling else "no_median_scaling"
+#     mt = n_targets > 1
+#     mt_tag = "MT" if mt else "ST"
+#     wandb_tags = [
+#         "ensemble",
+#         data_name,
+#         activity_type,
+#         descriptor_protein,
+#         descriptor_chemical,
+#         split_type,
+#         task_type,
+#         m_tag,
+#         mt_tag,
+#     ]
+#     with wandb.init(
+#         dir=WANDB_DIR,
+#         mode=WANDB_MODE,
+#         project=wandb_project_name,
+#         config=config,
+#         tags=wandb_tags,
+#     ):
+#         config = wandb.config
+#
+#         # Define the ensemble models
+#         ensemble_model = EnsembleDNN(
+#             config=config,
+#             model_class=BaselineDNN,
+#             ensemble_size=ensemble_size,
+#             chem_input_dim=desc_chem_len,
+#             prot_input_dim=desc_prot_len,
+#             task_type=task_type,
+#             n_targets=n_targets,
+#             logger=logger,
+#         ).to(DEVICE)
+#
+#         # Train the ensemble model
+#         best_model, test_loss = run_model(
+#             config,
+#             ensemble_model,
+#             dataloaders,
+#             n_targets=n_targets,
+#             device=DEVICE,
+#             logger=logger,
+#         )
+#         model_name = (
+#             f"{TODAY}-ensemble_{split_type}_{descriptor_protein}_{descriptor_chemical}"
+#         )
+#         # Save the best model
+#         save_model(
+#             config,
+#             best_model,
+#             model_name,
+#             data_specific_path,
+#             desc_prot_len,
+#             desc_chem_len,
+#             onnx=True,
+#         )
+#         # Predictions on Test set
+#         # Initialize the table to store the metrics
+#         config.activity = activity_type
+#         config.split = split_type
+#         uct_metrics_logger = MetricsTable(
+#             model_type="ensemble",
+#             config=config,
+#             desc_prot=descriptor_protein,
+#             desc_chem=descriptor_chemical,
+#             multitask=mt,
+#             task_type=task_type,
+#             data_specific_path=data_specific_path,
+#             model_name=model_name,
+#             logger=logger,
+#         )
+#         ensemble_preds, targets = predict(
+#             best_model, dataloaders["test"], return_targets=True
+#         )
+#
+#         if mt:
+#             tasks = get_tasks(
+#                 data_name=data_name, activity=activity_type, n_targets=n_targets
+#             )
+#
+#             y_true, y_pred, y_std, y_err = process_preds(ensemble_preds, targets, None)
+#             df = create_df_preds(
+#                 y_true,
+#                 y_pred,
+#                 y_std,
+#                 y_err,
+#                 True,
+#                 data_specific_path,
+#                 model_name + "_MT_AllTargets",
+#             )
+#             logger.debug(
+#                 f"Ensemble - predictions saved to Dataframe with shape {df.shape}"
+#             )
+#             metrics, plots = uct_metrics_logger(
+#                 y_pred=y_pred,
+#                 y_std=y_std,
+#                 y_true=y_true,
+#                 y_err=y_err,
+#                 task_name=f"All {n_targets} Targets",
+#             )
+#
+#             for task_idx in range(len(tasks)):
+#                 task_y_true, task_y_pred, task_y_std, task_y_err = process_preds(
+#                     ensemble_preds, targets, task_idx=task_idx
+#                 )
+#                 # Calculate and log the metrics
+#                 task_name = tasks[task_idx]
+#                 taskmetrics, taskplots = uct_metrics_logger(
+#                     y_pred=task_y_pred,
+#                     y_std=task_y_std,
+#                     y_true=task_y_true,
+#                     y_err=task_y_err,
+#                     task_name=task_name,
+#                 )
+#                 metrics[taskmetrics] = taskmetrics
+#                 plots[taskplots] = taskplots
+#
+#         else:  # ST
+#             task_name = f"PCM {task_type}"
+#             # Process the predictions
+#             y_true, y_pred, y_std, y_err = process_preds(ensemble_preds, targets, None)
+#             df = create_df_preds(
+#                 y_true, y_pred, y_std, y_err, True, data_specific_path, model_name
+#             )
+#             logger.debug(
+#                 f"Ensemble - predictions saved to Dataframe with shape {df.shape}"
+#             )
+#
+#             # Calculate and log the metrics
+#             metrics, plots = uct_metrics_logger(
+#                 y_pred=y_pred,
+#                 y_std=y_std,
+#                 y_true=y_true,
+#                 y_err=y_err,
+#                 task_name=task_name,
+#             )
+#
+#         uct_metrics_logger.wandb_log()
+#
+#     logger.info(f"Ensemble - end time: {datetime.now()}")
+#     logger.info(f"Ensemble - duration: {datetime.now() - start_time}")
+#     return test_loss, ensemble_preds, metrics, plots
+#

@@ -42,7 +42,7 @@ import wandb
 
 from gauche.dataloader import MolPropLoader
 from gauche.dataloader.data_utils import transform_data
-from uqdd.models.baselines import MTBaselineDNN
+from uqdd.models.baseline import MTBaselineDNN
 from uqdd.models.models_utils import (
     get_datasets,
     get_model_config,
@@ -63,7 +63,7 @@ from uqdd.models.models_utils import (
     save_models,
 )
 from uqdd.models.models_utils import UCTMetricsTable, process_preds
-from uqdd.models.baselines import train_model
+from uqdd.models.baseline import train_model
 
 num_tasks = 20  # number of tasks i.e. labels
 # rank = 1 # increasing the rank hyperparameter allows the model to learn more expressive

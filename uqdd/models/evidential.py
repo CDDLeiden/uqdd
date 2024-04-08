@@ -43,33 +43,33 @@ class EvidentialDNN(BaselineDNN):
     def __init__(
         self,
         config=None,
-        chem_input_dim=None,
-        prot_input_dim=None,
-        task_type="regression",
-        n_targets=-1,
+        # chem_input_dim=None,
+        # prot_input_dim=None,
+        # task_type="regression",
+        # n_targets=-1,
         logger=None,
         **kwargs,
     ):
         super().__init__(
             config,
-            chem_input_dim,
-            prot_input_dim,
-            task_type,
-            n_targets,
+            # chem_input_dim,
+            # prot_input_dim,
+            # task_type,
+            # n_targets,
             logger,
             **kwargs,
         )
 
-        if task_type == "regression":
+        if self.task_type == "regression":
             self.regressor_or_classifier[-1] = NormalInvGamma(
                 self.config["regressor_layers"][-1], self.output_dim
             )
-        elif task_type == "classification":
+        elif self.task_type == "classification":
             self.regressor_or_classifier[-1] = Dirichlet(
                 self.config["regressor_layers"][-1], self.output_dim
             )
         else:
-            raise ValueError(f"Unknown task_type: {task_type}")
+            raise ValueError(f"Unknown task_type: {self.task_type}")
 
         self.apply(
             self.init_weights
@@ -79,6 +79,7 @@ class EvidentialDNN(BaselineDNN):
 def run_evidential():
 
     # TODO:
-    # here we should specify the loss function according to the task_type, we dont need the config in this one we need to force it.
+    # here we should specify the loss function according to the task_type,
+    # we dont need the config in this one we need to force it.
 
     raise NotImplementedError("This function is not implemented yet.")

@@ -1,4 +1,6 @@
 {
+  "program": "baseline.py",
+  "entity": "bolak92",
   "method": "bayes",
   "metric": {
     "goal": "minimize",
@@ -7,10 +9,10 @@
   "parameters": {
     "chem_layers": {
       "values": [
-        [2048, 1024, 512, 256],
-        [2048, 1024, 512],
-        [1024, 512, 256],
-        [1024, 256],
+        [2048,1024,512,256],
+        [2048,1024,512],
+        [1024,512,256],
+        [1024,256],
         [1024],
         [512],
         [256]
@@ -18,39 +20,39 @@
     },
     "prot_layers": {
       "values": [
-        [768, 512, 256, 128],
-        [768, 512, 256],
-        [512, 256, 128],
-        [512, 128],
+        [768,512,256,128],
+        [768,512,256],
+        [512,256,128],
+        [512,128],
         [512],
         [256]
       ]
     },
     "regressor_layers": {
       "values": [
-        [512, 256, 128, 64],
-        [512, 256, 128],
-        [256, 128, 64],
-        [256, 128],
+        [512,256,128,64],
+        [512,256,128],
+        [256,128,64],
+        [256,128],
         [256],
         [128],
         [64]
       ]
     },
     "dropout": {
-      "values": [0.1, 0.2, 0.5]
+      "values": [0.1,0.2]
     },
     "batch_size": {
-      "values": [128, 256, 512]
+      "values": [128,256,512]
     },
     "epochs": {
-      "value": 3000
+      "value": 5000
     },
     "early_stop": {
-      "value": 50
+      "values": [200,500]
     },
     "loss": {
-      "values": ["huber", "mse"]
+      "values": ["huber", "mse", "mae"]
     },
     "loss_reduction": {
       "value": "mean"
@@ -59,19 +61,19 @@
       "values": ["adagrad", "adamw", "sgd"]
     },
     "lr": {
-      "values": [1e-3, 5e-4, 1e-4]
+      "values": [0.1,1e-2,1e-3,5e-4,1e-4]
     },
     "weight_decay": {
-      "value": 1e-4
+      "values": [0,1e-2,1e-4]
     },
     "lr_scheduler": {
       "value": "plateau"
     },
     "lr_scheduler_patience": {
-      "value": 20
+      "values": [200,5000]
     },
     "lr_scheduler_factor": {
-      "value": 0.2
+      "values": [0.1,0.2]
     }
   }
 }
