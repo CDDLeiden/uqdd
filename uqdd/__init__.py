@@ -25,6 +25,19 @@ TODAY = date.today().strftime("%Y%m%d")
 WANDB_DIR = LOGS_DIR / "wandb"
 WANDB_MODE = "online"  # 'offline'
 
+# create DIRs if they do not exist
+for dir in [
+    DATA_DIR,
+    DATASET_DIR,
+    LOGS_DIR,
+    CONFIG_DIR,
+    SCRIPTS_DIR,
+    MODELS_DIR,
+    FIGS_DIR,
+    WANDB_DIR,
+]:
+    dir.mkdir(parents=True, exist_ok=True)
+
 __all__ = [
     "BASE_DIR",
     "DATA_DIR",
