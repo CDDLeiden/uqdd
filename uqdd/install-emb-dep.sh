@@ -36,6 +36,7 @@ rm -rf bio-transformers-0.1.17.tar.gz
 pip install -r requirements-biotransformer.txt
 
 cd bio-transformers-0.1.17 || exit
-pip install -e .
+pip install .
 cd ..
-rm -rf bio-transformers-0.1.17
+# remove the directory
+rm -rf ./bio-transformers-0.1.17
