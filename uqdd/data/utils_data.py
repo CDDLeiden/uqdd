@@ -363,10 +363,14 @@ def scaffold_split(
 def scaffold_cluster_split(
     df,
     smiles_col="smiles",
-    max_k=100,
     train_frac=0.7,
     val_frac=0.15,
     test_frac=0.15,
+    max_k=100,
+    batch_size=10000,
+    withH=False,
+    fig_output_path=None,
+    export_mcs_path=None,
     return_indices=False,
     seed=42,
 ) -> dict:
@@ -392,9 +396,10 @@ def scaffold_cluster_split(
     df = clustering(
         df,
         "scaffold",
-        None,
         max_k=max_k,
-        fig_output_path=FIGS_DIR / f"{TODAY}_scaffold_clustering",
+        withH=withH,
+        fig_output_path=fig_output_path or FIGS_DIR / f"{TODAY}_scaffold_clustering/",
+        export_mcs_path=export_mcs_path,
     )
     # get unique scaffolds
     clusters = list(df["cluster"].unique())
@@ -488,6 +493,8 @@ def split_data(
     time_col: str = "year",
     fractions: Union[List[float], None] = None,
     max_k_clusters: int = 100,
+    fig_output_path: Union[str, None] = None,
+    export_mcs_path: Union[str, None] = None,
     return_indices: bool = False,
     seed: int = 42,
 ) -> dict:
@@ -509,8 +516,15 @@ def split_data(
     fractions : list, optional
         A list of fractions to use for the training, validation, and test sets. Default is [0.7, 0.15, 0.15].
         The sum of the fractions must be 1. If only two fractions are provided, the second fraction is used for the test set.
+    fig_output_path : str, optional
+        The path to the output directory for scaffold clustering figures. Default is None.
+    export_mcs_path : str, optional
+        The path to the output directory for exporting the maximum common substructures. Default is None.
+    return_indices : bool, optional
+        If True, returns the indices of the split dataframes instead of the dataframes themselves. Default is False.
     seed : int, optional
         The random seed to use for splitting the data. Default is 42.
+
 
     Returns
     -------
@@ -536,7 +550,13 @@ def split_data(
         "scaffold": (scaffold_split, {"smiles_col": smiles_col}),
         "scaffold_cluster": (
             scaffold_cluster_split,
-            {"smiles_col": smiles_col, "max_k": max_k_clusters},
+            {
+                "smiles_col": smiles_col,
+                "max_k": max_k_clusters,
+                "withH": False,
+                "fig_output_path": fig_output_path,
+                "export_mcs_path": export_mcs_path,
+            },
         ),
         "time": (time_split, {"time_col": time_col}),
     }
@@ -558,6 +578,8 @@ def split_data(
                 time_col=time_col,
                 max_k_clusters=max_k_clusters,
                 fractions=fractions,
+                fig_output_path=fig_output_path,
+                export_mcs_path=export_mcs_path,
                 return_indices=return_indices,
                 seed=seed,
             )

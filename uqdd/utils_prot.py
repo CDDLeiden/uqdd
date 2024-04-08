@@ -26,7 +26,7 @@ all_models = [
     "protbert_bfd",
     "ankh-base",
     "ankh-large",
-    "unirep",  # TODO to calculate it
+    "unirep",  # TODO to calculate it from scratch for TDC
 ]
 num_gpus = torch.cuda.device_count()
 

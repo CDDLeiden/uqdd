@@ -1,18 +1,22 @@
 import copy
-from typing import Union, List, Tuple, Dict, Any
+import logging
+from typing import Union, List, Tuple, Dict, Any, Optional
 from pathlib import Path
 from PIL import Image
 import numpy as np
 import pandas as pd
+from scipy.sparse import coo_matrix
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
 import rdkit
 from rdkit import Chem, RDLogger, DataStructs
 from rdkit.Chem import Draw, AllChem, MACCSkeys, rdFMCS
+from rdkit.Chem import MolToSmiles, MolFromSmiles, MolFromSmarts, SanitizeMol
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
+from rdkit.Chem.rdchem import Mol as RdkitMol
 
 from uqdd import DATA_DIR, FIGS_DIR
 from uqdd.utils import check_nan_duplicated, custom_agg
@@ -38,9 +42,15 @@ from sklearn.neighbors import NearestCentroid
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from itertools import combinations, islice
+import math
+
 # Disable RDKit warnings
 RDLogger.DisableLog("rdApp.info")
 print(f"rdkit {rdkit.__version__}")
+
+N_WORKERS = 20
+BATCH_SIZE = 20000
 
 all_models = [
     "ecfp1024",
@@ -258,7 +268,7 @@ descriptors = [
 ]
 
 
-def standardize(smi, logger=None, suppress_exception=False):
+def rdkit_standardize(smi, logger=None, suppress_exception=False):
     """
     Applies a standardization workflow to a SMILES string.
 
@@ -308,9 +318,9 @@ def standardize(smi, logger=None, suppress_exception=False):
     og_smiles = copy.deepcopy(smi)
     try:
         # Functional Groups Normalization
-        mol = Chem.MolFromSmiles(smi)
+        mol = MolFromSmiles(smi)
         mol.UpdatePropertyCache(strict=False)
-        Chem.SanitizeMol(
+        SanitizeMol(
             mol,
             sanitizeOps=(
                 Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES
@@ -330,7 +340,140 @@ def standardize(smi, logger=None, suppress_exception=False):
         else:
             return None
 
-    return Chem.MolToSmiles(mol)
+    return MolToSmiles(mol)
+
+
+def remove_stereo_rdkit_molecule(
+    mol: RdkitMol,
+) -> Optional[RdkitMol]:
+    try:
+        Chem.RemoveStereochemistry(mol)
+        return mol
+
+    except Exception as e:
+        raise ValueError(
+            f"Removing Stereochemistry failed with the following error {e}"
+        )
+
+
+def neutralize_rdkit_molecule(
+    mol: RdkitMol,
+) -> Optional[RdkitMol]:
+    try:
+        pattern = MolFromSmarts(
+            "[+1!h0!$([*]~[-1,-2,-3,-4]),-1!$([*]~[+1,+2,+3,+4]),-1!$([*]~[1+,2+,3+,4+])]"
+        )
+        at_matches = mol.GetSubstructMatches(pattern)
+        at_matches_list = [y[0] for y in at_matches]
+
+        if len(at_matches_list) > 0:
+            for at_idx in at_matches_list:
+                atom = mol.GetAtomWithIdx(at_idx)
+                chg = atom.GetFormalCharge()
+                h_count = atom.GetTotalNumHs()
+                atom.SetFormalCharge(0)
+                atom.SetNumExplicitHs(h_count - chg)
+                atom.UpdatePropertyCache()
+
+        return mol
+
+    except Exception as e:
+        raise ValueError(f"Neutralization failed with the following error {e}")
+
+
+def remove_isotopes_rdkit_molecule(
+    mol: RdkitMol,
+) -> Optional[RdkitMol]:
+    try:
+        atom_data = [(atom, atom.GetIsotope()) for atom in mol.GetAtoms()]
+        for atom, isotope in atom_data:
+            # restore original isotope values
+            if isotope:
+                atom.SetIsotope(0)
+        Chem.RemoveHs(mol)
+        return mol
+
+    except Exception as e:
+        raise ValueError(f"Removing Isotope failed with the following error {e}")
+
+
+def standardize(
+    smiles: Optional[str],
+    logger: Optional[logging.Logger] = None,
+    suppress_exception: bool = True,
+    remove_stereo: bool = False,
+) -> Optional[str]:
+    """
+    Standardizes a given SMILES string using RDKit.
+
+    Parameters
+    ----------
+    smiles : str, optional
+        A SMILES string to be standardized. If None, returns None.
+    remove_stereo : bool, optional
+        A boolean flag to remove stereochemistry information if True. Default is False.
+    logger : logging.Logger, optional
+        A logger object to log error messages. Default is None.
+    suppress_exception : bool, optional
+        A boolean flag to suppress exceptions and return the original SMILES string if an error
+        occurs during standardization. If False, an exception is raised or logged, depending on the value of logger.
+        Default is True.
+
+    Returns
+    -------
+    str or None
+        The standardized SMILES string or None, depending on the value of suppress_exception and whether an exception
+        occurs. If an exception occurs and suppress_exception is True, the original SMILES string is returned.
+    """
+    if smiles is None:
+        return None
+    og_smiles = copy.deepcopy(smiles)
+    smiles_inter = None
+    # if check_smiles_type and not isinstance(smiles, str):
+    #     if logger:
+    #         logger.error(
+    #             f"smiles must be a string and not {type(smiles)}, "
+    #             f"the following input is incorrect : {smiles}"
+    #         )
+    #     return None
+
+    try:
+        smiles = smiles.split("|")[0].split("{")[0].strip()
+        mol = MolFromSmiles(smiles)
+        if mol is None:
+            return None
+
+        smiles_inter = MolToSmiles(mol, canonical=True)
+
+        if remove_stereo:
+            mol = remove_stereo_rdkit_molecule(mol)
+        mol = neutralize_rdkit_molecule(mol)
+        mol = remove_isotopes_rdkit_molecule(mol)
+        # For Sanity Double Check
+        smiles = MolToSmiles(mol, canonical=True)
+        mol = MolFromSmiles(smiles)
+        smiles = Chem.MolToSmiles(mol, isomericSmiles=False, canonical=True)
+        return smiles
+
+    except Exception as e:
+        if logger:
+            logger.error(f"StandardizationError: {e} for {og_smiles}")
+        if suppress_exception:
+            return smiles_inter
+        else:
+            return None
+
+
+# check_smiles_type : bool, optional
+#         A boolean flag to check if the input is a string or None. If True and the input is not a
+#         string, a TypeError is raised or logged, depending on the value of logger. Default is True.
+#     Raises
+#     ------
+#     TypeError
+#         If check_smiles_type is True and the input is not a string.
+#     StandardizationError
+#         If an unexpected error occurs during standardization and suppress_exception is False.
+#         The error message is logged or raised, depending on the value of logger.
 
 
 def standardize_wrapper(args):
@@ -338,6 +481,13 @@ def standardize_wrapper(args):
     Wrapper function for the standardize function to be used with the concurrent.futures.ProcessPoolExecutor.
     """
     return standardize(*args)
+
+
+def rdkit_standardize_wrapper(args):
+    """
+    Wrapper function for the rdkit_standardize function to be used with the concurrent.futures.ProcessPoolExecutor.
+    """
+    return rdkit_standardize(*args)
 
 
 def standardize_df(
@@ -433,7 +583,7 @@ def standardize_df(
     unique_smiles = df_filtered[smiles_col].unique()
     args_list = [(smi, logger, suppress_exception) for smi in unique_smiles]
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
         results = list(
             tqdm(
                 executor.map(standardize_wrapper, args_list),
@@ -592,7 +742,7 @@ def generate_ecfp(
     # for length in [2 ** i for i in range(5, 12)]:
     args_list = [(smi, radius, length, use_features, use_chirality) for smi in smiles]
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
         results = list(
             tqdm(
                 executor.map(wrapper_ecfp_from_smiles, args_list),
@@ -677,7 +827,7 @@ def generate_mol_descriptors(
 
     args_list = [(smi, chosen_descriptors) for smi in smiles]
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
         results = list(
             tqdm(
                 executor.map(wrapper_get_mol_descriptors, args_list),
@@ -863,9 +1013,14 @@ def generate_scaffold(smiles, include_chirality=False):
         scaffold = MurckoScaffold.MurckoScaffoldSmiles(
             smiles=smiles, includeChirality=include_chirality
         )
+
     except Exception as e:
         scaffold = None
         print(f"following error {e} \n occurred while processing smiles: {smiles}")
+
+    if scaffold is None or scaffold == "":
+        scaffold = smiles
+
     return scaffold
 
 
@@ -931,36 +1086,115 @@ def tanimoto_mcs_withH(smi1, smi2):
     return mcs_tani
 
 
-def hierarchical_clustering(df, smiles_col: str = "SMILES", names_col=None):
+def tanimoto_mcs_wrapper(index_pair, cid_list):
+    cid1, cid2 = index_pair
+    return tanimoto_mcs(cid_list[cid1], cid_list[cid2])
+
+
+def tanimoto_mcs_withH_wrapper(index_pair, cid_list):
+    cid1, cid2 = index_pair
+    return tanimoto_mcs_withH(cid_list[cid1], cid_list[cid2])
+
+
+def chunked_iterable(n, size):
+    """
+    A generator to yield chunks of index pairs for all unique combinations.
+
+    Parameters
+    ----------
+    n : int
+        The total number of compounds.
+    size : int
+        The size of each chunk.
+
+    Yields
+    ------
+    List of tuple
+        Each yielded chunk is a list of index pairs.
+    """
+    iterable = combinations(range(n), 2)
+    while True:
+        chunk = list(islice(iterable, size))
+        if not chunk:
+            return
+        yield chunk
+
+
+def calculate_total_chunks(n_compounds, batch_size):
+    """
+    Calculate the total number of chunks for the tqdm progress bar.
+    """
+    total_pairs = n_compounds * (n_compounds - 1) / 2
+    total_chunks = math.ceil(total_pairs / batch_size)
+    return total_chunks
+
+
+def process_chunk(chunk, similarity_matrix, cid_list, tanimoto_mcs_func):
+    # tn_mcs_func = tanimoto_mcs_withH_wrapper if withH else tanimoto_mcs_wrapper
+    with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
+        futures = {
+            executor.submit(tanimoto_mcs_func, pair, cid_list): pair for pair in chunk
+        }
+        for future in futures:
+            similarity = future.result()
+            i, j = futures[future]
+            similarity_matrix[i, j] = similarity
+            similarity_matrix[j, i] = similarity
+
+
+def save_similarity_matrix(matrix, filename="similarity_matrix.npy"):
+    """
+    Save the similarity matrix to a file.
+
+    Parameters:
+    - matrix: The similarity matrix to be saved.
+    - filename: The filename for the saved matrix. Default is "similarity_matrix.npy".
+    """
+    np.save(filename, matrix)
+    print(f"Similarity matrix saved to {filename}")
+
+
+def hierarchical_clustering(
+    df,
+    smiles_col: str = "SMILES",
+    batch_size=10000,
+    withH=False,
+    save_path=None,
+):
     cid_list = df[smiles_col].tolist()
-    if names_col:
-        names_list = df[names_col].tolist()
-    else:
-        names_list = cid_list
-    list_len = df.shape[0]
+    n_compounds = len(cid_list)
+    print(f"Number of unique {smiles_col} for clustering: {df.shape[0]}")
 
-    df_cid = pd.DataFrame(0.0, index=names_list, columns=names_list)
-    df_pair = pd.DataFrame(0.0, index=names_list, columns=["Pair", "MaxValue"])
-    df_pair["Pair"] = df_pair["Pair"].astype(str)
+    # Initialize the similarity matrix
+    similarity_matrix = np.zeros((n_compounds, n_compounds), dtype="float16")
+    # Calculate total chunks for tqdm progress bar
+    total_chunks = calculate_total_chunks(n_compounds, batch_size)
+    tanimoto_mcs_func = tanimoto_mcs_withH_wrapper if withH else tanimoto_mcs_wrapper
+    # Process the pairs in chunks
+    for chunk in tqdm(
+        chunked_iterable(n_compounds, batch_size),
+        desc="Calculating similarities in chunks",
+        unit="chunk",
+        total=total_chunks,
+    ):
+        process_chunk(chunk, similarity_matrix, cid_list, tanimoto_mcs_func)
 
-    # df_cid = pd.DataFrame(0.0, index=cid_list, columns=cid_list)
-    # df_pair = pd.DataFrame(0.0, index=cid_list, columns=["Pair", "MaxValue"])
-    # for loop with tqdm to show progress bar
-    for i in tqdm(range(list_len), desc="Calculating Tanimoto Similarity"):
-        df_cid.iloc[i, i] = 1.0
-        for j in range(i + 1, list_len):
-            df_cid.iloc[i, j] = tanimoto_mcs(cid_list[i], cid_list[j])
-            df_cid.iloc[j, i] = df_cid.iloc[i, j]
-        cid = names_list[i]
-        tmpInd = df_cid.loc[cid, cid != df_cid.columns].idxmax()
-        tmpValue = df_cid.loc[cid, tmpInd]
-        df_pair.iloc[i, 0] = tmpInd
-        df_pair.iloc[i, 1] = tmpValue
-    return df_cid, df_pair
+    np.fill_diagonal(similarity_matrix, 1.0)
+
+    # Save the similarity matrix to the specified path
+    if save_path:
+        file_path = Path(save_path) / "tanimoto_similarities.npy"
+        save_similarity_matrix(similarity_matrix, save_path)
+
+    return similarity_matrix
 
 
-def form_linkage(df):
-    X = df.values
+def form_linkage(df_or_array_input):
+    X = (
+        df_or_array_input.values
+        if isinstance(df_or_array_input, pd.DataFrame)
+        else df_or_array_input
+    )
     Z = linkage(X, method="ward")
     Pdist = pdist(X)
     c, coph_dists = cophenet(Z, Pdist)
@@ -1024,6 +1258,7 @@ def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None
 
     # Show and save the plot
     if output_path:
+        Path(output_path).mkdir(parents=True, exist_ok=True)
         fig.savefig(
             Path(output_path)
             / "Silhouette_analysis_for_determining_optimal_clusters_K.png",
@@ -1053,6 +1288,7 @@ def plot_cluster_heatmap(data_matrix, output_path=None):
 
     # Save the plot to the specified output path
     if output_path:
+        Path(output_path).mkdir(parents=True, exist_ok=True)
         fig.savefig(
             Path(output_path) / "Heatmap_of_the_clustering.png",
             dpi=600,
@@ -1066,28 +1302,40 @@ def plot_cluster_heatmap(data_matrix, output_path=None):
 def clustering(
     df,
     smiles_col: str = "scaffold",
-    names_col=None,
     max_k=100,
+    withH=False,
     fig_output_path=None,
+    export_mcs_path=None,
 ):
     # pre cleaning
     df_clean = df.copy()[[smiles_col]]
     # dropp duplicates to avoid self comparison and reset index
     df_clean.drop_duplicates(subset=smiles_col, keep="first", inplace=True)
+
+    df_clean.dropna(subset=[smiles_col], inplace=True)
+    # print(f"after nan drop: {df_clean.shape}")
     df_clean.reset_index(inplace=True, drop=True)
+    print(f"Chunk Size: {BATCH_SIZE}")
+    print(f"Number of Workers: {N_WORKERS}")
+    # TODO : only 10 scaffolds for testing
 
-    df_mcs, df_pair = hierarchical_clustering(
-        df_clean, smiles_col=smiles_col, names_col=names_col
+    mcs_np = hierarchical_clustering(
+        df_clean,
+        smiles_col=smiles_col,
+        batch_size=BATCH_SIZE,
+        withH=withH,
+        save_path=export_mcs_path,
     )
-    mcs_x, mcs_z = form_linkage(df_mcs)
+    # if export_mcs_path:
+    #     Path(export_mcs_path).mkdir(parents=True, exist_ok=True)
+    #     df_mcs.to_csv(Path(export_mcs_path) / "mcs_matrix.csv", index=True)
+    # df_pair.to_csv(Path(export_mcs_path) / "scaffold_sim_pair.csv", index=True)
+    mcs_x, mcs_z = form_linkage(mcs_np)
     mcs_k, mcs_sil, optimal_clu = sil_K(mcs_x, mcs_z, max_k=max_k)
-
-    if fig_output_path:
-        Path(fig_output_path).mkdir(parents=True, exist_ok=True)
 
     plot_silhouette_analysis(mcs_k, mcs_sil, output_path=fig_output_path)
 
-    plot_cluster_heatmap(df_mcs, output_path=fig_output_path)
+    plot_cluster_heatmap(mcs_np, output_path=fig_output_path)
 
     df_clean["cluster"] = fcluster(mcs_z, optimal_clu, criterion="maxclust")
 
@@ -1191,3 +1439,193 @@ def clustering(
 #         plt.show()
 #
 #     return clusters
+
+
+# cid_idx = {cid: i for i, cid in enumerate(cid_list)}
+# Generate all unique pairs for similarity calculation to avoid redundancy
+# rows, cols, data = [], [], []
+# total_pairs = int(len(cid_list) * (len(cid_list) - 1) / 2)
+# pairs = combinations(cid_list, 2)
+# index_pairs = list(combinations(range(n_compounds), 2))
+# print(f"Number of unique pairs for clustering: {len(index_pairs)}")
+
+# Split index pairs into chunks
+# chunks = [
+#     index_pairs[i : i + batch_size] for i in range(0, len(index_pairs), batch_size)
+# ]
+
+# Initialize a memory-mapped file to store similarities
+# similarity_matrix = np.memmap(
+#     filename, dtype="float32", mode="w+", shape=(total_pairs,)
+# )
+
+# Process pairs in chunks and write to memmap file
+# start_idx = 0
+#
+# # Function to process a chunk of pairs
+# def process_chunk(chunk):
+#     with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
+#         chunk_results = list(executor.map(tanimoto_mcs_wrapper, chunk))
+#     return chunk_results
+#
+# start_idx = 0
+# # Process the pairs in chunks
+# for chunk in tqdm(
+#     chunked_iterable(pairs, batch_size), total=total_pairs // batch_size
+# ):
+#     chunk_results = process_chunk(chunk)
+#     end_idx = start_idx + len(chunk_results)
+#     s
+#
+#     for cid1, cid2, similarity in process_chunk(chunk):
+#         rows.append(cid_idx[cid1])
+#         cols.append(cid_idx[cid2])
+#         data.append(similarity)
+#
+# # Create sparse matrix and save
+# matrix = coo_matrix((data, (rows, cols)), shape=(len(cid_list), len(cid_list)))
+# save_sparse_matrix(filename, matrix)
+
+# return matrix.toarray()
+
+# df_cid.loc[cid1, cid2] = similarity
+# df_cid.loc[cid2, cid1] = similarity
+
+# for cid in names_list:
+#     cidx = cid_idx.index(cid)
+#     df_cid.iloc[cidx, cidx] = 1.0  # Self-similarity is 1
+#     max_sim_idx = df_cid.iloc[cidx].idxmax()
+#     max_sim_value = df_cid.loc[cid, max_sim_idx]
+#     df_pair.loc[cid, "Pair"] = max_sim_idx
+#     df_pair.loc[cid, "MaxValue"] = max_sim_value
+
+#
+# def __hierarchical_clustering(df, smiles_col: str = "SMILES"):  # , names_col=None
+#     cid_idx = df.index.tolist()
+#     cid_list = df[smiles_col].tolist()
+#     print(f"Number of unique {smiles_col} for clustering: {df.shape[0]}")
+#
+#     # Generate all unique pairs for similarity calculation to avoid redundancy
+#     pairs = list(combinations(cid_list, 2))
+#     print(f"Number of unique pairs for clustering: {len(pairs)}")
+#
+#     # Initialize the DataFrame to hold Tanimoto similarities
+#     df_cid = pd.DataFrame(0.0, index=cid_idx, columns=cid_idx)
+#
+#     print("Pooling the Tanimoto Similarity Calculation...")
+#     # Parallel calculation of Tanimoto similarities
+#     with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
+#         results = list(
+#             tqdm(
+#                 executor.map(tanimoto_mcs_wrapper, pairs),
+#                 total=len(pairs),
+#                 desc="Calculating Tanimoto Similarity",
+#             )
+#         )
+#
+#     for cid1, cid2, similarity in results:
+#         # we want to get index of the cid in the df
+#         idx1 = cid_idx.index(cid1)
+#         idx2 = cid_idx.index(cid2)
+#         df_cid.iloc[idx1, idx2] = similarity
+#         df_cid.iloc[idx2, idx1] = similarity
+#         df_cid.iloc[idx1, idx1] = 1.0  # Self-similarity is 1
+#         df_cid.iloc[idx2, idx2] = 1.0  # Self-similarity is 1
+#
+#     return df_cid  # , df_pair
+
+# df_cid.loc[cid1, cid2] = similarity
+# df_cid.loc[cid2, cid1] = similarity
+
+# for cid in names_list:
+#     cidx = cid_idx.index(cid)
+#     df_cid.iloc[cidx, cidx] = 1.0  # Self-similarity is 1
+#     max_sim_idx = df_cid.iloc[cidx].idxmax()
+#     max_sim_value = df_cid.loc[cid, max_sim_idx]
+#     df_pair.loc[cid, "Pair"] = max_sim_idx
+#     df_pair.loc[cid, "MaxValue"] = max_sim_value
+
+
+# def _hierarchical_clustering(df, smiles_col: str = "SMILES", names_col=None):
+#     cid_list = df[smiles_col].tolist()
+#     if names_col:
+#         names_list = df[names_col].tolist()
+#     else:
+#         names_list = cid_list
+#     list_len = df.shape[0]
+#
+#     df_cid = pd.DataFrame(0.0, index=names_list, columns=names_list)
+#     df_pair = pd.DataFrame(0.0, index=names_list, columns=["Pair", "MaxValue"])
+#     df_pair["Pair"] = df_pair["Pair"].astype(str)
+#
+#     # df_cid = pd.DataFrame(0.0, index=cid_list, columns=cid_list)
+#     # df_pair = pd.DataFrame(0.0, index=cid_list, columns=["Pair", "MaxValue"])
+#     # for loop with tqdm to show progress bar
+#     for i in tqdm(range(list_len), desc="Calculating Tanimoto Similarity"):
+#         df_cid.iloc[i, i] = 1.0
+#         for j in range(i + 1, list_len):
+#             df_cid.iloc[i, j] = tanimoto_mcs(cid_list[i], cid_list[j])
+#             df_cid.iloc[j, i] = df_cid.iloc[i, j]
+#         cid = names_list[i]
+#         tmpInd = df_cid.loc[cid, cid != df_cid.columns].idxmax()
+#         tmpValue = df_cid.loc[cid, tmpInd]
+#         df_pair.iloc[i, 0] = tmpInd
+#         df_pair.iloc[i, 1] = tmpValue
+#     return df_cid, df_pair
+
+
+# def chunks(pairs, batch_size):
+#     """
+#     Splits a list of pairs into chunks of a specified size.
+#
+#     Parameters
+#     ----------
+#     pairs : list of tuple
+#         The list of pairs to split.
+#     batch_size : int
+#         The size of each chunk.
+#
+#     Yields
+#     ------
+#     list of tuple
+#         A chunk of pairs.
+#     """
+#     for i in range(0, len(pairs), batch_size):
+#         yield pairs[i : i + batch_size]
+
+
+# def chunked_iterable(iterable, size):
+#     """
+#     Take an iterable and yield chunks of a given size.
+#
+#     Parameters
+#     ----------
+#     iterable : iterable
+#         The iterable to be chunked.
+#     size : int
+#         The size of each chunk.
+#
+#     Yields
+#     ------
+#     Iterable chunks of the specified size.
+#     """
+#     iterator = iter(iterable)
+#     for first in iterator:  # stops when iterator is depleted
+#         chunk = list(islice(iterator, size - 1))
+#         if not chunk:
+#             # End of the iterator
+#             yield [first]
+#             break
+#         yield [first] + chunk
+
+
+#
+#
+# def save_sparse_matrix(filename, matrix):
+#     np.savez(
+#         filename,
+#         data=matrix.data,
+#         indices=matrix.indices,
+#         indptr=matrix.indptr,
+#         shape=matrix.shape,
+#     )
