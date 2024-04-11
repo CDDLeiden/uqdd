@@ -20,44 +20,45 @@ from uqdd.models.utils_models import (
     build_optimizer,
     build_lr_scheduler,
     save_model,
-    # calc_regr_metrics,
     set_seed,
-    get_model_config,
     build_datasets,
     get_desc_len,
+    compute_pnorm,
+    compute_gnorm
 )
 from uqdd.utils import create_logger
 
 
-def train(model, dataloader, loss_fn, optimizer, device=DEVICE, pbar=None, epoch=0):
+def train(
+        model, dataloader, loss_fn, optimizer, aleatoric, device=DEVICE, pbar=None, epoch=0
+):
     model.train()
     total_loss = 0.0
     targets_all = []
     outputs_all = []
-    # for inputs, targets in tqdm(dataloader, total=len(dataloader), desc="Training Batches"):
+    logvars_all = []
+
     for inputs, targets in dataloader:
         inputs = tuple(x.to(device) for x in inputs)
-        # inputs = (
-        #     tuple(x.to(device) for x in inputs)
-        #     if isinstance(inputs, tuple) or isinstance(inputs, list)
-        #     else inputs.to(device)
-        # )
+
         targets = targets.to(device)
         optimizer.zero_grad()
-        outputs = model(inputs)
-        # outputs = (
-        #     outputs.squeeze()
-        #     if isinstance(outputs, torch.Tensor)
-        #     else (outp.squeeze() for outp in outputs)
-        # )
-        loss = loss_fn(outputs, targets)
+        if aleatoric:
+            outputs, logvars = model(inputs)
+            logvars = torch.exp(logvars)
+            loss = loss_fn(outputs, targets, logvars)
+            logvars_all.append(logvars)
+        else:
+            outputs = model(inputs)
+            loss = loss_fn(outputs, targets)
+
         loss.backward()
         optimizer.step()
+
         total_loss += loss.item() * outputs.size(0)
         targets_all.append(targets)
         outputs_all.append(outputs)
         if pbar:
-            # pbar.set_description(f"Epoch {epoch + 1} : Training")
             pbar.set_postfix(loss=loss.item(), refresh=True)
             pbar.update(1)
 
@@ -65,68 +66,127 @@ def train(model, dataloader, loss_fn, optimizer, device=DEVICE, pbar=None, epoch
 
     targets_all = torch.cat(targets_all, dim=0)
     outputs_all = torch.cat(outputs_all, dim=0)
+
     # Calculate metrics
     train_rmse, train_r2, train_evs = calc_regr_metrics(
         targets_all, outputs_all
-    )  # squeeze
+    )
+    pnorm = compute_pnorm(model)
+    gnorm = compute_gnorm(model)
 
-    # # Here we want to report total_loss to pbar
-    # if pbar:
-    #     pbar.set_postfix(train_loss=total_loss, refresh=True)
-    return total_loss, train_rmse, train_r2, train_evs
+    wandb.log(
+        data={
+            # "epoch": epoch,
+            "train/loss": total_loss,
+            "train/rmse": train_rmse,
+            "train/r2": train_r2,
+            "train/evs": train_evs,
+            "model/pnorm": pnorm,
+            "model/gnorm": gnorm,
+        },
+        step=epoch,
+    )
+    if aleatoric:
+        vars_all = torch.cat(logvars_all, dim=0)
+        # vars_all = torch.exp(torch.cat(logvars_all, dim=0))
+        vars_mean = torch.mean(vars_all, dim=0)
+        vars_var = torch.var(vars_all, dim=0)
+        wandb.log(
+            data={
+                "train/alea_mean": vars_mean.item(),
+                "train/alea_var": vars_var.item(),
+            },
+            step=epoch,
+        )
+    return total_loss
+    # TODO watch out:
+    #  return total_loss, train_rmse, train_r2, train_evs
 
 
 def evaluate(
     model,
     dataloader,
     loss_fn,
+    aleatoric=False,
     device=DEVICE,
     pbar=None,
     metrics_per_task=False,
+    subset="val",  # can be "train", "val" or "test"
     epoch=0,
 ):
     model.eval()
     total_loss = 0.0
     targets_all = []
     outputs_all = []
+    logvars_all = []
 
     with torch.no_grad():
         for inputs, targets in dataloader:
             inputs = tuple(x.to(device) for x in inputs)
-            # inputs = (
-            #     tuple(x.to(device) for x in inputs)
-            #     if isinstance(inputs, tuple) or isinstance(inputs, list)
-            #     else inputs.to(device)
-            # )
             targets = targets.to(device)
-            outputs = model(inputs)
 
-            # outputs = (
-            #     outputs.squeeze()
-            #     if isinstance(outputs, torch.Tensor)
-            #     else (outp.squeeze() for outp in outputs)
-            # )
-            loss = loss_fn(outputs, targets)
+            if aleatoric:
+                outputs, logvars = model(inputs)
+                logvars = torch.exp(logvars)
+                loss = loss_fn(outputs, targets, logvars)
+                logvars_all.append(logvars)
+            else:
+                outputs = model(inputs)
+                loss = loss_fn(outputs, targets)
             total_loss += loss.item() * outputs.size(0)
             targets_all.append(targets)
             outputs_all.append(outputs)
 
             if pbar:
-                # desc = ": Initial Evaluation" if epoch == 0 else ": Evaluating"
-                # pbar.set_description(f"Epoch {epoch + 1} {desc}")
                 pbar.set_postfix(loss=loss.item(), refresh=True)
                 pbar.update(1)
 
         total_loss /= len(dataloader.dataset)
         targets_all = torch.cat(targets_all, dim=0)
         outputs_all = torch.cat(outputs_all, dim=0)
+
         # Calculate metrics
         if metrics_per_task:
             tasks_rmse, tasks_r2, tasks_evs = calc_regr_metrics(
                 targets_all, outputs_all, metrics_per_task
             )
+            for task_idx in range(len(tasks_rmse)):
+                wandb.log(
+                    data={
+                        f"{subset}/rmse/task_{task_idx}": tasks_rmse[task_idx],
+                        f"{subset}/r2/task_{task_idx}": tasks_r2[task_idx],
+                        f"{subset}/evs/task_{task_idx}": tasks_evs[task_idx],
+                    },
+                    step=epoch,
+                )
+
         rmse, r2, evs = calc_regr_metrics(targets_all, outputs_all)
 
+        wandb.log(
+            data={
+                f"{subset}/loss": total_loss,
+                f"{subset}/rmse": rmse,
+                f"{subset}/r2": r2,
+                f"{subset}/evs": evs,
+            },
+            step=epoch,
+        )
+
+        # Aleatoric Uncertainty
+        if aleatoric:
+            # vars_all = torch.cat(logvars_all, dim=0)
+            vars_all = torch.exp(torch.cat(logvars_all, dim=0))
+            vars_mean = torch.mean(vars_all, dim=0)
+            vars_var = torch.var(vars_all, dim=0)
+            wandb.log(
+                data={
+                    f"{subset}/alea_mean": vars_mean.item(),
+                    f"{subset}/alea_var": vars_var.item(),
+                },
+                step=epoch,
+            )
+
+    return total_loss
         # if metrics_per_task:
         #     for task_idx in range(targets_all.size(1)):
         #         task_targets = targets_all[:, task_idx]
@@ -140,65 +200,89 @@ def evaluate(
     # Here we want to report total_loss to pbar
     # if pbar:
     #     pbar.set_postfix(val_loss=total_loss, refresh=True)
-    if metrics_per_task:
-        return total_loss, rmse, r2, evs, tasks_rmse, tasks_r2, tasks_evs
-    return total_loss, rmse, r2, evs
+    # if metrics_per_task:
+    #     return total_loss, rmse, r2, evs, tasks_rmse, tasks_r2, tasks_evs
+    # return total_loss, rmse, r2, evs
 
 
 def predict(
     model,
     dataloader,
-    return_targets=False,
+    aleatoric=False,
     device=DEVICE,
 ):
     model.eval()
     outputs_all = []
     targets_all = []
+    logvars_all = []
+
     with torch.no_grad():
         for inputs, targets in tqdm(
             dataloader, total=len(dataloader), desc="Predicting"
         ):
             inputs = tuple(x.to(device) for x in inputs)
-            # inputs = (
-            #     tuple(x.to(device) for x in inputs)
-            #     if isinstance(inputs, tuple) or isinstance(inputs, list)
-            #     else inputs.to(device)
-            # )
-            outputs = model(inputs)
+            # targets.to(device)
+
+            if aleatoric:
+                outputs, logvars = model(inputs)
+                logvars_all.append(logvars)
+            else:
+                outputs = model(inputs)
+
             outputs = (
                 outputs.squeeze()
                 if isinstance(outputs, torch.Tensor)
                 else (outp.squeeze() for outp in outputs)
             )
             outputs_all.append(outputs)
-            if return_targets:
-                targets_all.append(targets)
+            targets_all.append(targets)
+
     outputs_all = torch.cat(outputs_all, dim=0).cpu()
-    if return_targets:
-        targets_all = torch.cat(targets_all, dim=0).cpu()
-        return outputs_all, targets_all
-    return outputs_all
+    targets_all = torch.cat(targets_all, dim=0).cpu()
+
+    if aleatoric:
+        vars_all = torch.exp(torch.stack(logvars_all)).cpu()
+        return outputs_all, targets_all, vars_all
+        # logvars_all = torch.cat(logvars_all, dim=0).cpu()
+        # results.append(logvars_all)
+
+    return outputs_all, targets_all
+
+    # if return_targets and not aleatoric:
+    #     return outputs_all, targets_all, None
+    # elif return_targets and aleatoric:
+    #     return outputs_all, targets_all, logvars_all
+    #
+    # return outputs_all
 
 
 def initial_evaluation(
-    model, train_loader, val_loader, loss_fn, device=DEVICE, pbar=None, epoch=0
+    model, train_loader, val_loader, loss_fn, aleatoric, device=DEVICE, pbar=None, epoch=0
 ):
-    val_loss, val_rmse, val_r2, val_evs = evaluate(
-        model, val_loader, loss_fn, device, pbar, False, epoch
+    # val_loss, val_rmse, val_r2, val_evs = evaluate(
+    #     model, val_loader, loss_fn, aleatoric, device, pbar, False, epoch
+    # )
+    # train_loss, train_rmse, train_r2, train_evs = evaluate(
+    #     model, train_loader, loss_fn, aleatoric, device, pbar, False, epoch
+    # )
+    val_loss = evaluate(
+        model, val_loader, loss_fn, aleatoric, device, pbar, False, "val", epoch
     )
-    train_loss, train_rmse, train_r2, train_evs = evaluate(
-        model, train_loader, loss_fn, device, pbar, False, epoch
+    train_loss = evaluate(
+        model, train_loader, loss_fn, aleatoric, device, pbar, False, "train", epoch
     )
-    return (
-        train_loss,
-        train_rmse,
-        train_r2,
-        train_evs,
-        val_loss,
-        val_rmse,
-        val_r2,
-        val_evs,
-    )
+    return train_loss, val_loss
+
+    # return (
+    #     train_loss,
+    #     train_rmse,
+    #     train_r2,
+    #     train_evs,
+    #     val_loss,
+    #     val_rmse,
+    #     val_r2,
+    #     val_evs,
+    # )
 
 
 def run_one_epoch(
@@ -208,6 +292,7 @@ def run_one_epoch(
     loss_fn,
     optimizer,
     lr_scheduler,
+    aleatoric=False,
     epoch=0,
     device=DEVICE,
 ):
@@ -242,42 +327,23 @@ def run_one_epoch(
     # with tqdm(total=total_steps, desc=f"Epoch {epoch+1}", unit="batch") as pbar:
     pbar = None
     if epoch == 0:
-        # Perform evaluation before training starts (epoch 0)
-        (
-            train_loss,
-            train_rmse,
-            train_r2,
-            train_evs,
-            val_loss,
-            val_rmse,
-            val_r2,
-            val_evs,
-        ) = initial_evaluation(
-            model, train_loader, val_loader, loss_fn, device, pbar, epoch
+        train_loss, val_loss= initial_evaluation(
+            model, train_loader, val_loader, loss_fn, aleatoric, device, pbar, epoch
         )
 
     else:
-        train_loss, train_rmse, train_r2, train_evs = train(
-            model, train_loader, loss_fn, optimizer, device, pbar, epoch
+        train_loss = train(
+            model, train_loader, loss_fn, optimizer, aleatoric, device, pbar, epoch
         )
-        val_loss, val_rmse, val_r2, val_evs = evaluate(
-            model, val_loader, loss_fn, device, pbar, False, epoch
+        val_loss = evaluate(
+            model, val_loader, loss_fn, aleatoric, device, pbar, False, "val", epoch
         )
 
-        # Update the learning rate
-        lr_scheduler.step(val_loss)
+        if lr_scheduler is not None:
+            # Update the learning rate
+            lr_scheduler.step(val_loss)
 
-    return (
-        epoch,
-        train_loss,
-        train_rmse,
-        train_r2,
-        train_evs,
-        val_loss,
-        val_rmse,
-        val_r2,
-        val_evs,
-    )
+    return epoch, train_loss, val_loss
 
 
 def wandb_epoch_logger(
@@ -357,14 +423,22 @@ def train_model(
         optimizer = build_optimizer(
             model, config.optimizer, config.lr, config.weight_decay
         )
+        aleatoric = config.get("aleatoric", False)
+
+        if aleatoric and config.loss != "gaussnll":
+            logger.warning(f"Aleatoric Uncertainty is to be calculated "
+                           f"but the loss function provided = {config.loss} doesnt allow this. "
+                           f"Changing loss to gaussianNLL")
+            config.loss = "gaussnll"
+
         loss_fn = build_loss(
-            config.loss, reduction=config.loss_reduction, mt=multitask, logger=logger
+            config.loss, reduction=config.get("loss_reduction", "mean"), mt=multitask, logger=logger
         )
         lr_scheduler = build_lr_scheduler(
             optimizer,
-            config.lr_scheduler,
-            config.lr_scheduler_patience,
-            config.lr_scheduler_factor,
+            config.get("lr_scheduler", None),
+            config.get("lr_scheduler_patience", None),
+            config.get("lr_scheduler_factor", None),
         )
 
         # "none", "mean", "sum"
@@ -374,35 +448,30 @@ def train_model(
                 (
                     epoch,
                     train_loss,
-                    train_rmse,
-                    train_r2,
-                    train_evs,
                     val_loss,
-                    val_rmse,
-                    val_r2,
-                    val_evs,
                 ) = run_one_epoch(
                     model,
                     train_loader,
                     val_loader,
-                    loss_fn,
-                    optimizer,
-                    lr_scheduler,
+                    loss_fn=loss_fn,
+                    optimizer=optimizer,
+                    lr_scheduler=lr_scheduler,
+                    aleatoric=aleatoric,
                     epoch=epoch,
                     device=device,
                 )
-                wandb_epoch_logger(
-                    epoch,
-                    train_loss,
-                    train_rmse,
-                    train_r2,
-                    train_evs,
-                    val_loss,
-                    val_rmse,
-                    val_r2,
-                    val_evs,
-                    # epoch, train_loss, val_loss, val_rmse, val_r2, val_evs
-                )
+                # wandb_epoch_logger(
+                #     epoch,
+                #     train_loss,
+                #     train_rmse,
+                #     train_r2,
+                #     train_evs,
+                #     val_loss,
+                #     val_rmse,
+                #     val_r2,
+                #     val_evs,
+                #     # epoch, train_loss, val_loss, val_rmse, val_r2, val_evs
+                # )
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     early_stop_counter = 0
@@ -430,6 +499,7 @@ def run_model(
 ):
     seed = 42
     n_targets = config.get("n_targets", -1)
+    aleatoric = config.get("aleatoric", False)
     mt = n_targets > 1
     # Train the model
     best_model, loss_fn = train_model(
@@ -444,26 +514,13 @@ def run_model(
     )
 
     # Testing metrics on the best model
-    if mt:
-        test_loss, test_rmse, test_r2, test_evs, tasks_rmse, tasks_r2, tasks_evs = (
-            evaluate(
-                best_model, dataloaders["test"], loss_fn, device, metrics_per_task=True
-            )
-        )
-        wandb_test_logger(
-            test_loss, test_rmse, test_r2, test_evs, tasks_rmse, tasks_r2, tasks_evs
-        )
-    else:
-        test_loss, test_rmse, test_r2, test_evs = evaluate(
-            best_model, dataloaders["test"], loss_fn, device
+    test_loss = evaluate(
+        best_model, dataloaders["test"], loss_fn, aleatoric, device, metrics_per_task=mt
         )
 
-        wandb_test_logger(test_loss, test_rmse, test_r2, test_evs)
 
-    logger.info(f"Test loss: {test_loss}")
-    logger.info(f"Test RMSE: {test_rmse}")
-    logger.info(f"Test R2: {test_r2}")
-    logger.info(f"Test EVS: {test_evs}")
+    # FOR TESTING # TODO remove
+    results = predict(best_model, dataloaders["test"], aleatoric=aleatoric, device=device)
 
     return best_model, test_loss
 
@@ -485,7 +542,7 @@ def train_model_e2e(
 
     if config is not None:
         wandb_project_name = config.get(
-            "wandb_project_name"
+            "wandb_project_name", "test-project"
         )  # add it to config only in baseline not the sweep
         run = wandb.init(
             config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name
@@ -504,6 +561,7 @@ def train_model_e2e(
     split_type = config.get("split_type", "random")
     ext = config.get("ext", "pkl")
     task_type = config.get("task_type", "regression")
+    # aleatoric = config.get("aleatoric", False)
     assert split_type in [
         "random",
         "scaffold",

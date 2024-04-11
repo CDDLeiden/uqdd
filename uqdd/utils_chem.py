@@ -899,6 +899,10 @@ def get_papyrus_descriptors(connectivity_ids=None, desc_type="cddd", logger=None
         logger.info(f"Loading Papyrus {desc_type} descriptors...")
 
     mol_descriptors = consume_chunks(mol_descriptors, progress=True, total=60)
+    # # get only the connectivity ids that are from the input connectivity_ids list
+    # mol_descriptors = mol_descriptors[
+    #     mol_descriptors["connectivity"].isin(connectivity_ids)
+    # ]
 
     mol_descriptors[desc_type] = mol_descriptors.apply(_merge_cols, axis=1)
 

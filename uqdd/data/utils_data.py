@@ -273,6 +273,46 @@ def random_split(
     return create_split_dict("random", train_df, val_df, test_df)
 
 
+def merge_scaffolds(df, smiles_col="SMILES"): # , verbose=False, output_path="./"
+    """
+    Merges the scaffold information into the DataFrame.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input DataFrame.
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings. Default is 'smiles'.
+    verbose : bool, optional
+        If True, prints the progress of the scaffold generation. Default is False.
+    output_path : str, optional
+        The path to the output directory for scaffold clustering figures. Default is None.
+    Returns
+    -------
+
+    """
+    # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
+    unique_smiles = df[smiles_col].unique().tolist()
+
+    with ProcessPoolExecutor() as executor:
+        scaffolds = list(
+            tqdm(
+                executor.map(generate_scaffold, unique_smiles),
+                total=len(unique_smiles),
+                desc="Generating scaffolds",
+            )
+        )
+
+    smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
+    df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
+
+    # if verbose:
+    #     # print(f"Number of unique scaffolds: {df['scaffold'].nunique()}")
+    #     export_df(df, Path(output_path) / "merged_scaffolds.csv")
+
+    return df
+
+
 def scaffold_split(
     df,
     smiles_col="smiles",
@@ -313,21 +353,21 @@ def scaffold_split(
     """
     # set random seed
     np.random.seed(seed)
-
-    # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
-    unique_smiles = df[smiles_col].unique().tolist()
-
-    with ProcessPoolExecutor() as executor:
-        scaffolds = list(
-            tqdm(
-                executor.map(generate_scaffold, unique_smiles),
-                total=len(unique_smiles),
-                desc="Generating scaffolds",
-            )
-        )
-
-    smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
-    df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
+    df = merge_scaffolds(df, smiles_col=smiles_col, verbose=False)
+    # # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
+    # unique_smiles = df[smiles_col].unique().tolist()
+    #
+    # with ProcessPoolExecutor() as executor:
+    #     scaffolds = list(
+    #         tqdm(
+    #             executor.map(generate_scaffold, unique_smiles),
+    #             total=len(unique_smiles),
+    #             desc="Generating scaffolds",
+    #         )
+    #     )
+    #
+    # smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
+    # df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
 
     # get unique scaffolds
     scaffolds = list(df["scaffold"].unique())
@@ -377,20 +417,21 @@ def scaffold_cluster_split(
     # set random seed
     np.random.seed(seed)
 
-    # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
-    unique_smiles = df[smiles_col].unique().tolist()
-
-    with ProcessPoolExecutor() as executor:
-        scaffolds = list(
-            tqdm(
-                executor.map(generate_scaffold, unique_smiles),
-                total=len(unique_smiles),
-                desc="Generating scaffolds",
-            )
-        )
-
-    smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
-    df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
+    df = merge_scaffolds(df, smiles_col=smiles_col, verbose=False)
+    # # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
+    # unique_smiles = df[smiles_col].unique().tolist()
+    #
+    # with ProcessPoolExecutor() as executor:
+    #     scaffolds = list(
+    #         tqdm(
+    #             executor.map(generate_scaffold, unique_smiles),
+    #             total=len(unique_smiles),
+    #             desc="Generating scaffolds",
+    #         )
+    #     )
+    #
+    # smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
+    # df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
 
     # clustering scaffolds
     df = clustering(
@@ -548,23 +589,23 @@ def split_data(
     func_key = {
         "random": (random_split, {}),
         "scaffold": (scaffold_split, {"smiles_col": smiles_col}),
-        "scaffold_cluster": (
-            scaffold_cluster_split,
-            {
-                "smiles_col": smiles_col,
-                "max_k": max_k_clusters,
-                "withH": False,
-                "fig_output_path": fig_output_path,
-                "export_mcs_path": export_mcs_path,
-            },
-        ),
+        # "scaffold_cluster": (
+        #     scaffold_cluster_split,
+        #     {
+        #         "smiles_col": smiles_col,
+        #         "max_k": max_k_clusters,
+        #         "withH": False,
+        #         "fig_output_path": fig_output_path,
+        #         "export_mcs_path": export_mcs_path,
+        #     },
+        # ),
         "time": (time_split, {"time_col": time_col}),
     }
 
     # POSTPONED for now - only one split at a time can be done here
     all_data = {}
     split_type = (
-        ["random", "scaffold", "scaffold_cluster", "time"]
+        ["random", "scaffold", "time"] # "scaffold_cluster",
         if split_type == "all"
         else split_type
     )
@@ -604,7 +645,7 @@ def split_data(
                 split_type, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
             )
     else:
-        raise ValueError("split_type must be one of 'random', 'scaffold', or 'time'.")
+        raise ValueError(f"split_type must be one of 'random', 'scaffold', or 'time', instead we got {split_type}")
 
     return all_data
 

@@ -1,3 +1,4 @@
+import math
 import os
 import random
 import logging
@@ -8,6 +9,7 @@ import pandas as pd
 import torch
 import torch.optim as optim
 import wandb
+from torch import nn
 from torch.utils.data import DataLoader
 
 from uqdd import CONFIG_DIR, MODELS_DIR, TODAY, DEVICE
@@ -34,6 +36,17 @@ def set_seed(seed=42):
 
     # Disabling the benchmark mode so that deterministic algorithms are used
     torch.backends.cudnn.benchmark = False
+
+
+# Adapted from ChemProp - Uncertainty
+def compute_pnorm(model: nn.Module) -> float:
+    """Computes the norm of the parameters of a model."""
+    return math.sqrt(sum([p.norm().item() ** 2 for p in model.parameters()]))
+
+
+def compute_gnorm(model: nn.Module) -> float:
+    """Computes the norm of the gradients of a model."""
+    return math.sqrt(sum([p.grad.norm().item() ** 2 for p in model.parameters() if p.grad is not None]))
 
 
 def get_desc_len_from_dataset(dataset):  # , desc_prot=True):
@@ -241,9 +254,9 @@ def build_optimizer(model, optimizer, lr, weight_decay):
     elif optimizer.lower() == "adagrad":
         optimizer = optim.Adagrad(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer.lower() == "sgd":
-        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9)
     elif optimizer.lower() == "rmsprop":
-        optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
+        optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9)
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
 
@@ -280,7 +293,9 @@ def build_optimizer(model, optimizer, lr, weight_decay):
 
 
 def build_lr_scheduler(optimizer, lr_scheduler, patience=20, factor=0.2, **kwargs):
-    if lr_scheduler.lower() == "plateau":
+    if lr_scheduler is None:
+        return None
+    elif lr_scheduler.lower() == "plateau":
         lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, factor=factor, patience=patience, mode="min", **kwargs
         )
