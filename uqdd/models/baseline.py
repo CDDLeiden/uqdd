@@ -21,11 +21,13 @@ class BaselineDNN(nn.Module):
         **kwargs,
     ):
         super(BaselineDNN, self).__init__()
+
         chem_input_dim = config.get("chem_input_dim", None)
         prot_input_dim = config.get("prot_input_dim", None)
         task_type = config.get("task_type", "regression")
         n_targets = config.get("n_targets", -1)
         self.MT = config.get("MT", n_targets > 1)
+        self.aleatoric = config.get("aleatoric", False)
 
         assert task_type in [
             "regression",
@@ -33,11 +35,12 @@ class BaselineDNN(nn.Module):
         ], "task_type must be either 'regression' or 'classification'"
 
         self.task_type = task_type
-
+        # memory placeholders
         self.prot_feature_extractor = None
         self.chem_feature_extractor = None
         self.regressor_or_classifier = None
-
+        self.logvar_layer = None
+        self.output_layer = None
         self.logger = (
             create_logger(name="baseline", file_level="debug", stream_level="info")
             if not logger
@@ -73,11 +76,20 @@ class BaselineDNN(nn.Module):
             # chem_input = inputs
             # combined_features = self.chem_feature_extractor(chem_input)
             combined_features = chem_features
-        output = self.regressor_or_classifier(combined_features)
+
+        _output = self.regressor_or_classifier(combined_features)
+        if self.aleatoric:
+            output = self.output_layer(_output)
+            logvar = self.logvar_layer(_output)
+            return output, logvar
+        else:
+            output = self.output_layer(_output)
+        # TODO : check this with classification if necessary:
+        self.output_layer(_output)
         return output
 
     @staticmethod
-    def create_mlp(input_dim, layer_dims, dropout, output_dim=None):
+    def create_mlp(input_dim, layer_dims, dropout): # , output_dim=None
         modules = []
         for i in range(len(layer_dims)):
             if i == 0:
@@ -88,9 +100,9 @@ class BaselineDNN(nn.Module):
             modules.append(nn.ReLU())
             if dropout > 0:
                 modules.append(nn.Dropout(dropout))
-        if output_dim:
-            modules.append(nn.Linear(layer_dims[-1], output_dim))
-        return nn.Sequential(*modules)
+        # if output_dim:
+        #     modules.append(nn.Linear(layer_dims[-1], output_dim))
+        return nn.Sequential(*modules)  # , layer_dims[-1]
 
     def init_layers(self, config, chem_input_dim, prot_input_dim, output_dim):
         # Chemical feature extractor
@@ -124,8 +136,17 @@ class BaselineDNN(nn.Module):
         self.logger.debug(f"Combined input dimension: {combined_input_dim}")
         regressor_layers = config["regressor_layers"]
         self.regressor_or_classifier = self.create_mlp(
-            combined_input_dim, regressor_layers, config["dropout"], output_dim
+            combined_input_dim, regressor_layers, config["dropout"]
         )
+        if self.aleatoric:
+            self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
+            self.logvar_layer = nn.Sequential(
+                nn.Linear(regressor_layers[-1], output_dim),
+                nn.Softplus()
+            )
+
+        else:
+            self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
         self.logger.debug(f"Output dimension: {output_dim}")
 
 
@@ -499,17 +520,19 @@ def main():
 
 if __name__ == "__main__":
     # main()
+
     data_name = "papyrus"
-    n_targets = 20
+    n_targets = -1
     task_type = "regression"
     activity = "xc50"
-    split = "time"
+    split = "random"
     desc_prot = "ankh-base"
     desc_chem = "ecfp2048"
     median_scaling = False
     ext = "pkl"
-    wandb_project_name = "MT-baseline-test-272"
+    wandb_project_name = "baseline-test-272"
     sweep_count = 0  # 250
+    aleatoric = True
     # epochs=1
 
     run_baseline_wrapper(
@@ -520,26 +543,27 @@ if __name__ == "__main__":
         descriptor_chemical=desc_chem,
         median_scaling=median_scaling,
         split_type=split,
+        aleatoric=aleatoric,
         ext=ext,
         task_type=task_type,
         wandb_project_name=wandb_project_name,
         logger=None,
     )
-
-    sweep_count = 10
-    run_baseline_hyperparam(
-        sweep_count=sweep_count,
-        data_name=data_name,
-        activity_type=activity,
-        n_targets=n_targets,
-        descriptor_protein=desc_prot,
-        descriptor_chemical=desc_chem,
-        split_type=split,
-        ext=ext,
-        task_type=task_type,
-        wandb_project_name=wandb_project_name,
-    )
-    print("Done")
+    #
+    # sweep_count = 10
+    # run_baseline_hyperparam(
+    #     sweep_count=sweep_count,
+    #     data_name=data_name,
+    #     activity_type=activity,
+    #     n_targets=n_targets,
+    #     descriptor_protein=desc_prot,
+    #     descriptor_chemical=desc_chem,
+    #     split_type=split,
+    #     ext=ext,
+    #     task_type=task_type,
+    #     wandb_project_name=wandb_project_name,
+    # )
+    # print("Done")
 
 
 # def _run_baseline(

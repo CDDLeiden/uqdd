@@ -9,7 +9,6 @@
   "parameters": {
     "chem_layers": {
       "values": [
-        [2048,1024,512,256],
         [2048,1024,512],
         [1024,512,256],
         [1024,256],
@@ -20,7 +19,6 @@
     },
     "prot_layers": {
       "values": [
-        [768,512,256,128],
         [768,512,256],
         [512,256,128],
         [512,128],
@@ -30,10 +28,8 @@
     },
     "regressor_layers": {
       "values": [
-        [512,256,128,64],
-        [512,256,128],
-        [256,128,64],
         [256,128],
+        [128,64],
         [256],
         [128],
         [64]
@@ -49,31 +45,25 @@
       "value": 5000
     },
     "early_stop": {
-      "values": [200,500]
+      "values": [200,300]
     },
     "loss": {
-      "values": ["huber", "mse", "mae"]
+      "values": ["huber", "mse"]
     },
     "loss_reduction": {
       "value": "mean"
     },
     "optimizer": {
-      "values": ["adagrad", "adamw", "sgd"]
+      "values": ["adagrad","adamw","adam","sgd","rmsprop"]
     },
     "lr": {
-      "values": [0.1,1e-2,1e-3,5e-4,1e-4]
+      "values": [1e-2,1e-3,5e-4,1e-4]
     },
     "weight_decay": {
       "values": [0,1e-2,1e-4]
     },
     "lr_scheduler": {
-      "value": "plateau"
-    },
-    "lr_scheduler_patience": {
-      "values": [200,5000]
-    },
-    "lr_scheduler_factor": {
-      "values": [0.1,0.2]
+      "value": null
     }
   }
 }

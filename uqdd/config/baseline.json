@@ -6,12 +6,13 @@
     "batch_size": 256,
     "epochs": 5000,
     "early_stop": 200,
-    "loss": "huber",
+    "aleatoric": true,
+    "loss": "gaussnll",
     "loss_reduction": "mean",
     "optimizer": "adamw",
     "lr": 5e-4,
     "weight_decay": 1e-4,
-    "lr_scheduler": "plateau",
-    "lr_scheduler_patience": 5000,
+    "lr_scheduler": null,
+    "lr_scheduler_patience": 50,
     "lr_scheduler_factor": 0.2
 }
