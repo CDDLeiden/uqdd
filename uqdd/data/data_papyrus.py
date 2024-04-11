@@ -30,7 +30,7 @@ from uqdd.data.utils_data import (
     check_if_processed_file,
     export_tasks,
     apply_median_scaling,
-    target_filtering,
+    target_filtering, export_df, merge_scaffolds,
 )
 
 
@@ -65,23 +65,24 @@ class Papyrus:
         self.desc_prots = [
             "ankh-base",
             "ankh-large",
-            "esm1_t12",
+            # "esm1_t12",
             "esm1_t34",
-            "esm1_t6",
-            "esm_msa1",
-            "esm_msa1b",
-            "esm1v",
+            # "esm1_t6",
+            # "esm_msa1",
+            # "esm_msa1b",
+            # "esm1v",
             "protbert",
-            "protbert_bfd",
+            # "protbert_bfd",
             "unirep",
             # "esm1b",
         ]
         self.desc_chems = [
-            "ecfp1024",
+            # "ecfp1024",
             "ecfp2048",
-            "mold2",
+            # "mold2",
+            "mordred",
             "cddd",
-            "fingerprint",
+            # "fingerprint",
             # "moldesc",
         ]
         self.MT = None  # placeholder for multitask learning
@@ -102,6 +103,7 @@ class Papyrus:
         only_normal: bool = True,
         file_ext: str = "pkl",
         batch_size: int = 2,
+        verbose: bool = False,
     ):
         """
         Main function to process the Papyrus data and export the dataset with the desired descriptors and splits
@@ -155,6 +157,26 @@ class Papyrus:
         # TODO change the output path to include t_tag
         export_mcs_path = Path(self.output_path) / t_tag / "mcs"
         figure_path = Path(self.output_path) / t_tag / "mcs_figures"
+
+        if verbose:
+            tar_tag = t_tag
+            self.logger.info(f"Dataset loaded with {len(df)} datapoints")
+            self.logger.info(f"Label column: {label_col}")
+            if "target_id" in df.columns:
+
+                unique_targets = df["target_id"].nunique()
+                tar_tag += f"_{unique_targets}"
+                self.logger.info(f"Unique Targets: {unique_targets}")
+            if "SMILES" in df.columns:
+                unique_smiles = df["SMILES"].nunique()
+                self.logger.info(f"Unique SMILES: {unique_smiles}")
+
+            export_df(df, Path(self.output_path) / t_tag / f"papyrus_filtered_{self.activity_key}_{tar_tag}.csv")
+
+            self.logger.info("Calculating scaffolds")
+            df = merge_scaffolds(df, "SMILES")
+            export_df(df, Path(self.output_path) / t_tag / f"papyrus_filtered_{self.activity_key}_{tar_tag}_with_scaffolds.csv")
+            self.logger.info(f"Unique scaffolds: {df['scaffold'].nunique()}")
 
         split_idx = self.split(
             df,
@@ -259,8 +281,8 @@ class Papyrus:
     def _get_split_types(self, split_type: str = None):
         if split_type == "all":
             if self.MT:
-                return ["random", "scaffold", "scaffold_cluster"]
-            return ["random", "scaffold", "scaffold_cluster", "time"]
+                return ["random", "scaffold"] # , "scaffold_cluster"
+            return ["random", "scaffold", "time"] # , "scaffold_cluster"
         return [split_type]
 
     @staticmethod
@@ -307,18 +329,23 @@ class Papyrus:
         if n_targets > 0:
             df, top_targets = self._get_top_targets(df, n_targets)
 
+            # Set the DataFrame's index to be both 'SMILES' and 'connectivity'
+            # df.set_index(["SMILES", "connectivity"], inplace=True)
+
             # if multitask:
             pivoted = pd.pivot_table(
                 df,
-                index="SMILES",
+                index=["SMILES", "connectivity"],
                 columns="accession",
                 values="pchembl_value_Mean",
                 aggfunc="first",
             )
+
             # reset the index to make the "smiles" column a regular column
-            pivoted = pivoted.reset_index()
+            pivoted.reset_index(level=["SMILES", "connectivity"], inplace=True)
             # replace any missing values with NaN
             df = pivoted.fillna(value=np.nan)
+
             label_col = list(top_targets.index)
             export_tasks(
                 data_name="papyrus",
@@ -378,7 +405,7 @@ class Papyrus:
     def get_cols_to_include(
         desc_prot: str, desc_chem: str, n_targets: int, label_col: list
     ):
-        cols_to_include = ["SMILES", desc_chem]  # * used to unpack the list ['ecfp']
+        cols_to_include = ["SMILES", "connectivity", desc_chem]  # * used to unpack the list ['ecfp']
         cols_to_include = (
             cols_to_include + ["target_id", desc_prot, "Year"]
             if n_targets <= 0 and desc_prot
@@ -406,8 +433,8 @@ class Papyrus:
         batch_size: int = 4,
     ):
         try:
-            df = self._merge_desc(df, desc_prot, get_embeddings, batch_size=batch_size)
             df = self._merge_desc(df, desc_chem, get_chem_desc)
+            df = self._merge_desc(df, desc_prot, get_embeddings, batch_size=batch_size)
         except Exception as e:
             self.logger.error(
                 f"Error within merge_descriptors func: {e} \n {desc_prot} and/or {desc_chem} not calculated"
@@ -662,13 +689,16 @@ class PapyrusDataset(Dataset):
             data[self.label_col].values, dtype=torch.float32, device=device
         )
         # if desc_chem is not None:
+        np_desc_chem = np.stack(data[desc_chem].apply(pd.to_numeric, errors='coerce').values).astype(np.float32)
+        np_desc_prot = np.stack(data[desc_prot].apply(pd.to_numeric, errors='coerce').values).astype(np.float32)
+
         self.chem_desc = torch.tensor(
-            np.stack(data[desc_chem].values), dtype=torch.float32, device=device
+            np_desc_chem, dtype=torch.float32, device=device
         )
 
         if desc_prot is not None:
             self.prot_desc = torch.tensor(
-                np.stack(data[desc_prot].values), dtype=torch.float32, device=device
+                np_desc_prot, dtype=torch.float32, device=device
             )
         else:  # create an empty tensor for the protein descriptors
             self.prot_desc = torch.zeros(
@@ -858,43 +888,44 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-    # Example of how to use the Papyrus class
-    activity_type = "xc50"
-    std_smiles = True
-    verbose_files = False
-
-    # call args
-    n_targets = 2
-    desc_prot = "ankh-base"  # For testing - it should become none
-    desc_chem = "ecfp2048"
-    split_type = "scaffold_cluster"
-    all_descs = False
-    recalculate = True
-    split_proportions = [0.7, 0.15, 0.15]
-    file_ext = "pkl"
-
-    papyrus = Papyrus(
-        activity_type=activity_type,
-        std_smiles=std_smiles,
-        verbose_files=verbose_files,
-    )
-
-    papyrus(
-        n_targets=n_targets,
-        descriptor_protein=desc_prot,
-        descriptor_chemical=desc_chem,
-        all_descriptors=all_descs,
-        recalculate=recalculate,
-        split_type=split_type,
-        split_proportions=split_proportions,
-        max_k_clusters=100,
-        min_datapoints=50,
-        min_actives=10,
-        active_threshold=6.5,
-        only_normal=False,
-        file_ext=file_ext,
-    )
+    main()
+    # # Example of how to use the Papyrus class
+    # activity_type = "kx"
+    # std_smiles = True
+    # verbose_files = False
+    #
+    # # call args
+    # n_targets = 20
+    # desc_prot = None  # "ankh-base"  # For testing - it should become none
+    # desc_chem = None  # "mordred"
+    # split_type = "random"
+    # all_descs = True
+    # recalculate = True
+    # split_proportions = [0.7, 0.15, 0.15]
+    # file_ext = "pkl"
+    #
+    # papyrus = Papyrus(
+    #     activity_type=activity_type,
+    #     std_smiles=std_smiles,
+    #     verbose_files=verbose_files,
+    # )
+    #
+    # papyrus(
+    #     n_targets=n_targets,
+    #     descriptor_protein=desc_prot,
+    #     descriptor_chemical=desc_chem,
+    #     all_descriptors=all_descs,
+    #     recalculate=recalculate,
+    #     split_type=split_type,
+    #     split_proportions=split_proportions,
+    #     max_k_clusters=100,
+    #     min_datapoints=50,
+    #     min_actives=10,
+    #     active_threshold=6.5,
+    #     only_normal=False,
+    #     file_ext=file_ext,
+    #     verbose=True
+    # )
     # #
     # # reg_dataset = get_datasets(
     # #     n_targets=n_targets,

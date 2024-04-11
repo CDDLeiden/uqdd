@@ -231,11 +231,14 @@ def build_loss(
         loss_fn = nn.CrossEntropyLoss(reduction=reduction, **kwargs)
     elif loss.lower() == "nll":
         loss_fn = nn.NLLLoss(reduction=reduction, **kwargs)
+    elif loss.lower() == "gaussnll":
+        loss_fn = nn.GaussianNLLLoss(reduction=reduction, **kwargs)
     elif loss.lower() == "evidential_regression":
         # TODO how to deal with reduction here on this one?
         loss_fn = EvidenceRegressionLoss(lamb=lamb)
     elif loss.lower() == "evidential_classification":
         loss_fn = EvidentialClassLoss(lamb=lamb)
+
     else:
         raise ValueError("Unknown loss: {}".format(loss))
     return loss_fn
