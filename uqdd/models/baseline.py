@@ -158,108 +158,9 @@ def run_baseline(config=None):
     return best_model
 
 
-# def __run_baseline(
-#     config=None,
-# ):
-#     if config is not None:
-#         wandb_project_name = config.get(
-#             "wandb_project_name"
-#         )  # add it to config only in baseline not the sweep
-#         run = wandb.init(
-#             config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name
-#         )
-#     else:
-#         run = wandb.init(config=config, dir=WANDB_DIR, mode=WANDB_MODE)
-#     config = wandb.config
-#
-#     data_name = config.get("data_name")
-#     activity_type = config.get("activity_type")
-#     n_targets = config.get("n_targets")
-#     descriptor_protein = config.get("descriptor_protein")
-#     descriptor_chemical = config.get("descriptor_chemical")
-#     median_scaling = config.get("median_scaling")
-#     split_type = config.get("split_type")
-#     ext = config.get("ext")
-#     task_type = config.get("task_type")
-#
-#     (
-#         dataloaders,
-#         config,
-#         logger,
-#         desc_prot_len,
-#         desc_chem_len,
-#         start_time,
-#         data_specific_path,
-#     ) = premodel_init(
-#         config,
-#         "baseline",
-#         data_name,
-#         activity_type,
-#         n_targets,
-#         descriptor_protein,
-#         descriptor_chemical,
-#         split_type,
-#         median_scaling,
-#         task_type,
-#         ext,
-#         LOGGER,
-#     )
-#
-#     m_tag = "median_scaling" if median_scaling else "no_median_scaling"
-#     mt_tag = "MT" if n_targets > 1 else "ST"
-#     wandb_tags = [
-#         "baseline",
-#         data_name,
-#         activity_type,
-#         descriptor_protein,
-#         descriptor_chemical,
-#         split_type,
-#         task_type,
-#         m_tag,
-#         mt_tag,
-#     ]
-#     run.tags += tuple(wandb_tags)
-#
-#     # Initiate the model
-#     model = BaselineDNN(
-#         config=config,
-#         chem_input_dim=desc_chem_len,
-#         prot_input_dim=desc_prot_len,
-#         task_type=task_type,
-#         n_targets=n_targets,
-#         logger=logger,
-#     ).to(DEVICE)
-#
-#     best_model, _ = run_model(
-#         config,
-#         model,
-#         dataloaders,
-#         n_targets=n_targets,
-#         device=DEVICE,
-#         logger=logger,
-#     )
-#
-#     model_name = f"{TODAY}-baseline_{split_type}_{descriptor_protein}_{descriptor_chemical}-{run.name}"
-#     save_model(
-#         config,
-#         best_model,
-#         model_name,
-#         data_specific_path,
-#         desc_prot_len,
-#         desc_chem_len,
-#         onnx=True,
-#     )
-#
-#     logger.info(f"Baseline - end time: {datetime.now()}")
-#     logger.info(f"Baseline - duration: {datetime.now() - start_time}")
-
-# return best_model, test_loss
-
-
 def run_baseline_wrapper(
     **kwargs,
 ):
-
     global LOGGER
     LOGGER = create_logger("baseline", file_level="debug", stream_level="info")
 
@@ -519,36 +420,36 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-
-    data_name = "papyrus"
-    n_targets = -1
-    task_type = "regression"
-    activity = "xc50"
-    split = "random"
-    desc_prot = "ankh-base"
-    desc_chem = "ecfp2048"
-    median_scaling = False
-    ext = "pkl"
-    wandb_project_name = "baseline-test-272"
-    sweep_count = 0  # 250
-    aleatoric = True
-    # epochs=1
-
-    run_baseline_wrapper(
-        data_name=data_name,
-        activity_type=activity,
-        n_targets=n_targets,
-        descriptor_protein=desc_prot,
-        descriptor_chemical=desc_chem,
-        median_scaling=median_scaling,
-        split_type=split,
-        aleatoric=aleatoric,
-        ext=ext,
-        task_type=task_type,
-        wandb_project_name=wandb_project_name,
-        logger=None,
-    )
+    main()
+    #
+    # data_name = "papyrus"
+    # n_targets = -1
+    # task_type = "regression"
+    # activity = "xc50"
+    # split = "random"
+    # desc_prot = "ankh-base"
+    # desc_chem = "ecfp2048"
+    # median_scaling = False
+    # ext = "pkl"
+    # wandb_project_name = "baseline-test-272"
+    # sweep_count = 0  # 250
+    # aleatoric = True
+    # # epochs=1
+    #
+    # run_baseline_wrapper(
+    #     data_name=data_name,
+    #     activity_type=activity,
+    #     n_targets=n_targets,
+    #     descriptor_protein=desc_prot,
+    #     descriptor_chemical=desc_chem,
+    #     median_scaling=median_scaling,
+    #     split_type=split,
+    #     aleatoric=aleatoric,
+    #     ext=ext,
+    #     task_type=task_type,
+    #     wandb_project_name=wandb_project_name,
+    #     logger=None,
+    # )
     #
     # sweep_count = 10
     # run_baseline_hyperparam(

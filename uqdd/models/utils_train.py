@@ -174,8 +174,8 @@ def evaluate(
 
         # Aleatoric Uncertainty
         if aleatoric:
-            # vars_all = torch.cat(logvars_all, dim=0)
-            vars_all = torch.exp(torch.cat(logvars_all, dim=0))
+            vars_all = torch.cat(logvars_all, dim=0)
+            # vars_all = torch.exp(torch.cat(logvars_all, dim=0))
             vars_mean = torch.mean(vars_all, dim=0)
             vars_var = torch.var(vars_all, dim=0)
             wandb.log(
@@ -187,22 +187,6 @@ def evaluate(
             )
 
     return total_loss
-        # if metrics_per_task:
-        #     for task_idx in range(targets_all.size(1)):
-        #         task_targets = targets_all[:, task_idx]
-        #         task_outputs = outputs_all[:, task_idx]
-        #         task_rmse, task_r2, task_evs = calc_regr_metrics(
-        #             task_targets, task_outputs
-        #         )
-        #         rmse[f"task_{task_idx}"] = task_rmse
-        #         r2[f"task_{task_idx}"] = task_r2
-        #         evs[f"task_{task_idx}"] = task_evs
-    # Here we want to report total_loss to pbar
-    # if pbar:
-    #     pbar.set_postfix(val_loss=total_loss, refresh=True)
-    # if metrics_per_task:
-    #     return total_loss, rmse, r2, evs, tasks_rmse, tasks_r2, tasks_evs
-    # return total_loss, rmse, r2, evs
 
 
 def predict(
@@ -225,15 +209,16 @@ def predict(
 
             if aleatoric:
                 outputs, logvars = model(inputs)
+                logvars = torch.exp(logvars)
                 logvars_all.append(logvars)
             else:
                 outputs = model(inputs)
 
-            outputs = (
-                outputs.squeeze()
-                if isinstance(outputs, torch.Tensor)
-                else (outp.squeeze() for outp in outputs)
-            )
+            # outputs = (
+            #     outputs.squeeze()
+            #     if isinstance(outputs, torch.Tensor)
+            #     else (outp.squeeze() for outp in outputs)
+            # )
             outputs_all.append(outputs)
             targets_all.append(targets)
 
@@ -241,12 +226,13 @@ def predict(
     targets_all = torch.cat(targets_all, dim=0).cpu()
 
     if aleatoric:
-        vars_all = torch.exp(torch.stack(logvars_all)).cpu()
+        # vars_all = torch.exp(torch.stack(logvars_all)).cpu()
+        vars_all = torch.cat(logvars_all, dim=0).cpu()
         return outputs_all, targets_all, vars_all
         # logvars_all = torch.cat(logvars_all, dim=0).cpu()
         # results.append(logvars_all)
 
-    return outputs_all, targets_all
+    return outputs_all, targets_all, None
 
     # if return_targets and not aleatoric:
     #     return outputs_all, targets_all, None
@@ -327,7 +313,7 @@ def run_one_epoch(
     # with tqdm(total=total_steps, desc=f"Epoch {epoch+1}", unit="batch") as pbar:
     pbar = None
     if epoch == 0:
-        train_loss, val_loss= initial_evaluation(
+        train_loss, val_loss = initial_evaluation(
             model, train_loader, val_loader, loss_fn, aleatoric, device, pbar, epoch
         )
 
@@ -515,12 +501,12 @@ def run_model(
 
     # Testing metrics on the best model
     test_loss = evaluate(
-        best_model, dataloaders["test"], loss_fn, aleatoric, device, metrics_per_task=mt
+        best_model, dataloaders["test"], loss_fn, aleatoric, device, metrics_per_task=mt, subset="test"
         )
 
 
-    # FOR TESTING # TODO remove
-    results = predict(best_model, dataloaders["test"], aleatoric=aleatoric, device=device)
+    # TODO FOR TESTING
+    # outputs_all, targets_all, vars_all = predict(best_model, dataloaders["test"], aleatoric=aleatoric, device=device)
 
     return best_model, test_loss
 
