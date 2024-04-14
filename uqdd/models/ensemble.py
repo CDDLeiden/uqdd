@@ -3,12 +3,15 @@ import argparse
 import wandb
 import torch
 import torch.nn as nn
+
+from uqdd import DEVICE
 from uqdd.models.baseline import BaselineDNN
 from uqdd.utils import create_logger, parse_list
 
 from uqdd.models.utils_train import (
     train_model_e2e,
-    predict_uc_metrics,
+    evaluate_predictions,
+    predict, recalibrate_model,
 )
 
 from uqdd.models.utils_models import (
@@ -19,21 +22,38 @@ from uqdd.models.utils_models import (
 
 class EnsembleDNN(nn.Module):
     def __init__(
-        self, config=None, model_class=BaselineDNN, ensemble_size=100, **kwargs
+        self,
+        config=None,
+        model_class=BaselineDNN,
+        **kwargs
     ):
         super(EnsembleDNN, self).__init__()
-        self.ensemble_size = ensemble_size
-        self.logger = create_logger(name="EnsembleDNN")
         if config is None:
             config = get_model_config(model_name="ensemble", **kwargs)
-        # set_seed(seed)
+        # self.ensemble_size = ensemble_size
+        self.config = config
+        self.logger = create_logger(name="EnsembleDNN")
+        self.ensemble_size = config.get("ensemble_size", 100)
+        self.aleatoric = config.get("aleatoric", False)
+
         self.models = nn.ModuleList(
-            [model_class(config, **kwargs) for _ in range(ensemble_size)]
+            [model_class(config, **kwargs) for _ in range(self.ensemble_size)]
         )
 
     def forward(self, inputs):
-        outputs = torch.stack([model(inputs) for model in self.models], dim=2)
-        return outputs
+        if self.aleatoric:
+            outputs = []
+            logvars = []
+            for model in self.models:
+                output, logvar = model(inputs)
+                outputs.append(output)
+                logvars.append(logvar)
+            outputs = torch.stack(outputs, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+            logvars = torch.stack(logvars, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+            return outputs, logvars
+        else:
+            outputs = torch.stack([model(inputs) for model in self.models], dim=2)
+            return outputs
 
 
 def run_ensemble(config=None):
@@ -43,17 +63,33 @@ def run_ensemble(config=None):
         model_type="ensemble",
         model_kwargs={
             "model_class": BaselineDNN,
-            "ensemble_size": config.get("ensemble_size", 100),
+            # "ensemble_size": config.get("ensemble_size", 100),
         },
         logger=LOGGER,
     )
 
-    ### Then comes the predict metrics part
-    metrics, plots = predict_uc_metrics(
-        config, best_model, dataloaders, "ensemble", logger
+    aleatoric = config.get("aleatoric", False)
+    preds, labels, alea_vars = predict(
+        best_model, dataloaders["test"], aleatoric=aleatoric, device=DEVICE
     )
 
-    return best_model, metrics, plots
+    # Then comes the predict metrics part
+    metrics, plots = evaluate_predictions(
+        config,
+        preds,
+        labels,
+        alea_vars,
+        "ensemble",
+        logger
+    )
+
+    # RECALIBRATION
+    preds_val, labels_val, alea_vars_val = predict(
+        best_model, dataloaders["val"], aleatoric=aleatoric, device=DEVICE
+    )
+    recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config)
+
+    return best_model, recal_model, metrics, plots
 
 
 def run_ensemble_wrapper(**kwargs):
@@ -61,8 +97,8 @@ def run_ensemble_wrapper(**kwargs):
     LOGGER = create_logger(name="ensemble", file_level="debug", stream_level="info")
     config = get_model_config(model_name="ensemble", **kwargs)
 
-    best_model, metrics, plots = run_ensemble(config)
-    return best_model, metrics, plots
+    best_model, recal_model, metrics, plots = run_ensemble(config)
+    return best_model, recal_model, metrics, plots
 
 
 def run_ensemble_hyperparm(**kwargs):
@@ -244,7 +280,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-    # run_ensemble_wrapper(
+    # best_model, recal_model, metrics, plots = run_ensemble_wrapper(
     #     data_name="papyrus",
     #     activity_type="xc50",
     #     n_targets=-1,
@@ -257,7 +293,7 @@ if __name__ == "__main__":
     #     wandb_project_name="ensemble-test",
     #     ensemble_size=5,
     # )
-    #
+    # #
     # print("Done!")
     # TEST
     # run_ensemble(

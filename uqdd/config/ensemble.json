@@ -1,17 +1,19 @@
 {
+  "ensemble_size": 100,
   "chem_layers": [1024],
   "prot_layers": [256],
   "regressor_layers": [64],
   "dropout": 0.1,
   "batch_size": 128,
   "epochs": 3000,
-  "early_stop": 50,
-  "loss": "huber",
+  "early_stop": 150,
+  "aleatoric": true,
+  "loss": "gaussnll",
   "loss_reduction": "mean",
-  "optimizer": "sgd",
+  "optimizer": "adamw",
   "lr": 5e-4,
   "weight_decay": 1e-4,
-  "lr_scheduler": "plateau",
+  "lr_scheduler": null,
   "lr_scheduler_patience": 20,
   "lr_scheduler_factor": 0.2
 }
