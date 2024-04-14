@@ -92,51 +92,137 @@ def dirichlet_mse(alpha, y):
 #     return nig_nll(*dist_params, y) + lamb * nig_reg(*dist_params, y)
 
 
-def calc_loss_notnan(outputs, targets, loss_fn):
+def calc_loss_notnan(outputs, targets, alea_vars, loss_fn, reduction='mean'):
     """
-    Calculates the loss for non-NaN values between outputs and targets using a given loss function.
+    Calculates the loss for non-NaN values between outputs and targets using a given loss function,
+    and aggregates it per task.
 
     Parameters
     ----------
     outputs : torch.Tensor
-        Predicted outputs from the model.
+        Predicted outputs from the model, shape [batch_size, num_tasks, num_models]
     targets : torch.Tensor
-        True target values.
-    loss_fn : Callable or function
+        True target values, shape [batch_size, num_tasks, 1] after unsqueezing
+    alea_vars : torch.Tensor or None
+        Predicted aleatoric variances from the model, same shape as outputs.
+    loss_fn : Callable
         A loss function compatible with torch.Tensors and supports 'none' reduction.
+    reduction : str
+        The method for reducing the loss across the batch ('mean', 'sum', or 'none').
 
     Returns
     -------
     torch.Tensor
-        The aggregated loss value excluding NaNs.
+        The aggregated loss value excluding NaNs, shape [num_tasks, 1] or scalar if reduction='mean'.
     """
+    assert outputs.dim() == 3, "Outputs should be [batch_size, num_tasks, num_models]"
+    # if targets.dim() < outputs.dim():
+    #     targets =
+    # assert targets.dim() == 3, "Targets should be [batch_size, num_tasks, 1] after unsqueezing"
+
+    # Mask out NaN values in targets
     nan_mask = torch.isnan(targets)
-    valid_targets = torch.where(
-        ~nan_mask, targets, torch.tensor(0.0, device=targets.device)
-    )
-    valid_outputs = torch.where(
-        ~nan_mask, outputs, torch.tensor(0.0, device=outputs.device)
-    )
+    valid_mask = ~nan_mask.squeeze(-1)  # Reduce to two dimensions if not [batch_size, num_tasks]
 
-    loss_per_task = loss_fn(valid_outputs, valid_targets)
-    loss = calc_nanaware_metrics(loss_per_task, nan_mask, all_tasks_agg="sum")
+    # Initialize containers for task-wise losses
+    task_losses = torch.zeros(targets.size(1), device=outputs.device)  # [num_tasks]
 
-    return loss
+    # Process each model's predictions separately
+    for i in range(outputs.shape[2]):  # Loop through each model in the ensemble
+        model_outputs = outputs[:, :, i]
+        model_vars = alea_vars[:, :, i] if alea_vars is not None else None
+
+        # Calculate the loss only on valid (non-NaN) entries
+        for task_index in range(outputs.size(1)):  # Iterate over each task
+            task_valid_mask = valid_mask[:, task_index]
+            if task_valid_mask.any():  # Only compute where there are valid targets
+                task_outputs = model_outputs[:, task_index][task_valid_mask]
+                task_targets = targets[:, task_index][task_valid_mask]
+                task_vars = model_vars[:, task_index][task_valid_mask] if model_vars is not None else None
+
+                if task_vars is not None:
+                    task_loss = loss_fn(task_outputs, task_targets, task_vars)
+                else:
+                    task_loss = loss_fn(task_outputs, task_targets)
+
+                # Sum up or mean loss for this task across all valid samples
+                if reduction == 'mean':
+                    task_losses[task_index] += task_loss.mean()  # Average the loss for this task
+                else:  # sum or none
+                    task_losses[task_index] += task_loss.sum()
+
+    # Normalize by the number of models in the ensemble
+    task_losses /= outputs.shape[2]
+
+    if reduction == 'mean':
+        return task_losses.mean()  # Return mean loss across tasks
+    elif reduction == 'sum':
+        return task_losses.sum()  # Return sum of losses across tasks
+    return task_losses  # Return losses per task as a tensor
+
+
+# def _calc_loss_notnan(outputs, targets, alea_vars, loss_fn, reduction='mean'):
+#     """
+#     Calculates the loss for non-NaN values between outputs and targets using a given loss function.
+#
+#     Parameters
+#     ----------
+#     outputs : torch.Tensor
+#         Predicted outputs from the model.
+#     targets : torch.Tensor
+#         True target values.
+#     loss_fn : Callable or function
+#         A loss function compatible with torch.Tensors and supports 'none' reduction.
+#     reduction : str
+#         The method for reducing the loss across the batch ('mean', 'sum', or 'none').
+#
+#     Returns
+#     -------
+#     torch.Tensor
+#         The aggregated loss value excluding NaNs.
+#     """
+#     # Shapes fix
+#     if outputs.dim() > targets.dim():
+#         targets = targets.unsqueeze(-1)
+#
+#     nan_mask = torch.isnan(targets)
+#     valid_targets = torch.where(
+#         ~nan_mask, targets, torch.tensor(0.0, device=targets.device)
+#     )
+#     valid_outputs = torch.where(
+#         ~nan_mask, outputs, torch.tensor(0.0, device=outputs.device)
+#     )
+#
+#     if alea_vars is not None:
+#         valid_alea_vars = torch.where(
+#             ~nan_mask, alea_vars, torch.tensor(0.0, device=alea_vars.device)
+#         )
+#         loss_per_task = loss_fn(valid_outputs, valid_targets, valid_alea_vars)
+#     else:
+#         loss_per_task = loss_fn(valid_outputs, valid_targets)
+#     loss = calc_nanaware_metrics(loss_per_task, nan_mask, all_tasks_agg="sum")
+#
+#     return loss
 
 
 ### Custom Loss Functions ###
 class MultiTaskLoss(nn.Module):
-    def __init__(self, loss_type="huber", reduction="mean", lamb=1e-2, logger=None):
+    def __init__(self, loss_type="huber", reduction="mean", lamb=1e-2, **kwargs):
         super(MultiTaskLoss, self).__init__()
         self.loss_type = loss_type
         self.loss_fn = build_loss(
-            loss_type, reduction=reduction, lamb=lamb, logger=logger
+            loss_type, reduction="none", lamb=lamb, **kwargs
         )
+        self.reduction = reduction
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, alea_vars):
         # loss
-        loss = calc_loss_notnan(outputs, targets, self.loss_fn)
+        loss = calc_loss_notnan(outputs, targets, alea_vars, self.loss_fn, self.reduction) # "mean"
+        # loss = loss.mean()
         return loss
+
+    # def prepare_mt_args(self, outputs, targets, alea_vars):
+    #     if outputs.dim() > targets.dim():
 
 
 class EvidentialClassLoss(nn.Module):
@@ -208,16 +294,15 @@ def build_loss(
     reduction="none",
     lamb=1e-2,
     mt=False,
-    logger=logging.Logger(__name__),
     **kwargs,
 ):
     if mt:
-        if reduction != "none":
-            logger.warning(
-                f"reduction should only be none with multitask learning to be able to calculate loss per each task. {reduction=} is provided instead"
-            )
-            reduction = "none"
-        return MultiTaskLoss(loss_type=loss, reduction=reduction, lamb=lamb)
+        # if reduction != "none":
+        #     logger.warning(
+        #         f"reduction should only be none with multitask learning to be able to calculate loss per each task. {reduction=} is provided instead"
+        #     )
+        #     reduction = "none"
+        return MultiTaskLoss(loss_type=loss, reduction=reduction, lamb=lamb, **kwargs)
 
     if loss.lower() in ["mse", "l2"]:
         loss_fn = nn.MSELoss(reduction=reduction, **kwargs)
@@ -238,7 +323,6 @@ def build_loss(
         loss_fn = EvidenceRegressionLoss(lamb=lamb)
     elif loss.lower() == "evidential_classification":
         loss_fn = EvidentialClassLoss(lamb=lamb)
-
     else:
         raise ValueError("Unknown loss: {}".format(loss))
     return loss_fn
