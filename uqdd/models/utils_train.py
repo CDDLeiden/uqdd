@@ -413,7 +413,7 @@ def evaluate_predictions(
 
     uct_metrics_logger.wandb_log()
 
-    return metrics, plots
+    return metrics, plots, uct_metrics_logger
 
 
 def initial_evaluation(

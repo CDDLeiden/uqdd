@@ -677,18 +677,21 @@ def make_uq_plots(
         include_bootstrap=include_bootstrap,
         logger=logger,
     )
-    fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.png")
-    fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.svg")
+    if figpath is not None:
+        fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.png")
+        fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.svg")
 
 
     # Generate Z-score plot and calibration curve
     fig2, _ = plot_Z_scores(ordered_df.errors, ordered_df.uq)
-    fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.png")
-    fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.svg")
+    if figpath is not None:
+        fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.png")
+        fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.svg")
 
     fig3 = plot_calibration_curve(gaus_pred, errors_observed, mis_cal)
-    fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.png")
-    fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.svg")
+    if figpath is not None:
+        fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.png")
+        fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.svg")
     plots = {"rmv_vs_rmse": fig, "Z_scores": fig2, "calibration_curve": fig3}
     return plots
 
@@ -1423,9 +1426,18 @@ class MetricsTable:
 
 
 def recalibrate(
-        y_true_recal, y_pred_recal, y_std_recal,
-        y_true_test, y_pred_test, y_std_test,
-        n_subset=None, savefig: bool = True, save_dir: Path = "path/to/figures"):
+        y_true_recal, y_pred_recal, y_std_recal, y_err_recal,
+        y_true_test, y_pred_test, y_std_test, y_err_test,
+        n_subset=None, task_name="PCM", savefig: bool = True, save_dir: Path = "path/to/figures"):
+
+    if savefig:
+        before_path = Path(save_dir) / "Before_recal"
+        after_path = Path(save_dir) / "After_recal"
+        before_path.mkdir(exist_ok=True)
+        after_path.mkdir(exist_ok=True)
+    else:
+        before_path = None
+        after_path = None
     # Before Calibration
     # Plot average calibration
     fig1, ax1 = plt.subplots(figsize=(6, 4))
@@ -1440,6 +1452,26 @@ def recalibrate(
             str(fig_save_path), ext_list=["png", "svg"], white_background=True
         )
     plt.show()
+    plt.close()
+
+    uctmetrics, _ = calculate_uct_metrics(
+                y_pred=y_pred_test,
+                y_std=y_std_test,
+                y_true=y_true_test,
+                Nbins=100,
+                task_name=task_name,
+                figpath=before_path,
+            )
+    uqmetrics, _ = calculate_uqtools_metrics(
+        y_std_test,
+        y_err_test,
+        Nbins=100,
+        include_bootstrap=True,
+        task_name=task_name,
+        figpath=after_path,
+    )
+    _before = {**uctmetrics, **uqmetrics}
+    # plots_before = {**uctplots, **uqplots}
     plt.close()
 
     # Recalibrating
@@ -1475,6 +1507,26 @@ def recalibrate(
             str(fig_save_path), ext_list=["png", "svg"], white_background=True
         )
     plt.show()
+    plt.close()
+
+    uctmetrics, _ = calculate_uct_metrics(
+                y_pred=y_pred_test,
+                y_std=y_std_test,
+                y_true=y_true_test,
+                Nbins=100,
+                task_name=task_name,
+                figpath=after_path,
+            )
+    uqmetrics, _ = calculate_uqtools_metrics(
+        y_std_test,
+        y_err_test,
+        Nbins=100,
+        include_bootstrap=True,
+        task_name=task_name,
+        figpath=after_path,
+    )
+    _after = {**uctmetrics, **uqmetrics}
+    # plots_before = {**uctplots, **uqplots}
     plt.close()
 
     return recal_model

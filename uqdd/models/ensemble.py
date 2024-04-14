@@ -11,7 +11,8 @@ from uqdd.utils import create_logger, parse_list
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
-    predict, recalibrate_model,
+    predict,
+    recalibrate_model,
 )
 
 from uqdd.models.utils_models import (
@@ -74,7 +75,7 @@ def run_ensemble(config=None):
     )
 
     # Then comes the predict metrics part
-    metrics, plots = evaluate_predictions(
+    metrics, plots, uct_logger = evaluate_predictions(
         config,
         preds,
         labels,
