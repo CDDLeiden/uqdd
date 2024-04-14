@@ -124,22 +124,34 @@ def calc_regr_metrics(targets, outputs, metrics_per_task=False):
 
     if metrics_per_task:
         # Calculate metrics per task
-        rmse = []
-        r2 = []
-        evs = []
+        rmse = np.full(targets.shape[1], np.nan)  # Initialize with NaNs
+        r2 = np.full(targets.shape[1], np.nan)    # Initialize with NaNs
+        evs = np.full(targets.shape[1], np.nan)   # Initialize with NaNs
+
         for i in range(targets.shape[1]):
             task_t = targets[:, i]
             task_o = outputs[:, i]
-            nan_mask = ~torch.isnan(task_t)
-            task_t, task_o = task_t[nan_mask].numpy(), task_o[nan_mask].numpy()
-            rmse.append(mean_squared_error(task_t, task_o, squared=False))
-            r2.append(r2_score(task_t, task_o))
-            evs.append(explained_variance_score(task_t, task_o))
-        rmse, r2, evs = np.array(rmse), np.array(r2), np.array(evs)
+
+            # Filter out NaN values for valid comparison
+            valid_mask = ~torch.isnan(task_t)
+            if valid_mask.any():  # Check if there are any valid data points
+                task_t = task_t[valid_mask].numpy()  # Valid target values
+                task_o = task_o[valid_mask].numpy()  # Valid output predictions
+
+                # Compute metrics
+                rmse[i] = mean_squared_error(task_t, task_o, squared=False)
+                r2[i] = r2_score(task_t, task_o)
+                evs[i] = explained_variance_score(task_t, task_o)
+        #     # nan_mask = ~torch.isnan(task_t)
+        #     task_t, task_o = task_t[valid_mask].numpy(), task_o[valid_mask].numpy()
+        #     rmse.append(mean_squared_error(task_t, task_o, squared=False))
+        #     r2.append(r2_score(task_t, task_o))
+        #     evs.append(explained_variance_score(task_t, task_o))
+        # rmse, r2, evs = np.array(rmse), np.array(r2), np.array(evs)
     else:
         # Calculate metrics for all tasks
         nan_mask = ~torch.isnan(targets)
-        targets, outputs = targets[nan_mask].numpy(), outputs[nan_mask].numpy()
+        targets, outputs = targets[nan_mask].numpy().flatten(), outputs[nan_mask].numpy().flatten()
         rmse = mean_squared_error(targets, outputs, squared=False)
         r2 = r2_score(targets, outputs)
         evs = explained_variance_score(targets, outputs)
@@ -227,7 +239,10 @@ def calc_regr_metrics(targets, outputs, metrics_per_task=False):
 
 
 def process_preds(
-    predictions: torch.Tensor, targets: torch.Tensor, task_idx: Union[int, None] = None
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    vars_: torch.Tensor = None,
+    task_idx: Union[int, None] = None
 ):
     """
     Process predictions to extract mean, standard deviation, and align with targets,
@@ -239,6 +254,8 @@ def process_preds(
         The model predictions with dimensions [samples, tasks, ensemble members].
     targets : torch.Tensor
         The true target values.
+    vars_ :  torch.Tensor, optional
+        Aleatoric part of uncertainty
     task_idx : int, optional
         Index of the specific task to process in a multi-task learning setting.
 
@@ -250,41 +267,37 @@ def process_preds(
     """
 
     # Get the predictions mean and std
-    y_pred = predictions.mean(dim=-1)  # (dim=2)
-    y_std = predictions.std(dim=-1)  # (dim=2)
+    y_pred = predictions.mean(dim=-1).squeeze()  # (dim=2)
+    y_std = predictions.std(dim=-1).squeeze()  # (dim=2)
     y_true = targets.squeeze()
+    if vars_ is not None:
+        vars_ = vars_.mean(dim=-1).squeeze()
+    else:  # Empty Tensor
+        vars_ = torch.zeros_like(targets)
     if task_idx is not None:
         # For MTL, select predictions for the specific task
-        y_pred, y_std, y_true = (
+        y_pred, y_std, y_true, vars_ = (
             y_pred[:, task_idx],
             y_std[:, task_idx],
             y_true[:, task_idx],
+            vars_[:, task_idx]
         )
-    # elif predictions.dim() > 2 and targets.dim() == 1: # TODO I dont remember what was this for - check the MTL for all targets run.
-    #     preds_mu, preds_std = preds_mu.flatten(), preds_std.flatten()
 
-    # else:
-    #     # flatten # TODO I dont think this works for STL
-    #     preds_mu = torch.flatten(preds_mu.transpose(0, 1))
-    #     preds_std = torch.flatten(preds_std.transpose(0, 1))
-    #     targets = torch.flatten(targets.transpose(0, 1))
-
-    # nan mask filter
-    # Filter out NaN values from targets and corresponding predictions
     nan_mask = ~torch.isnan(y_true)
-    y_pred, y_std, y_true = (
+    y_pred, y_std, y_true, vars_ = (
         y_pred[nan_mask],
         y_std[nan_mask],
         y_true[nan_mask],
+        vars_[nan_mask],
     )
-    # Calculate the absolute error
-    y_err = torch.abs(y_pred - y_true)
+    # Calculate the error
+    y_err = y_pred - y_true  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
     # Convert to numpy arrays
-    y_pred, y_std, y_true, y_err = map(
-        lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err)
+    y_pred, y_std, y_true, y_err, vars_ = map(
+        lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)
     )
 
-    return y_true, y_pred, y_std, y_err
+    return y_true, y_pred, y_std, y_err, vars_
 
 
 def get_preds_export_path(data_specific_path, model_name):
@@ -298,6 +311,7 @@ def create_df_preds(
     y_pred,
     y_std,
     y_err,
+    y_alea=None,
     export: bool = True,
     data_specific_path: str = None,
     model_name: str = None,
@@ -317,6 +331,8 @@ def create_df_preds(
         The standard deviation of the predictions.
     y_err : array-like
         The prediction errors.
+    y_alea : array-like or None
+        Aleatoric uncertainty part.
     export : bool, optional
         Whether to export the DataFrame as a CSV file.
     data_specific_path : str, optional
@@ -330,7 +346,7 @@ def create_df_preds(
         The DataFrame containing the prediction data.
     """
     df = pd.DataFrame(
-        {"y_true": y_true, "y_pred": y_pred, "y_std": y_std, "y_err": y_err}
+        {"y_true": y_true, "y_pred": y_pred, "y_std": y_std, "y_err": y_err, "y_alea": y_alea}
     )
 
     if export and data_specific_path and model_name:
@@ -549,6 +565,7 @@ def calculate_uct_metrics(
     y_pred,
     y_std,
     y_true,
+    Nbins=100,
     task_name=None,
     figpath=FIGS_DIR,
 ):
@@ -579,10 +596,10 @@ def calculate_uct_metrics(
         y_pred=y_pred,
         y_std=y_std,
         y_true=y_true,
-        num_bins=100,
+        num_bins=Nbins,
         resolution=99,
         scaled=True,
-        verbose=False,
+        verbose=True,
     )
     # figures_path = FIGS_DIR / data_specific_path / model_name
     # figures_path.mkdir(parents=True, exist_ok=True)
@@ -594,9 +611,9 @@ def calculate_uct_metrics(
         y_std,
         y_true,
         task_name=task_name,
-        n_subset=min(500, len(y_true)),
+        n_subset=min(200, len(y_true)),
         ylims=None,
-        num_stds_confidence_bound=1.96,
+        num_stds_confidence_bound=2.0,
         plot_save_str=f"{task_name}_uct",
         savefig=True,
         save_dir=Path(figpath),
@@ -648,6 +665,7 @@ def make_uq_plots(
     mis_cal,
     Nbins=20,
     include_bootstrap=True,
+    task_name="PCM",
     figpath=FIGS_DIR,
     logger=logging.Logger("uqtools"),
 ):
@@ -659,14 +677,18 @@ def make_uq_plots(
         include_bootstrap=include_bootstrap,
         logger=logger,
     )
-    fig.savefig(Path(figpath) / "rmv_vs_rmse.png")
+    fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.png")
+    fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.svg")
+
 
     # Generate Z-score plot and calibration curve
     fig2, _ = plot_Z_scores(ordered_df.errors, ordered_df.uq)
-    fig2.savefig(Path(figpath) / "Z_scores.png")
+    fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.png")
+    fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.svg")
 
     fig3 = plot_calibration_curve(gaus_pred, errors_observed, mis_cal)
-    fig3.savefig(Path(figpath) / "uq_calibration_curve.png")
+    fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.png")
+    fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.svg")
     plots = {"rmv_vs_rmse": fig, "Z_scores": fig2, "calibration_curve": fig3}
     return plots
 
@@ -674,8 +696,9 @@ def make_uq_plots(
 def calculate_uqtools_metrics(
     uncertainties,
     errors,
-    Nbins=20,
+    Nbins=100,
     include_bootstrap=True,
+    task_name="PCM",
     figpath=FIGS_DIR,
     logger=logging.Logger("uqtools"),
 ):
@@ -723,6 +746,7 @@ def calculate_uqtools_metrics(
         mis_cal,
         Nbins=Nbins,
         include_bootstrap=include_bootstrap,
+        task_name=task_name,
         figpath=figpath,
         logger=logger,
     )
@@ -1071,6 +1095,7 @@ class MetricsTable:
         self,
         config=None,
         model_type=None,
+        add_plots_to_table=False,
         logger=None,
     ):
         """
@@ -1090,7 +1115,9 @@ class MetricsTable:
         self.mt = config.get("MT", False)
         self.task_type = config.get("task_type", "regression")
         self.data_specific_path = config.get("data_specific_path", None)
-        self.model_name = config.get("model_name", None)
+        self.model_name = config.get("model_name", "ensemble")
+        self.aleatoric = config.get("aleatoric", False)
+        self.add_plots_to_table = add_plots_to_table
         cols = []
         if self.model_type:
             cols += ["Model type"]
@@ -1134,21 +1161,22 @@ class MetricsTable:
                     "Z_mean_CI_high",
                 ]
             )
-            # plots
-            cols.extend(
-                [
-                    "prediction_intervals",
-                    "ordered_prediction_intervals",
-                    "calibration",
-                    "adversarial_group_calibration",
-                    "sharpness",
-                    "residuals_vs_pred_std",
-                    "true_vs_preds",
-                    "rmv_vs_rmse",
-                    "Z_scores",
-                    "calibration_curve",
-                ]
-            )
+            if add_plots_to_table:
+                # plots
+                cols.extend(
+                    [
+                        "prediction_intervals",
+                        "ordered_prediction_intervals",
+                        "calibration",
+                        "adversarial_group_calibration",
+                        "sharpness",
+                        "residuals_vs_pred_std",
+                        "true_vs_preds",
+                        "rmv_vs_rmse",
+                        "Z_scores",
+                        "calibration_curve",
+                    ]
+                )
         elif self.task_type == "classification":
             cols.extend(
                 [
@@ -1162,6 +1190,14 @@ class MetricsTable:
                     "RP@K",
                 ]
             )
+        if self.aleatoric:
+            cols.extend(
+                [
+                    "aleatoric_uct_mean",
+                    "epistemic_uct_mean",
+                    "total_uct_mean"
+                ]
+            )
         self.table = wandb.Table(columns=cols)
 
     def __call__(
@@ -1170,7 +1206,8 @@ class MetricsTable:
         y_std,
         y_true,
         y_err,
-        task_name=None,
+        y_alea=None,
+        task_name=None
     ):
         """
         Calculate metrics and add them to the table.
@@ -1191,31 +1228,46 @@ class MetricsTable:
         metrics : dict
             Dictionary containing calculated metrics.
         """
+        # y_pred, y_std, y_true, y_err, y_alea = self.not_nan_filter(y_pred, y_std, y_true, y_err)
         metrics, plots = self.calculate_metrics(
             y_pred=y_pred,
             y_std=y_std,
             y_true=y_true,
             y_err=y_err,
+            y_alea=y_alea,
             task_name=task_name,
             data_specific_path=self.data_specific_path,
         )
+        # if vars_ is not None:
 
         # self.export_plots(imgs, task_name)
         self.add_data(task_name=task_name, metrics=metrics, plots=plots)
 
         return metrics, plots
+    # @staticmethod
+    # def not_nan_filter(y_pred, y_std, y_true, y_err, y_alea=None):
+    #     valid_mask = ~torch.isnan(y_true) # watch out the shapes Shape []
+    #     y_pred = y_pred[valid_mask]
+    #     y_std = y_std[valid_mask]
+    #     y_true = y_true[valid_mask]
+    #     y_err = y_err[valid_mask]
+    #     if y_alea is not None:
+    #         y_alea = y_alea[valid_mask]
+    #
+    #     return y_pred, y_std, y_true, y_err, y_alea
 
     def calculate_metrics(
-        self, y_pred, y_std, y_true, y_err, data_specific_path, task_name=None
+        self, y_pred, y_std, y_true, y_err, y_alea, data_specific_path, task_name=None  # model_name=None,
     ):
         figures_path = FIGS_DIR / data_specific_path / self.model_name
         figures_path.mkdir(parents=True, exist_ok=True)
-
+        # TODO Deal with NANs
         if self.task_type == "regression":
             uctmetrics, uctplots = calculate_uct_metrics(
                 y_pred=y_pred,
                 y_std=y_std,
                 y_true=y_true,
+                Nbins=100,
                 task_name=task_name,
                 figpath=figures_path,
             )
@@ -1223,8 +1275,9 @@ class MetricsTable:
             uqmetrics, uqplots = calculate_uqtools_metrics(
                 y_std,
                 y_err,
-                Nbins=10,
+                Nbins=100,
                 include_bootstrap=True,
+                task_name=task_name,
                 figpath=figures_path,
                 logger=self.logger,
             )
@@ -1242,9 +1295,12 @@ class MetricsTable:
             # TODO classification plots
             plots = {}
 
-        # for k, v in plots.items():
-        #     plots[k] = wandb.Image(v)
-        #     plt.close(v)
+        if self.aleatoric:
+            y_alea_mean = y_alea.mean()
+            y_std_mean = y_std.mean()
+            metrics["aleatoric_uct_mean"] = y_alea_mean
+            metrics["epistemic_uct_mean"] = y_std_mean
+            metrics["total_uct_mean"] = y_alea_mean + y_std_mean
 
         plots = {k: wandb.Image(v) for k, v in plots.items()}
 
@@ -1317,23 +1373,23 @@ class MetricsTable:
                     metrics["Z_mean_CI_high"],
                 ]
             )
-
-            # plots
-            vals.extend(
-                [
-                    plots["prediction_intervals"],
-                    plots["ordered_prediction_intervals"],
-                    plots["calibration"],
-                    plots["adversarial_group_calibration"],
-                    plots["sharpness"],
-                    plots["residuals_vs_stds"],
-                    plots["true_vs_predictions"],
-                    # UQ tools
-                    plots["rmv_vs_rmse"],
-                    plots["Z_scores"],
-                    plots["calibration_curve"],
-                ]
-            )
+            if self.add_plots_to_table:
+                # plots
+                vals.extend(
+                    [
+                        plots["prediction_intervals"],
+                        plots["ordered_prediction_intervals"],
+                        plots["calibration"],
+                        plots["adversarial_group_calibration"],
+                        plots["sharpness"],
+                        plots["residuals_vs_stds"],
+                        plots["true_vs_predictions"],
+                        # UQ tools
+                        plots["rmv_vs_rmse"],
+                        plots["Z_scores"],
+                        plots["calibration_curve"],
+                    ]
+                )
         elif self.task_type == "classification":
             vals.extend(
                 [
@@ -1347,6 +1403,14 @@ class MetricsTable:
                     metrics["RP@K"],
                 ]
             )
+        if self.aleatoric:
+            vals.extend(
+                [
+                    metrics["aleatoric_uct_mean"],
+                    metrics["epistemic_uct_mean"],
+                    metrics["total_uct_mean"]
+                ]
+            )
 
         self.table.add_data(*vals)
         plt.close()
@@ -1356,6 +1420,64 @@ class MetricsTable:
         Export the UCT metrics table to wandb.
         """
         wandb.log({f" Uncertainty Metrics Table - {self.model_type}": self.table})
+
+
+def recalibrate(
+        y_true_recal, y_pred_recal, y_std_recal,
+        y_true_test, y_pred_test, y_std_test,
+        n_subset=None, savefig: bool = True, save_dir: Path = "path/to/figures"):
+    # Before Calibration
+    # Plot average calibration
+    fig1, ax1 = plt.subplots(figsize=(6, 4))
+    uct.viz.plot_calibration(y_pred_test, y_std_test, y_true_test, n_subset=n_subset, ax=ax1)
+    ax1.set_title("Calibration Curve - Before Recalibration")
+    plt.gcf().set_size_inches(4, 4)
+    plt.tight_layout()
+
+    if savefig:
+        fig_save_path = Path(save_dir) / "Calib_curve_before_recalibration"
+        uct.viz.save_figure(
+            str(fig_save_path), ext_list=["png", "svg"], white_background=True
+        )
+    plt.show()
+    plt.close()
+
+    # Recalibrating
+    y_pred_recal = y_pred_recal.flatten()
+    y_std_recal = y_std_recal.flatten()
+    exp_props, obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
+        y_pred_recal, y_std_recal, y_true_recal,
+    )
+    # Train a recalibration model.
+    recal_model = uct.recalibration.iso_recal(exp_props, obs_props)
+    # Get the expected props and observed props using the new recalibrated model
+    te_recal_exp_props, te_recal_obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
+        y_pred_test, y_std_test, y_true_test, recal_model=recal_model
+    )
+    # Show the updated average calibration plot AFTER
+    fig2, ax2 = plt.subplots(figsize=(6, 4))
+    uct.viz.plot_calibration(
+        y_pred_test,
+        y_std_test,
+        y_true_test,
+        n_subset=n_subset,
+        exp_props=te_recal_exp_props,
+        obs_props=te_recal_obs_props,
+        ax=ax2
+    )
+    ax2.set_title("Calibration Curve - After Recalibration")
+    plt.gcf().set_size_inches(4.0, 4.0)
+    plt.tight_layout()
+
+    if savefig:
+        fig_save_path = Path(save_dir) / "Calib_curve_after_recalibration"
+        uct.viz.save_figure(
+            str(fig_save_path), ext_list=["png", "svg"], white_background=True
+        )
+    plt.show()
+    plt.close()
+
+    return recal_model
 
 
 def log_mol_table(smiles, inputs, targets, outputs, targets_names):
