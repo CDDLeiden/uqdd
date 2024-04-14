@@ -97,9 +97,10 @@ def run_ensemble_wrapper(**kwargs):
     global LOGGER
     LOGGER = create_logger(name="ensemble", file_level="debug", stream_level="info")
     config = get_model_config(model_name="ensemble", **kwargs)
+    return run_ensemble(config)
 
-    best_model, recal_model, metrics, plots = run_ensemble(config)
-    return best_model, recal_model, metrics, plots
+    # best_model, recal_model, metrics, plots = run_ensemble(config)
+    # return best_model, recal_model, metrics, plots
 
 
 def run_ensemble_hyperparm(**kwargs):

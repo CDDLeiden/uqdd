@@ -420,37 +420,37 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
     #
-    # data_name = "papyrus"
-    # n_targets = -1
-    # task_type = "regression"
-    # activity = "xc50"
-    # split = "random"
-    # desc_prot = "ankh-base"
-    # desc_chem = "ecfp2048"
-    # median_scaling = False
-    # ext = "pkl"
-    # wandb_project_name = "baseline-test-272"
-    # sweep_count = 0  # 250
-    # aleatoric = True
-    # # epochs=1
-    #
-    # run_baseline_wrapper(
-    #     data_name=data_name,
-    #     activity_type=activity,
-    #     n_targets=n_targets,
-    #     descriptor_protein=desc_prot,
-    #     descriptor_chemical=desc_chem,
-    #     median_scaling=median_scaling,
-    #     split_type=split,
-    #     aleatoric=aleatoric,
-    #     ext=ext,
-    #     task_type=task_type,
-    #     wandb_project_name=wandb_project_name,
-    #     logger=None,
-    # )
-    #
+    data_name = "papyrus"
+    n_targets = -1
+    task_type = "regression"
+    activity = "xc50"
+    split = "random"
+    desc_prot = "ankh-large"
+    desc_chem = "ecfp2048"
+    median_scaling = False
+    ext = "pkl"
+    wandb_project_name = "baseline-test-272"
+    sweep_count = 0  # 250
+    aleatoric = True
+    # epochs=1
+
+    run_baseline_wrapper(
+        data_name=data_name,
+        activity_type=activity,
+        n_targets=n_targets,
+        descriptor_protein=desc_prot,
+        descriptor_chemical=desc_chem,
+        median_scaling=median_scaling,
+        split_type=split,
+        aleatoric=aleatoric,
+        ext=ext,
+        task_type=task_type,
+        wandb_project_name=wandb_project_name,
+        logger=None,
+    )
+
     # sweep_count = 10
     # run_baseline_hyperparam(
     #     sweep_count=sweep_count,
