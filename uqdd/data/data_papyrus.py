@@ -668,35 +668,16 @@ class PapyrusDataset(Dataset):
                 int
             )
 
-            # self.data[self.label_col] = np.where(
-            #     self.data[self.label_col] > self.median_point, 1, 0
-            # )
-            # self.data[self.label_col] = self.data[self.label_col].astype("category")
-        # self.data.to(device)
-
-        # if self.desc_chem is not None:
-        #     self.chem_desc = (
-        #         torch.from_numpy(np.stack(data[self.desc_chem].values))
-        #         .float()
-        #         .to(device)
-        #     )
-        #     # chem_desc_np = np.array(data[self.desc_chem].tolist())
-        #     # self.chem_desc = torch.from_numpy(chem_desc_np).float()  # .to(device)
-        # if not self.MT and self.desc_prot is not None:
-        #     self.prot_desc = torch.from_numpy(np.stack(data[self.desc_prot].values))
-        # Convert descriptor columns to tensors once, avoid conversion in __getitem__
         self.labels = torch.tensor(
             data[self.label_col].values, dtype=torch.float32, device=device
         )
-        # if desc_chem is not None:
         np_desc_chem = np.stack(data[desc_chem].apply(pd.to_numeric, errors='coerce').values).astype(np.float32)
-        np_desc_prot = np.stack(data[desc_prot].apply(pd.to_numeric, errors='coerce').values).astype(np.float32)
-
         self.chem_desc = torch.tensor(
             np_desc_chem, dtype=torch.float32, device=device
         )
 
         if desc_prot is not None:
+            np_desc_prot = np.stack(data[desc_prot].apply(pd.to_numeric, errors='coerce').values).astype(np.float32)
             self.prot_desc = torch.tensor(
                 np_desc_prot, dtype=torch.float32, device=device
             )
@@ -704,11 +685,7 @@ class PapyrusDataset(Dataset):
             self.prot_desc = torch.zeros(
                 self.chem_desc.shape[0], 1, dtype=torch.float32, device=device
             )
-            # prot_desc_np = np.array(data[self.desc_prot].tolist())
-            # self.prot_desc = torch.from_numpy(prot_desc_np).float()  # .to(device)
-        # self.labels = torch.from_numpy(data[self.label_col].values).float().to(device)
         self.data = data
-        # )
 
     def __len__(self):
         return len(self.labels)
