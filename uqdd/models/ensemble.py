@@ -44,14 +44,14 @@ class EnsembleDNN(nn.Module):
     def forward(self, inputs):
         if self.aleatoric:
             outputs = []
-            logvars = []
+            vars_ = []
             for model in self.models:
-                output, logvar = model(inputs)
+                output, var_ = model(inputs)
                 outputs.append(output)
-                logvars.append(logvar)
+                vars_.append(var_)
             outputs = torch.stack(outputs, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
-            logvars = torch.stack(logvars, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
-            return outputs, logvars
+            vars_ = torch.stack(vars_, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+            return outputs, vars_
         else:
             outputs = torch.stack([model(inputs) for model in self.models], dim=2)
             return outputs
@@ -84,11 +84,11 @@ def run_ensemble(config=None):
         logger
     )
 
-    # RECALIBRATION
+    # RECALIBRATION # Get Calibration / Validation Set
     preds_val, labels_val, alea_vars_val = predict(
         best_model, dataloaders["val"], aleatoric=aleatoric, device=DEVICE
     )
-    recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config)
+    recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config, uct_logger=uct_logger)
 
     return best_model, recal_model, metrics, plots
 
@@ -124,6 +124,12 @@ def run_ensemble_hyperparm(**kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Ensemble Model")
+    parser.add_argument(
+        "--aleatoric",
+        type=bool,
+        default=True,
+        help="Aleatoric inference"
+    )
     parser.add_argument(
         "--ensemble_size",
         type=int,

@@ -217,7 +217,7 @@ class MultiTaskLoss(nn.Module):
 
     def forward(self, outputs, targets, alea_vars):
         # loss
-        loss = calc_loss_notnan(outputs, targets, alea_vars, self.loss_fn, self.reduction) # "mean"
+        loss = calc_loss_notnan(outputs, targets, alea_vars, self.loss_fn, self.reduction)  # "mean"
         # loss = loss.mean()
         return loss
 

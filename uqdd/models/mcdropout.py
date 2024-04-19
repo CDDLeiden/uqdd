@@ -204,7 +204,7 @@ def run_mcdropout(config=None):
     )
 
     # Then comes the predict metrics part
-    metrics, plots = evaluate_predictions(
+    metrics, plots, uct_logger = evaluate_predictions(
         config,
         preds,
         labels,
@@ -414,7 +414,20 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    #
+    # run_mcdropout_wrapper(
+    #     data_name="papyrus",
+    #     activity_type="xc50",
+    #     n_targets=-1,
+    #     descriptor_protein="ankh-base",
+    #     descriptor_chemical="ecfp2048",
+    #     median_scaling=False,
+    #     split_type="random",
+    #     ext="pkl",
+    #     task_type="regression",
+    #     wandb_project_name=f"mcdp-test",
+    #     num_mc_samples=100,
+    # )
 #
 # def run_mcdropout(
 #     datasets=None,

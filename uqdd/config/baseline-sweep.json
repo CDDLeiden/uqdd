@@ -7,9 +7,11 @@
     "name": "val/rmse"
   },
   "parameters": {
+    "aleatoric": {
+      "value": true
+    },
     "chem_layers": {
       "values": [
-        [2048,1024,512],
         [1024,512,256],
         [1024,256],
         [1024],
@@ -45,19 +47,19 @@
       "value": 5000
     },
     "early_stop": {
-      "values": [200,300]
+      "value": 200
     },
     "loss": {
-      "values": ["huber", "mse"]
+      "value": "gaussnll"
     },
     "loss_reduction": {
       "value": "mean"
     },
     "optimizer": {
-      "values": ["adagrad","adamw","adam","sgd","rmsprop"]
+      "values": ["adagrad","adamw","adam","sgd"]
     },
     "lr": {
-      "values": [1e-2,1e-3,5e-4,1e-4]
+      "values": [1e-2,1e-3,5e-4]
     },
     "weight_decay": {
       "values": [0,1e-2,1e-4]

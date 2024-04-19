@@ -1,7 +1,8 @@
 #!/bin/bash
 
-gpu_device=${1:-0}
-sweep_count=${2:-0}
+gpu_device=${1:-1}
+#sweep_count=${2:-10}
+ens_size=${2:-10}
 data=${3:-"papyrus"}
 activity=${4:-"xc50"}
 desc_prot=${5:-"ankh-base"}
@@ -18,19 +19,19 @@ today=$(date +%Y-%m-%d)
 echo "Script started at: $(date)"
 
 # Predefine the args here
+#ens_size=100
 #data="papyrus"
 ext="pkl"
 task_type="regression"
-#sweep_count=500
 #desc_prot="ankh-base"
 #desc_chem="ecfp2048"
-#split_type="time"
+#split_type="random"
 #activity="xc50"
 #wandb_project="${today}_baseline_${data}_${activity}_${split_type}_${desc_prot}_${desc_chem}_${sweep_count}sweep"
-wandb_project="${today}-all-models" #"2024-04-16-baseline"
-logname="${wandb_project}-baseline.txt"
+wandb_project="${today}-all-models"
+logname="${wandb_project}-ensemble.txt"
 
-python baseline.py --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project --sweep-count "$sweep_count" 2>&1 | tee ../logs/"${logname}"
+python ensemble.py --ensemble_size $ens_size --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "$wandb_project" 2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"

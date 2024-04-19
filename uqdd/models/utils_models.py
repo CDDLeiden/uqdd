@@ -121,6 +121,7 @@ def get_model_config(model_name="baseline", **kwargs):
     assert model_name in [
         "baseline",
         "ensemble",
+        "mcdropout",
         "evidential",
         "gp",
     ], f"Invalid model name: {model_name}"
@@ -152,6 +153,7 @@ def get_sweep_config(model_name="baseline", **kwargs):
     assert model_name in [
         "baseline",
         "ensemble",
+        "mcdropout",
         "evidential",
         "gp",
     ], f"Invalid model name: {model_name}"

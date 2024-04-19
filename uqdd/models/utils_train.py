@@ -3,17 +3,20 @@ from pathlib import Path
 
 import wandb
 import torch
+from torch import nn
 
 from tqdm import tqdm
-from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, TODAY, FIGS_DIR
-from uqdd.data.utils_data import get_topx, get_tasks
+from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, TODAY, FIGS_DIR, MODELS_DIR
+from uqdd.data.utils_data import get_topx, get_tasks, export_pickle
 
 from uqdd.models.loss import build_loss
 from uqdd.models.utils_metrics import (
     calc_regr_metrics,
     MetricsTable,
     process_preds,
-    create_df_preds, recalibrate,
+    create_df_preds,
+    calc_aleatoric_mean_var_notnan,
+    recalibrate,
 )
 from uqdd.models.utils_models import (
     build_loader,
@@ -29,43 +32,10 @@ from uqdd.models.utils_models import (
 from uqdd.utils import create_logger
 
 
-def calc_aleatoric_mean_var_notnan(vars_all, targets_all):
-    """
-    Calculate the mean and variance of vars_all considering only the valid (non-NaN) corresponding targets.
-
-    Parameters:
-    vars_all : torch.Tensor
-        Aleatoric variances from the model, shape [batch_size, num_tasks, num_models]
-    targets_all : torch.Tensor
-        True target values, shape [batch_size, num_tasks]
-
-    Returns:
-    tuple of torch.Tensor
-        Mean and variance of vars_all considering only valid entries, scalar values.
-    """
-    # Ensure targets_all has an additional dimension for broadcasting compatibility
-    if targets_all.dim() < vars_all.dim():
-        targets_all = targets_all.unsqueeze(-1)  # Shape [datapoints, tasks, 1]
-
-    # Create a mask of valid (non-NaN) targets
-    valid_mask = ~torch.isnan(targets_all)  # Shape [datapoints, tasks, 1] [6525, 20, 1]
-
-    # Apply the mask to vars_all
-    valid_vars = torch.where(valid_mask, vars_all, torch.tensor(float('nan'), device=vars_all.device))
-
-    # Flatten the valid_vars to a 1D array for mean and variance calculation
-    valid_vars_flat = valid_vars[~torch.isnan(valid_vars)]
-
-    # Calculate mean and variance on the flattened valid data
-    vars_mean = torch.mean(valid_vars_flat)
-    vars_var = torch.var(valid_vars_flat)
-
-    return vars_mean, vars_var
-
-
 def evidential_processing(outputs, alea_all):
     if len(outputs) == 4:  # Evidential model
-        mu, v, alpha, beta = (d.squeeze() for d in outputs)
+        # mu, v, alpha, beta = (d.squeeze() for d in outputs)
+        mu, v, alpha, beta = outputs
         vars_ = beta / (alpha - 1)  # aleatoric
         # var = torch.sqrt(beta / (v * (alpha - 1))) # epistemic
         alea_all.append(vars_)
@@ -76,9 +46,11 @@ def evidential_processing(outputs, alea_all):
     return outputs, alea_all
 
 
+# def apply_model_aleatoric_option()
 def train(
-    model, dataloader, loss_fn, optimizer, aleatoric, device=DEVICE, epoch=0  # pbar=None,
+    model, dataloader, loss_fn, optimizer, aleatoric, device=DEVICE, epoch=0, max_norm=10.0  # pbar=None,
 ):
+    # max_norm = 10.0
     model.train()
     total_loss = 0.0
     targets_all = []
@@ -93,8 +65,8 @@ def train(
         targets = targets.to(device)
         optimizer.zero_grad()
         if aleatoric:
-            outputs, logvars = model(inputs)
-            vars_ = torch.exp(logvars)
+            outputs, vars_ = model(inputs)
+            # vars_ = torch.exp(logvars)
             loss = loss_fn(outputs, targets, vars_)
             vars_all.append(vars_)
         else:
@@ -102,6 +74,8 @@ def train(
             loss = loss_fn(outputs, targets)
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
+
         optimizer.step()
         total_loss += loss.item()  # * outputs.size(0)
         outputs, vars_all = evidential_processing(outputs, vars_all)
@@ -132,6 +106,10 @@ def train(
         step=epoch,
     )
     if aleatoric:
+        # vars_all = torch.exp(torch.stack(vars_all))
+        # vars_mean = torch.mean(vars_all, dim=0)
+        # vars_var = torch.var(vars_all, dim=0)
+
         vars_all = torch.cat(vars_all, dim=0)
         vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
         wandb.log(
@@ -168,8 +146,8 @@ def evaluate(
             targets = targets.to(device)
 
             if aleatoric:
-                outputs, logvars = model(inputs)
-                vars_ = torch.exp(logvars)
+                outputs, vars_ = model(inputs)
+                # vars_ = torch.exp(logvars)
                 loss = loss_fn(outputs, targets, vars_)
                 vars_all.append(vars_)
             else:
@@ -247,8 +225,8 @@ def predict(
         ):
             inputs = tuple(x.to(device) for x in inputs)
             if aleatoric:
-                outputs, logvars = model(inputs)
-                vars_ = torch.exp(logvars)
+                outputs, vars_ = model(inputs)
+                # vars_ = torch.exp(logvars)
                 vars_all.append(vars_)
             else:
                 outputs = model(inputs)
@@ -264,87 +242,87 @@ def predict(
 
     return outputs_all, targets_all, None
 
-
-def _predict(
-        model,
-        dataloader,
-        aleatoric=False,
-        # evidential=False,
-        # num_mc_samples=1, # Default to 1 to mimic standard predict behavior, otherwise MC
-        device=DEVICE,
-):
-    # Determine mode based on num_samples
-    # if num_mc_samples == 1:
-    model.eval()  # Standard evaluation mode for prediction
-    #     desc = "Predicting"
-    # else:
-    #     model.train()  # Enable dropout for MC prediction
-    #     desc = f"MC Dropout Prediction ({num_mc_samples})"
-
-    outputs_all = []
-    targets_all = []
-    aleatoric_all = []
-    epistemic_all = []
-
-    with torch.no_grad():
-        for inputs, targets in tqdm(
-                dataloader, total=len(dataloader), desc="Predicting"
-        ):
-            inputs = tuple(x.to(device) for x in inputs)
-            targets = targets.to(device)
-            # output_samples, alea_samples, epistemic_samples = [], [], []
-            # for _ in range(num_mc_samples): # Multiple forward passes
-            if aleatoric:
-                outputs, logvars = model(inputs)
-                alea_vars = torch.exp(logvars)
-                # vars_all.append(vars_)
-                # output_samples.append(outputs)
-                # alea_samples.append(alea_vars)
-
-            else:
-                outputs = model(inputs)
-
-                # if len(outputs) == 4: # EVidential Model
-                #     mu, v, alpha, beta = (d.squeeze() for d in outputs)
-                #     alea_vars = beta / (alpha - 1)  # aleatoric
-                #     epist_var = torch.sqrt(beta / (v * (alpha - 1)))
-                #     outputs = mu
-                #     output_samples.append(outputs)
-                #     alea_samples.append(alea_vars)
-                #     epistemic_samples.append(epist_var)
-                # else:
-                #     output_samples.append(outputs)
-                #
-                #     alea_vars = torch.zeros_like(outputs)
-                #     alea_samples.append(alea_vars)
-            #
-            # if num_mc_samples > 1: # MC Dropout - stack them dim 2
-            #     outputs = torch.stack(output_samples, dim=2)
-            #     alea_vars = torch.stack(alea_samples, dim=2)
-            #
-            # if len(outputs) == 4: # Evidential model
-            #     outputs = torch.cat(outputs, dim=0) # ??
-            #     alea_vars = torch.cat(alea_vars, dim=0)
-            #     epist_var = torch.cat(epistemic_samples, dim=0)
-            #
-            #     epistemic_all.append(epist_var)
-            outputs_all.append(outputs)
-            targets_all.append(targets)
-            if aleatoric:
-                aleatoric_all.append(alea_vars)
-
-    # # Clean up: revert to evaluation mode if in MC dropout mode
-    # if num_mc_samples > 1:
-    #     model.eval()
-
-    outputs_all = torch.cat(outputs_all, dim=0).cpu()
-    targets_all = torch.cat(targets_all, dim=0).cpu()
-
-    if aleatoric:
-        # vars_all = torch.exp(torch.stack(logvars_all)).cpu()
-        vars_all = torch.cat(aleatoric_all, dim=0).cpu()
-        return outputs_all, targets_all, vars_all
-    return outputs_all, targets_all, None
+#
+# def _predict(
+#         model,
+#         dataloader,
+#         aleatoric=False,
+#         # evidential=False,
+#         # num_mc_samples=1, # Default to 1 to mimic standard predict behavior, otherwise MC
+#         device=DEVICE,
+# ):
+#     # Determine mode based on num_samples
+#     # if num_mc_samples == 1:
+#     model.eval()  # Standard evaluation mode for prediction
+#     #     desc = "Predicting"
+#     # else:
+#     #     model.train()  # Enable dropout for MC prediction
+#     #     desc = f"MC Dropout Prediction ({num_mc_samples})"
+#
+#     outputs_all = []
+#     targets_all = []
+#     aleatoric_all = []
+#     epistemic_all = []
+#
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#                 dataloader, total=len(dataloader), desc="Predicting"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             targets = targets.to(device)
+#             # output_samples, alea_samples, epistemic_samples = [], [], []
+#             # for _ in range(num_mc_samples): # Multiple forward passes
+#             if aleatoric:
+#                 outputs, logvars = model(inputs)
+#                 alea_vars = torch.exp(logvars)
+#                 # vars_all.append(vars_)
+#                 # output_samples.append(outputs)
+#                 # alea_samples.append(alea_vars)
+#
+#             else:
+#                 outputs = model(inputs)
+#
+#                 # if len(outputs) == 4: # EVidential Model
+#                 #     mu, v, alpha, beta = (d.squeeze() for d in outputs)
+#                 #     alea_vars = beta / (alpha - 1)  # aleatoric
+#                 #     epist_var = torch.sqrt(beta / (v * (alpha - 1)))
+#                 #     outputs = mu
+#                 #     output_samples.append(outputs)
+#                 #     alea_samples.append(alea_vars)
+#                 #     epistemic_samples.append(epist_var)
+#                 # else:
+#                 #     output_samples.append(outputs)
+#                 #
+#                 #     alea_vars = torch.zeros_like(outputs)
+#                 #     alea_samples.append(alea_vars)
+#             #
+#             # if num_mc_samples > 1: # MC Dropout - stack them dim 2
+#             #     outputs = torch.stack(output_samples, dim=2)
+#             #     alea_vars = torch.stack(alea_samples, dim=2)
+#             #
+#             # if len(outputs) == 4: # Evidential model
+#             #     outputs = torch.cat(outputs, dim=0) # ??
+#             #     alea_vars = torch.cat(alea_vars, dim=0)
+#             #     epist_var = torch.cat(epistemic_samples, dim=0)
+#             #
+#             #     epistemic_all.append(epist_var)
+#             outputs_all.append(outputs)
+#             targets_all.append(targets)
+#             if aleatoric:
+#                 aleatoric_all.append(alea_vars)
+#
+#     # # Clean up: revert to evaluation mode if in MC dropout mode
+#     # if num_mc_samples > 1:
+#     #     model.eval()
+#
+#     outputs_all = torch.cat(outputs_all, dim=0).cpu()
+#     targets_all = torch.cat(targets_all, dim=0).cpu()
+#
+#     if aleatoric:
+#         # vars_all = torch.exp(torch.stack(logvars_all)).cpu()
+#         vars_all = torch.cat(aleatoric_all, dim=0).cpu()
+#         return outputs_all, targets_all, vars_all
+#     return outputs_all, targets_all, None
 
     # if return_targets and not aleatoric:
     #     return outputs_all, targets_all, None
@@ -361,6 +339,7 @@ def evaluate_predictions(
         alea_vars=None,  # TODO to decide whether to include this in the metrics part
         model_type="ensemble",
         logger=None,
+        epi_vars=None,
 ):
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
@@ -375,12 +354,12 @@ def evaluate_predictions(
     uct_metrics_logger = MetricsTable(
         model_type=model_type,
         config=config,
-        add_plots_to_table=False, # * we can turn on if we want to see them in wandb * #
+        add_plots_to_table=True, # * we can turn on if we want to see them in wandb * #
         logger=logger,
     )
 
     # preds, labels = predict(model, dataloaders["test"], return_targets=True)
-    y_true, y_pred, y_std, y_err, y_alea = process_preds(preds, labels, alea_vars, None)
+    y_true, y_pred, y_std, y_err, y_alea = process_preds(preds, labels, alea_vars, epi_vars, None)
     _ = create_df_preds(
         y_true, y_pred, y_std, y_err, y_alea, True, data_specific_path, model_name, logger
     )
@@ -399,7 +378,7 @@ def evaluate_predictions(
         tasks = get_tasks(data_name, activity_type, n_targets)
         for task_idx in range(len(tasks)):
             task_name = tasks[task_idx]
-            y_true, y_pred, y_std, y_err, y_alea = process_preds(preds, labels, alea_vars, task_idx)
+            y_true, y_pred, y_std, y_err, y_alea = process_preds(preds, labels, alea_vars, epi_vars, task_idx)
             taskmetrics, taskplots = uct_metrics_logger(
                 y_pred=y_pred,
                 y_std=y_std,
@@ -444,6 +423,7 @@ def run_one_epoch(
         aleatoric=False,
         epoch=0,
         device=DEVICE,
+        max_norm=10.0
 ):
     """
     Run a single epoch of training and evaluation.
@@ -482,7 +462,7 @@ def run_one_epoch(
 
     else:
         train_loss = train(
-            model, train_loader, loss_fn, optimizer, aleatoric, device, epoch
+            model, train_loader, loss_fn, optimizer, aleatoric, device, epoch, max_norm=max_norm
         )
         val_loss = evaluate(
             model, val_loader, loss_fn, aleatoric, device, False, "val", epoch
@@ -558,6 +538,7 @@ def train_model(
         seed=42,
         device=DEVICE,
         logger=None,
+        max_norm=10.0
 ):
     try:
         set_seed(seed)
@@ -615,6 +596,7 @@ def train_model(
                     aleatoric=aleatoric,
                     epoch=epoch,
                     device=device,
+                    max_norm=max_norm
                 )
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -640,6 +622,7 @@ def run_model(
         dataloaders,
         device=DEVICE,
         logger=create_logger("run_model"),
+        max_norm=10.0
 ):
     seed = 42
     n_targets = config.get("n_targets", -1)
@@ -655,6 +638,7 @@ def run_model(
         seed,
         device,
         logger=logger,
+        max_norm=max_norm
     )
 
     # Testing metrics on the best model
@@ -674,6 +658,7 @@ def train_model_e2e(
         model_type="baseline",
         model_kwargs=None,
         logger=None,
+        max_norm=10.0
 ):
     start_time = datetime.now()
     seed = 42
@@ -737,6 +722,7 @@ def train_model_e2e(
         task_type,
         m_tag,
         mt_tag,
+        f"max_norm={max_norm}",
         TODAY
     ]
     # filter out None values
@@ -785,6 +771,7 @@ def train_model_e2e(
         dataloaders,
         device=DEVICE,
         logger=logger,
+        max_norm=max_norm
     )
 
     model_name = f"{TODAY}-{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}-{run.name}"
@@ -806,20 +793,27 @@ def train_model_e2e(
     return best_model, dataloaders, config, logger
 
 
-def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config):
+def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, epi_val=None, epi_test=None, uct_logger=None):
     model_name = config.get("model_name", "ensemble")
     data_specific_path = config.get("data_specific_path", None)
 
     figures_path = FIGS_DIR / data_specific_path / model_name
 
     # Validation Set
-    y_true_val, y_pred_val, y_std_val, y_err_val, _ = process_preds(preds_val, labels_val)
-    y_true_test, y_pred_test, y_std_test, y_err_test, _ = process_preds(preds_test, labels_test)
+    y_true_val, y_pred_val, y_std_val, y_err_val, _ = process_preds(preds_val, labels_val, epi_vars=epi_val)
+    y_true_test, y_pred_test, y_std_test, y_err_test, _ = process_preds(preds_test, labels_test, epi_vars=epi_test)
 
     recal_model = recalibrate(
-        y_true_val, y_pred_val, y_std_val, y_true_test, y_pred_test, y_std_test,
-        n_subset=None, savefig=True, save_dir=figures_path
+        y_true_val, y_pred_val, y_std_val, y_err_val, y_true_test, y_pred_test, y_std_test, y_err_test,
+        n_subset=None, savefig=True, save_dir=figures_path, uct_logger=uct_logger
     )
+    # TODO add task_name
+    model_dir = MODELS_DIR / "saved_models" / data_specific_path
+    model_dir.mkdir(exist_ok=True)
+    model_name = config.get("model_name", "ensemble") + "_recalibrate_model.pkl"
+    # pickle save the model to model_dir
+    export_pickle(recal_model, model_dir / model_name)
+
     # Test Set
     return recal_model
 
