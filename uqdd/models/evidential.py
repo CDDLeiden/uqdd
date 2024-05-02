@@ -13,7 +13,6 @@ from uqdd.utils import create_logger, parse_list
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
-    predict,
     recalibrate_model
 )
 
@@ -34,9 +33,9 @@ def ev_predict(
     with torch.no_grad():
         for inputs, targets in tqdm(test_loader, total=len(test_loader), desc="Evidential prediction"):
             inputs = tuple(x.to(device) for x in inputs)
-            outputs = model(inputs)
+            outputs, alea_vars = model(inputs)
             mu, v, alpha, beta = outputs #(d.squeeze() for d in outputs)
-            alea_vars = beta / (alpha - 1)  # aleatoric
+            # alea_vars = beta / (alpha - 1)  # aleatoric
             epist_var = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
             outputs = mu
 
@@ -66,18 +65,19 @@ class NormalInvGamma(nn.Module):
     def forward(self, x):
         out = self.dense(x)
         mu, logv, logalpha, logbeta = torch.split(out, self.out_units, dim=-1)
+        # mu_c, logv_c, logalpha_c, logbeta_c = torch.chunk(out, 4, dim=-1)
         v = self.evidence(logv)
         alpha = self.evidence(logalpha) + 1
         beta = self.evidence(logbeta)
-        # alea_var = beta / (alpha - 1)
-        return mu, v, alpha, beta
+        alea_var = beta / (alpha - 1)
+        return (mu, v, alpha, beta), alea_var
 
 
 class Dirichlet(nn.Module):
     def __init__(self, in_features, out_units):
         super().__init__()
         self.dense = nn.Linear(in_features, out_units)
-        self.out_units = out_units
+        self.out_units = int(out_units)
 
     def evidence(self, x):
         return F.softplus(x)
@@ -86,6 +86,14 @@ class Dirichlet(nn.Module):
         out = self.dense(x)
         alpha = self.evidence(out) + 1
         return alpha
+
+        # TRANSLATED FROM TF
+        # output = self.dense(x)
+        # evidence_ = torch.exp(output)
+        # alpha = evidence_ + 1
+        # prob = alpha / torch.sum(alpha, dim=1, keepdim=True)
+        # # return torch.cat([alpha, prob], dim=-1)
+        # return prob, alpha
 
 
 class EvidentialDNN(BaselineDNN):
@@ -117,7 +125,21 @@ class EvidentialDNN(BaselineDNN):
 
         self.apply(
             self.init_wt
-        )  # reinitiating wts to include the new layers in the model initialization.
+        )
+        # reinitiating wts to include the new layers in the model initialization.
+
+    def forward(self, inputs):
+        prot_input, chem_input = inputs
+        chem_features = self.chem_feature_extractor(chem_input)
+        if not self.MT:
+            prot_features = self.prot_feature_extractor(prot_input)
+            combined_features = torch.cat((chem_features, prot_features), dim=1)
+        else:
+            combined_features = chem_features
+        _output = self.regressor_or_classifier(combined_features)
+        output, var_ = self.output_layer(_output)
+
+        return output, var_
 
 
 def run_evidential(config=None):
@@ -134,7 +156,7 @@ def run_evidential(config=None):
 
     # Temporary turning off aleatoric for training
     # aleat_ = config.get("aleatoric", False)
-    config["aleatoric"] = False
+    # config["aleatoric"] = False
 
     best_model, dataloaders, config, logger = train_model_e2e(
         config,
@@ -335,6 +357,9 @@ def main():
     parser.add_argument(
         "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
     )
+    parser.add_argument(
+        "--max_norm", type=float, default=None, help="Max norm for gradient clipping"
+    )
 
     args = parser.parse_args()
     # Construct kwargs, excluding arguments that were not provided
@@ -365,7 +390,7 @@ if __name__ == "__main__":
     #     descriptor_chemical="ecfp2048",
     #     median_scaling=False,
     #     ext="pkl",
-    #     wandb_project_name="2024-04-17-all-models",
+    #     wandb_project_name="test-evidential",
     #     # sweep_count = 0  # 250
     #     # aleatoric = True
     #     # epochs=1

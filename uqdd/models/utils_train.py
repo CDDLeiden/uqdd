@@ -48,7 +48,8 @@ def evidential_processing(outputs, alea_all):
 
 # def apply_model_aleatoric_option()
 def train(
-    model, dataloader, loss_fn, optimizer, aleatoric, device=DEVICE, epoch=0, max_norm=10.0  # pbar=None,
+        model, dataloader, loss_fn, optimizer, device=DEVICE, epoch=0, max_norm=None, #10.0,
+        lossfname="EvidenceRegressionLoss"  # pbar=None,
 ):
     # max_norm = 10.0
     model.train()
@@ -64,22 +65,33 @@ def train(
         inputs = tuple(x.to(device) for x in inputs)
         targets = targets.to(device)
         optimizer.zero_grad()
-        if aleatoric:
-            outputs, vars_ = model(inputs)
-            # vars_ = torch.exp(logvars)
-            loss = loss_fn(outputs, targets, vars_)
-            vars_all.append(vars_)
-        else:
-            outputs = model(inputs)
-            loss = loss_fn(outputs, targets)
+        outputs, vars_ = model(inputs)
+        # if outputs.dim() > targets.dim():
+        #     _, _, num_repeats = outputs.shape
+        #     targets = targets.repeat(num_repeats, 1).t()
+        # t = t.unsqueeze(2).expand(-1,-1,5)
+        args = (outputs, targets, vars_) if lossfname == 'gaussnll' else (
+        outputs, targets)  # instead we need to specify here if loss fn is gaussnll
+        loss = loss_fn(*args)
+        vars_all.append(vars_)
+        # if aleatoric:
+        #     outputs, vars_ = model(inputs)
+        #     # vars_ = torch.exp(logvars)
+        #     loss = loss_fn(outputs, targets, vars_)
+        #     vars_all.append(vars_)
+        # else:
+        #     outputs = model(inputs)
+        #     loss = loss_fn(outputs, targets)
 
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
-
+        if max_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                       max_norm=max_norm)  # TODO : does this actually work with Ensemble
         optimizer.step()
         total_loss += loss.item()  # * outputs.size(0)
-        outputs, vars_all = evidential_processing(outputs, vars_all)
+        # outputs, vars_all = evidential_processing(outputs, vars_all)
         targets_all.append(targets)
+        outputs = outputs[0] if lossfname.lower() == "evidential_regression" else outputs  # Because it gets 4 outputs
         outputs_all.append(outputs)
 
     total_loss /= num_batches  # len(dataloader.dataset)
@@ -105,20 +117,29 @@ def train(
         },
         step=epoch,
     )
-    if aleatoric:
-        # vars_all = torch.exp(torch.stack(vars_all))
-        # vars_mean = torch.mean(vars_all, dim=0)
-        # vars_var = torch.var(vars_all, dim=0)
-
-        vars_all = torch.cat(vars_all, dim=0)
-        vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
-        wandb.log(
-            data={
-                "train/alea_mean": vars_mean.item(),
-                "train/alea_var": vars_var.item(),
-            },
-            step=epoch,
-        )
+    vars_all = torch.cat(vars_all, dim=0)
+    vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
+    wandb.log(
+        data={
+            "train/alea_mean": vars_mean.item(),
+            "train/alea_var": vars_var.item(),
+        },
+        step=epoch,
+    )
+    # if aleatoric:
+    #     # vars_all = torch.exp(torch.stack(vars_all))
+    #     # vars_mean = torch.mean(vars_all, dim=0)
+    #     # vars_var = torch.var(vars_all, dim=0)
+    #
+    #     vars_all = torch.cat(vars_all, dim=0)
+    #     vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
+    #     wandb.log(
+    #         data={
+    #             "train/alea_mean": vars_mean.item(),
+    #             "train/alea_var": vars_var.item(),
+    #         },
+    #         step=epoch,
+    #     )
     return total_loss
 
 
@@ -126,12 +147,13 @@ def evaluate(
         model,
         dataloader,
         loss_fn,
-        aleatoric=False,
+        # aleatoric=False,
         device=DEVICE,
         # pbar=None,
         metrics_per_task=False,
         subset="val",  # can be "train", "val" or "test"
         epoch=0,
+        lossfname="EvidenceRegressionLoss"
 ):
     model.eval()
     total_loss = 0.0
@@ -144,19 +166,24 @@ def evaluate(
         for inputs, targets in dataloader:
             inputs = tuple(x.to(device) for x in inputs)
             targets = targets.to(device)
+            outputs, vars_ = model(inputs)
+            args = (outputs, targets, vars_) if lossfname.lower() == 'gaussnll' else (outputs, targets)
+            loss = loss_fn(*args)
+            vars_all.append(vars_)
 
-            if aleatoric:
-                outputs, vars_ = model(inputs)
-                # vars_ = torch.exp(logvars)
-                loss = loss_fn(outputs, targets, vars_)
-                vars_all.append(vars_)
-            else:
-                outputs = model(inputs)
-                loss = loss_fn(outputs, targets)
+            # if aleatoric:
+            #     outputs, vars_ = model(inputs)
+            #     # vars_ = torch.exp(logvars)
+            #     loss = loss_fn(outputs, targets, vars_)
+            #     vars_all.append(vars_)
+            # else:
+            #     outputs = model(inputs)
+            #     loss = loss_fn(outputs, targets)
 
             total_loss += loss.item()  # * outputs.size(0)
-            outputs, vars_all = evidential_processing(outputs, vars_all)
+            # outputs, vars_all = evidential_processing(outputs, vars_all)
             targets_all.append(targets)
+            outputs = outputs[0] if lossfname.lower() == "evidential_regression" else outputs  # Because it gets 4 outputs
             outputs_all.append(outputs)
 
         total_loss /= num_batches  # len(dataloader.dataset)
@@ -190,20 +217,29 @@ def evaluate(
                     step=epoch,
                 )
         # Aleatoric Uncertainty
-        if aleatoric:
-            vars_all = torch.cat(vars_all, dim=0)
-            vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
-            # vars_all = torch.cat(vars_all, dim=0)
-            # # vars_all = torch.exp(torch.cat(logvars_all, dim=0))
-            # vars_mean = torch.mean(vars_all)
-            # vars_var = torch.var(vars_all)
-            wandb.log(
-                data={
-                    f"{subset}/alea_mean": vars_mean.item(),
-                    f"{subset}/alea_var": vars_var.item(),
-                },
-                step=epoch,
-            )
+        vars_all = torch.cat(vars_all, dim=0)
+        vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
+        wandb.log(
+            data={
+                f"{subset}/alea_mean": vars_mean.item(),
+                f"{subset}/alea_var": vars_var.item(),
+            },
+            step=epoch,
+        )
+        # if aleatoric:
+        #     vars_all = torch.cat(vars_all, dim=0)
+        #     vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
+        #     # vars_all = torch.cat(vars_all, dim=0)
+        #     # # vars_all = torch.exp(torch.cat(logvars_all, dim=0))
+        #     # vars_mean = torch.mean(vars_all)
+        #     # vars_var = torch.var(vars_all)
+        #     wandb.log(
+        #         data={
+        #             f"{subset}/alea_mean": vars_mean.item(),
+        #             f"{subset}/alea_var": vars_var.item(),
+        #         },
+        #         step=epoch,
+        #     )
 
     return total_loss
 
@@ -211,7 +247,7 @@ def evaluate(
 def predict(
         model,
         dataloader,
-        aleatoric=False,
+        # aleatoric=False,
         device=DEVICE,
 ):
     model.eval()
@@ -224,23 +260,27 @@ def predict(
                 dataloader, total=len(dataloader), desc="Predicting"
         ):
             inputs = tuple(x.to(device) for x in inputs)
-            if aleatoric:
-                outputs, vars_ = model(inputs)
-                # vars_ = torch.exp(logvars)
-                vars_all.append(vars_)
-            else:
-                outputs = model(inputs)
+            outputs, vars_ = model(inputs)
+            vars_all.append(vars_)
+            # if aleatoric:
+            #     outputs, vars_ = model(inputs)
+            #     # vars_ = torch.exp(logvars)
+            #     vars_all.append(vars_)
+            # else:
+            #     outputs = model(inputs)
             outputs_all.append(outputs)
             targets_all.append(targets)
 
     outputs_all = torch.cat(outputs_all, dim=0).cpu()
     targets_all = torch.cat(targets_all, dim=0).cpu()
+    vars_all = torch.cat(vars_all, dim=0).cpu()
+    return outputs_all, targets_all, vars_all
+    # if aleatoric:
+    #     vars_all = torch.cat(vars_all, dim=0).cpu()
+    #     return outputs_all, targets_all, vars_all
+    #
+    # return outputs_all, targets_all, None
 
-    if aleatoric:
-        vars_all = torch.cat(vars_all, dim=0).cpu()
-        return outputs_all, targets_all, vars_all
-
-    return outputs_all, targets_all, None
 
 #
 # def _predict(
@@ -324,12 +364,12 @@ def predict(
 #         return outputs_all, targets_all, vars_all
 #     return outputs_all, targets_all, None
 
-    # if return_targets and not aleatoric:
-    #     return outputs_all, targets_all, None
-    # elif return_targets and aleatoric:
-    #     return outputs_all, targets_all, logvars_all
-    #
-    # return outputs_all
+# if return_targets and not aleatoric:
+#     return outputs_all, targets_all, None
+# elif return_targets and aleatoric:
+#     return outputs_all, targets_all, logvars_all
+#
+# return outputs_all
 
 
 def evaluate_predictions(
@@ -354,7 +394,7 @@ def evaluate_predictions(
     uct_metrics_logger = MetricsTable(
         model_type=model_type,
         config=config,
-        add_plots_to_table=True, # * we can turn on if we want to see them in wandb * #
+        add_plots_to_table=True,  # * we can turn on if we want to see them in wandb * #
         logger=logger,
     )
 
@@ -396,7 +436,7 @@ def evaluate_predictions(
 
 
 def initial_evaluation(
-        model, train_loader, val_loader, loss_fn, aleatoric, device=DEVICE, epoch=0  # pbar=None,
+        model, train_loader, val_loader, loss_fn, device=DEVICE, epoch=0, lossfname=""  # pbar=None,
 ):
     # val_loss, val_rmse, val_r2, val_evs = evaluate(
     #     model, val_loader, loss_fn, aleatoric, device, pbar, False, epoch
@@ -405,10 +445,10 @@ def initial_evaluation(
     #     model, train_loader, loss_fn, aleatoric, device, pbar, False, epoch
     # )
     val_loss = evaluate(
-        model, val_loader, loss_fn, aleatoric, device, False, "val", epoch
+        model, val_loader, loss_fn, device, False, "val", epoch, lossfname
     )
     train_loss = evaluate(
-        model, train_loader, loss_fn, aleatoric, device, False, "train", epoch
+        model, train_loader, loss_fn, device, False, "train", epoch, lossfname
     )
     return train_loss, val_loss
 
@@ -420,10 +460,10 @@ def run_one_epoch(
         loss_fn,
         optimizer,
         lr_scheduler,
-        aleatoric=False,
         epoch=0,
         device=DEVICE,
-        max_norm=10.0
+        max_norm=None, #=10.0,
+        lossfname=""
 ):
     """
     Run a single epoch of training and evaluation.
@@ -457,15 +497,15 @@ def run_one_epoch(
     # pbar = None
     if epoch == 0:
         train_loss, val_loss = initial_evaluation(
-            model, train_loader, val_loader, loss_fn, aleatoric, device, epoch
+            model, train_loader, val_loader, loss_fn, device, epoch, lossfname
         )
 
     else:
         train_loss = train(
-            model, train_loader, loss_fn, optimizer, aleatoric, device, epoch, max_norm=max_norm
+            model, train_loader, loss_fn, optimizer, device, epoch, max_norm=max_norm, lossfname=lossfname
         )
         val_loss = evaluate(
-            model, val_loader, loss_fn, aleatoric, device, False, "val", epoch
+            model, val_loader, loss_fn, device, False, "val", epoch, lossfname
         )
 
         if lr_scheduler is not None:
@@ -538,7 +578,7 @@ def train_model(
         seed=42,
         device=DEVICE,
         logger=None,
-        max_norm=10.0
+        max_norm=None, #10.0
 ):
     try:
         set_seed(seed)
@@ -555,7 +595,7 @@ def train_model(
         )
         aleatoric = config.get("aleatoric", False)
 
-        if aleatoric and config.loss != "gaussnll":
+        if aleatoric and config.loss.lower() != "gaussnll":
             logger.warning(f"Aleatoric Uncertainty is to be calculated "
                            f"but the loss function provided = {config.loss} doesnt allow this. "
                            f"Changing loss to gaussianNLL")
@@ -593,10 +633,11 @@ def train_model(
                     loss_fn=loss_fn,
                     optimizer=optimizer,
                     lr_scheduler=lr_scheduler,
-                    aleatoric=aleatoric,
+                    # aleatoric=aleatoric,
                     epoch=epoch,
                     device=device,
-                    max_norm=max_norm
+                    max_norm=max_norm,
+                    lossfname=config.loss
                 )
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -622,11 +663,11 @@ def run_model(
         dataloaders,
         device=DEVICE,
         logger=create_logger("run_model"),
-        max_norm=10.0
+        max_norm=None, #10.0
 ):
     seed = 42
     n_targets = config.get("n_targets", -1)
-    aleatoric = config.get("aleatoric", False)
+    # aleatoric = config.get("aleatoric", False)
     mt = n_targets > 1
     # Train the model
     best_model, loss_fn = train_model(
@@ -643,7 +684,7 @@ def run_model(
 
     # Testing metrics on the best model
     test_loss = evaluate(
-        best_model, dataloaders["test"], loss_fn, aleatoric, device, metrics_per_task=mt, subset="test", epoch=None
+        best_model, dataloaders["test"], loss_fn, device, metrics_per_task=mt, subset="test", epoch=None, lossfname=config.loss
     )
 
     # TODO FOR TESTING
@@ -658,10 +699,11 @@ def train_model_e2e(
         model_type="baseline",
         model_kwargs=None,
         logger=None,
-        max_norm=10.0
+        seed=42,
+        # max_norm=None, #10.0
 ):
     start_time = datetime.now()
-    seed = 42
+    # seed = 42
     set_seed(seed)
 
     if model_kwargs is None:
@@ -672,7 +714,7 @@ def train_model_e2e(
             "wandb_project_name", "test-project"
         )  # add it to config only in baseline not the sweep
         run = wandb.init(
-            config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name
+            config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name, reinit=True
         )
     else:  # TODO check the effect here?
         run = wandb.init(config=config, dir=WANDB_DIR, mode=WANDB_MODE)
@@ -688,6 +730,7 @@ def train_model_e2e(
     split_type = config.get("split_type", "random")
     ext = config.get("ext", "pkl")
     task_type = config.get("task_type", "regression")
+    max_norm = config.get("max_norm", None)  # 10.0
     # aleatoric = config.get("aleatoric", False)
     assert split_type in [
         "random",
@@ -793,7 +836,8 @@ def train_model_e2e(
     return best_model, dataloaders, config, logger
 
 
-def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, epi_val=None, epi_test=None, uct_logger=None):
+def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, epi_val=None, epi_test=None,
+                      uct_logger=None):
     model_name = config.get("model_name", "ensemble")
     data_specific_path = config.get("data_specific_path", None)
 
@@ -816,7 +860,6 @@ def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, ep
 
     # Test Set
     return recal_model
-
 
 # def _run_model_e2e(
 #     model,

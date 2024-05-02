@@ -1,6 +1,6 @@
 {
   "model_type": "ensemble",
-  "ensemble_size": 10,
+  "ensemble_size": 2,
   "loss": "gaussnll",
   "aleatoric": true,
   "chem_layers": [256],
@@ -8,11 +8,12 @@
   "regressor_layers": [128],
   "dropout": 0.2,
   "batch_size": 512,
-  "epochs": 3000,
+  "epochs": 2,
   "early_stop": 150,
   "loss_reduction": "mean",
   "optimizer": "adamw",
   "lr": 0.001,
   "weight_decay": 0.01,
-  "lr_scheduler": null
+  "lr_scheduler": null,
+  "max_norm": null
 }

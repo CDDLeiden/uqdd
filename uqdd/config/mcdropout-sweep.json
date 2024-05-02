@@ -1,5 +1,5 @@
 {
-  "program": "baseline.py",
+  "program": "mcdropout.py",
   "entity": "bolak92",
   "method": "bayes",
   "metric": {
@@ -13,7 +13,6 @@
     "chem_layers": {
       "values": [
         [1024,512,256],
-        [1024,512],
         [1024,256],
         [1024],
         [512],
@@ -22,11 +21,9 @@
     },
     "prot_layers": {
       "values": [
-        [1536, 1024, 512, 256],
-        [1024,512,256],
+        [768,512,256],
         [512,256,128],
         [512,128],
-        [512,256],
         [512],
         [256]
       ]
@@ -47,10 +44,10 @@
       "values": [128,256,512]
     },
     "epochs": {
-      "value": 3000
+      "value": 5000
     },
     "early_stop": {
-      "value": 100
+      "value": 200
     },
     "loss": {
       "value": "gaussnll"
@@ -70,8 +67,11 @@
     "lr_scheduler": {
       "value": null
     },
-    "max_norm": {
-      "value": null
+    "model_type": {
+      "value": "mcdropout"
+    },
+    "num_mc_samples": {
+      "value": 100
     }
   }
 }

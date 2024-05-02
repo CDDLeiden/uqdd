@@ -1,5 +1,5 @@
 {
-  "program": "baseline.py",
+  "program": "evidential.py",
   "entity": "bolak92",
   "method": "bayes",
   "metric": {
@@ -8,12 +8,11 @@
   },
   "parameters": {
     "aleatoric": {
-      "value": true
+      "value": false
     },
     "chem_layers": {
       "values": [
         [1024,512,256],
-        [1024,512],
         [1024,256],
         [1024],
         [512],
@@ -22,11 +21,9 @@
     },
     "prot_layers": {
       "values": [
-        [1536, 1024, 512, 256],
-        [1024,512,256],
+        [768,512,256],
         [512,256,128],
         [512,128],
-        [512,256],
         [512],
         [256]
       ]
@@ -47,13 +44,13 @@
       "values": [128,256,512]
     },
     "epochs": {
-      "value": 3000
+      "value": 5000
     },
     "early_stop": {
       "value": 100
     },
     "loss": {
-      "value": "gaussnll"
+      "value": "evidential_regression"
     },
     "loss_reduction": {
       "value": "mean"
@@ -70,8 +67,14 @@
     "lr_scheduler": {
       "value": null
     },
+    "model_type": {
+      "value": "evidential"
+    },
+    "lamb": {
+      "values": [1.0, 0.01, 0.001]
+    },
     "max_norm": {
-      "value": null
+      "values": [null, 10.0]
     }
   }
 }

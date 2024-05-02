@@ -1,10 +1,10 @@
 #!/bin/bash
 
 gpu_device=${1:-0}
-sweep_count=${2:-0}
+sweep_count=${2:-2}
 data=${3:-"papyrus"}
 activity=${4:-"xc50"}
-desc_prot=${5:-"ankh-base"}
+desc_prot=${5:-"ankh-large"}
 desc_chem=${6:-"ecfp2048"}
 split_type=${7:-"random"}
 n_targets=${8:--1}
@@ -27,10 +27,10 @@ task_type="regression"
 #split_type="time"
 #activity="xc50"
 #wandb_project="${today}_baseline_${data}_${activity}_${split_type}_${desc_prot}_${desc_chem}_${sweep_count}sweep"
-wandb_project="${today}-all-models" #"2024-04-16-baseline"
+wandb_project="2024-04-30-baseline" #"${today}-baseline" #"2024-04-16-baseline"
 logname="${wandb_project}-baseline.txt"
 
-python baseline.py --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project --sweep-count "$sweep_count" 2>&1 | tee ../logs/"${logname}"
+python baseline.py --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project --sweep-count "$sweep_count" #2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"

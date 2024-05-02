@@ -1,5 +1,5 @@
 {
-  "program": "baseline.py",
+  "program": "ensemble.py",
   "entity": "bolak92",
   "method": "bayes",
   "metric": {
@@ -13,7 +13,6 @@
     "chem_layers": {
       "values": [
         [1024,512,256],
-        [1024,512],
         [1024,256],
         [1024],
         [512],
@@ -22,11 +21,9 @@
     },
     "prot_layers": {
       "values": [
-        [1536, 1024, 512, 256],
-        [1024,512,256],
+        [768,512,256],
         [512,256,128],
         [512,128],
-        [512,256],
         [512],
         [256]
       ]
@@ -44,10 +41,10 @@
       "values": [0.1,0.2]
     },
     "batch_size": {
-      "values": [128,256,512]
+      "values": [256,512]
     },
     "epochs": {
-      "value": 3000
+      "value": 5000
     },
     "early_stop": {
       "value": 100
@@ -70,8 +67,14 @@
     "lr_scheduler": {
       "value": null
     },
+    "model_type": {
+      "value": "ensemble"
+    },
+    "ensemble_size": {
+      "value": 100
+    },
     "max_norm": {
-      "value": null
+      "values": [null, 10.0]
     }
   }
 }

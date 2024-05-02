@@ -11,6 +11,15 @@ from uqdd import CONFIG_DIR, LOGS_DIR
 string_types = (type(b""), type(""))
 
 
+def float_or_none(value):
+    if value.lower() == 'none':
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid float value: '{value}'")
+
+
 def create_logger(name="logger", file_level="debug", stream_level="info"):
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     levels = {

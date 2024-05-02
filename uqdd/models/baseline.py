@@ -3,7 +3,7 @@ import argparse
 import wandb
 import torch
 import torch.nn as nn
-from uqdd.utils import create_logger, parse_list
+from uqdd.utils import create_logger, parse_list, float_or_none
 from uqdd.models.utils_models import (
     get_model_config,
     get_sweep_config,
@@ -39,7 +39,7 @@ class BaselineDNN(nn.Module):
         self.prot_feature_extractor = None
         self.chem_feature_extractor = None
         self.regressor_or_classifier = None
-        self.logvar_layer = None
+        self.aleavar_layer = None
         self.output_layer = None
         self.logger = (
             create_logger(name="baseline", file_level="debug", stream_level="info")
@@ -78,15 +78,20 @@ class BaselineDNN(nn.Module):
             combined_features = chem_features
 
         _output = self.regressor_or_classifier(combined_features)
-        if self.aleatoric:
-            output = self.output_layer(_output)
-            logvar = self.logvar_layer(_output)
-            return output, logvar
-        else:
-            output = self.output_layer(_output)
-        # TODO : check this with classification if necessary:
-        self.output_layer(_output)
-        return output
+        output = self.output_layer(_output)
+
+        var_ = self.aleavar_layer(_output)
+
+        return output, var_
+        # if self.aleatoric:
+        #     output = self.output_layer(_output)
+        #     logvar = self.logvar_layer(_output)
+        #     return output, logvar
+        # else:
+        #     output = self.output_layer(_output)
+        # # TODO : check this with classification if necessary:
+        # # self.output_layer(_output)
+        # return output
 
     @staticmethod
     def create_mlp(input_dim, layer_dims, dropout): # , output_dim=None
@@ -138,16 +143,25 @@ class BaselineDNN(nn.Module):
         self.regressor_or_classifier = self.create_mlp(
             combined_input_dim, regressor_layers, config["dropout"]
         )
-        if self.aleatoric:
-            self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
-            self.logvar_layer = nn.Sequential(
-                nn.Linear(regressor_layers[-1], output_dim),
-                nn.Softplus()
-            )
 
-        else:
-            self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
+        self.logger.debug(f"Regressor layers: {regressor_layers}")
         self.logger.debug(f"Output dimension: {output_dim}")
+        self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
+        if self.aleatoric:
+            self.aleavar_layer = nn.Sequential(
+                nn.Linear(regressor_layers[-1], output_dim),
+                nn.Softplus()  # TODO questionable
+            )
+        # if self.aleatoric:
+        #     self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
+        #     self.logvar_layer = nn.Sequential(
+        #         nn.Linear(regressor_layers[-1], output_dim),
+        #         nn.Softplus()
+        #     )
+        #
+        # else:
+        #     self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
+        # self.logger.debug(f"Output dimension: {output_dim}")
 
 
 def run_baseline(config=None):
@@ -395,9 +409,9 @@ def main():
         "--loss_reduction", type=str, default=None, help="Loss reduction method"
     )
     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
-    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+    parser.add_argument("--lr", type=float_or_none, default=None, help="Learning rate")
     parser.add_argument(
-        "--weight_decay", type=float, default=None, help="Weight decay rate"
+        "--weight_decay", type=float_or_none, default=None, help="Weight decay rate"
     )
     parser.add_argument(
         "--lr_scheduler", type=str, default=None, help="LR scheduler type"
@@ -406,7 +420,10 @@ def main():
         "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
     )
     parser.add_argument(
-        "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
+        "--lr_scheduler_factor", type=float_or_none, default=None, help="LR scheduler factor",
+    )
+    parser.add_argument(
+        "--max_norm", type=float_or_none, default=None, help="Max norm for gradient clipping" #, choices=[None, 10.0, 50.0]
     )
 
     args = parser.parse_args()
@@ -427,13 +444,13 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #
+    # #
     # data_name = "papyrus"
     # n_targets = -1
     # task_type = "regression"
     # activity = "xc50"
     # split = "random"
-    # desc_prot = "ankh-large"
+    # desc_prot = "ankh-base"
     # desc_chem = "ecfp2048"
     # median_scaling = False
     # ext = "pkl"

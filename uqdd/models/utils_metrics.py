@@ -279,12 +279,12 @@ def process_preds(
             vars_ = alea_vars
 
     if epi_vars is None:
-        epi_vars = predictions.std(dim=-1) #.squeeze()  # (dim=2)
+        epi_vars = predictions.var(dim=-1) #.squeeze()  # (dim=2)
         predictions = predictions.mean(dim=-1) #.squeeze()
     # Get the predictions mean and std
     y_pred = predictions # predictions.mean(dim=-1).squeeze()  # (dim=2)
-    y_std = epi_vars
-    y_std = np.minimum(y_std, 1e3) # clip the unc for vis
+    y_std = epi_vars.sqrt()
+    # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
     y_true = targets #.squeeze()
     # if vars_ is not None:
     #     vars_ = vars_.mean(dim=-1).squeeze()
@@ -307,7 +307,7 @@ def process_preds(
         vars_[nan_mask],
     )
     # Calculate the error
-    y_err = y_pred - y_true  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
+    y_err = (y_pred - y_true).abs()  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
     # Convert to numpy arrays
     y_pred, y_std, y_true, y_err, vars_ = map(
         lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)

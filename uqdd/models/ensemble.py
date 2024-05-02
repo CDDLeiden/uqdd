@@ -17,7 +17,7 @@ from uqdd.models.utils_train import (
 
 from uqdd.models.utils_models import (
     get_model_config,
-    get_sweep_config,
+    get_sweep_config, set_seed,
 )
 
 
@@ -26,6 +26,7 @@ class EnsembleDNN(nn.Module):
         self,
         config=None,
         model_class=BaselineDNN,
+        model_list=None,
         **kwargs
     ):
         super(EnsembleDNN, self).__init__()
@@ -35,29 +36,86 @@ class EnsembleDNN(nn.Module):
         self.config = config
         self.logger = create_logger(name="EnsembleDNN")
         self.ensemble_size = config.get("ensemble_size", 100)
-        self.aleatoric = config.get("aleatoric", False)
-
-        self.models = nn.ModuleList(
-            [model_class(config, **kwargs) for _ in range(self.ensemble_size)]
-        )
+        # self.aleatoric = config.get("aleatoric", False)
+        # self.aleatoric = False
+        if model_list is not None:
+            models = model_list
+        else:
+            models = []
+            seed = 42
+            for _ in range(self.ensemble_size):
+                set_seed(seed)
+                seed += 1
+                model = model_class(config, **kwargs)
+                models.append(model)
+        self.models = nn.ModuleList(models)
+        # self.models = nn.ModuleList(
+        #     [model_class(config, **kwargs) for _ in range(self.ensemble_size)]
+        # )
 
     def forward(self, inputs):
-        if self.aleatoric:
-            outputs = []
-            vars_ = []
-            for model in self.models:
-                output, var_ = model(inputs)
-                outputs.append(output)
-                vars_.append(var_)
-            outputs = torch.stack(outputs, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
-            vars_ = torch.stack(vars_, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
-            return outputs, vars_
-        else:
-            outputs = torch.stack([model(inputs) for model in self.models], dim=2)
-            return outputs
+        outputs = []
+        vars_ = []
+        for model in self.models:
+            output, var_ = model(inputs)
+            outputs.append(output)
+            vars_.append(var_)
+        outputs = torch.stack(outputs, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+        vars_ = torch.stack(vars_, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+        return outputs, vars_
+        # if self.aleatoric:
+        #     outputs = []
+        #     vars_ = []
+        #     for model in self.models:
+        #         output, var_ = model(inputs)
+        #         outputs.append(output)
+        #         vars_.append(var_)
+        #     outputs = torch.stack(outputs, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+        #     vars_ = torch.stack(vars_, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+        #     return outputs, vars_
+        # else:
+        #     outputs = torch.stack([model(inputs) for model in self.models], dim=2)
+        #     return outputs
 
 
 def run_ensemble(config=None):
+    ensemble_size = config.get("ensemble_size", 10)
+    best_models = []
+    seed = 42
+    for _ in range(ensemble_size):
+        best_model, dataloaders, config_, logger = train_model_e2e(
+            config, model=BaselineDNN, model_type="baseline", logger=LOGGER, seed=seed
+        )
+        best_models.append(best_model)
+        seed += 1
+
+    ensemble_model = EnsembleDNN(config_, model_list=best_models)
+
+    preds, labels, alea_vars = predict(
+        ensemble_model, dataloaders["test"], device=DEVICE
+    )
+
+    # Then comes the predict metrics part
+    metrics, plots, uct_logger = evaluate_predictions(
+        config_,
+        preds,
+        labels,
+        alea_vars,
+        "ensemble",
+        logger
+    )
+
+    # RECALIBRATION # Get Calibration / Validation Set
+    preds_val, labels_val, alea_vars_val = predict(
+        ensemble_model, dataloaders["val"], device=DEVICE
+    )
+    recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config_, uct_logger=uct_logger)
+
+    return ensemble_model, recal_model, metrics, plots
+
+
+
+def _run_ensemble(config=None):
     best_model, dataloaders, config, logger = train_model_e2e(
         config,
         model=EnsembleDNN,
@@ -71,7 +129,7 @@ def run_ensemble(config=None):
 
     aleatoric = config.get("aleatoric", False)
     preds, labels, alea_vars = predict(
-        best_model, dataloaders["test"], aleatoric=aleatoric, device=DEVICE
+        best_model, dataloaders["test"], device=DEVICE  #aleatoric=aleatoric,
     )
 
     # Then comes the predict metrics part
@@ -86,7 +144,7 @@ def run_ensemble(config=None):
 
     # RECALIBRATION # Get Calibration / Validation Set
     preds_val, labels_val, alea_vars_val = predict(
-        best_model, dataloaders["val"], aleatoric=aleatoric, device=DEVICE
+        best_model, dataloaders["val"], device=DEVICE  # aleatoric=aleatoric,
     )
     recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config, uct_logger=uct_logger)
 
@@ -269,7 +327,9 @@ def main():
     parser.add_argument(
         "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
     )
-
+    parser.add_argument(
+        "--max_norm", type=float, default=None, help="Max norm for gradient clipping"
+    )
     args = parser.parse_args()
     # Construct kwargs, excluding arguments that were not provided
     kwargs = {k: v for k, v in vars(args).items() if v is not None}
@@ -287,7 +347,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    #
     # best_model, recal_model, metrics, plots = run_ensemble_wrapper(
     #     data_name="papyrus",
     #     activity_type="xc50",

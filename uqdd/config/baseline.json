@@ -13,5 +13,6 @@
     "optimizer": "adagrad",
     "lr": 0.001,
     "weight_decay": 0.01,
-    "lr_scheduler": null
+    "lr_scheduler": null,
+    "max_norm": null
 }
