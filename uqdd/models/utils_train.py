@@ -593,13 +593,13 @@ def train_model(
         optimizer = build_optimizer(
             model, config.optimizer, config.lr, config.weight_decay
         )
-        aleatoric = config.get("aleatoric", False)
+        # aleatoric = config.get("aleatoric", False)
 
-        if aleatoric and config.loss.lower() != "gaussnll":
-            logger.warning(f"Aleatoric Uncertainty is to be calculated "
-                           f"but the loss function provided = {config.loss} doesnt allow this. "
-                           f"Changing loss to gaussianNLL")
-            config.loss = "gaussnll"
+        # if aleatoric and config.loss.lower() != "gaussnll":
+        #     logger.warning(f"Aleatoric Uncertainty is to be calculated "
+        #                    f"but the loss function provided = {config.loss} doesnt allow this. "
+        #                    f"Changing loss to gaussianNLL")
+        #     config.loss = "gaussnll"
 
         # if multitask:
         #     reduction='none'

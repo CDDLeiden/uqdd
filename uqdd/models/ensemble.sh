@@ -2,10 +2,10 @@
 
 gpu_device=${1:-1}
 #sweep_count=${2:-10}
-ens_size=${2:-10}
+ens_size=${2:-100}
 data=${3:-"papyrus"}
 activity=${4:-"xc50"}
-desc_prot=${5:-"ankh-base"}
+desc_prot=${5:-"ankh-large"}
 desc_chem=${6:-"ecfp2048"}
 split_type=${7:-"random"}
 n_targets=${8:--1}
