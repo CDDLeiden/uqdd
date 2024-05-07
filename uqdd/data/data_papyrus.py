@@ -17,21 +17,21 @@ from papyrus_scripts.preprocess import (
 )
 from papyrus_scripts.reader import read_papyrus, read_protein_set
 from uqdd import DATA_DIR, DATASET_DIR, DEVICE
-from uqdd.utils import create_logger, get_config
-from uqdd.utils_chem import standardize_df, get_chem_desc
+from uqdd.utils import create_logger, get_config, save_pickle, load_pickle, save_df, load_df
+from uqdd.utils_chem import standardize_df, get_chem_desc, merge_scaffolds
 from uqdd.utils_prot import get_embeddings
 from uqdd.data.utils_data import (
     split_data,
     export_dataset,
-    load_df,
-    load_pickle,
-    export_pickle,
     load_desc_preprocessed,
     check_if_processed_file,
     export_tasks,
     apply_median_scaling,
-    target_filtering, export_df, merge_scaffolds,
+    target_filtering,  #merge_scaffolds,
 )
+# load_df,
+# load_pickle,
+# save_pickle,save_df,
 
 
 class Papyrus:
@@ -100,7 +100,7 @@ class Papyrus:
         min_datapoints: int = 50,
         min_actives: int = 10,
         active_threshold: float = 6.5,
-        only_normal: bool = True,
+        only_normal: bool = False,
         file_ext: str = "pkl",
         batch_size: int = 2,
         verbose: bool = False,
@@ -155,8 +155,8 @@ class Papyrus:
         split_types = self._get_split_types(split_type)
         t_tag = "all" if n_targets <= 0 else f"top{n_targets}"
         # TODO change the output path to include t_tag
-        export_mcs_path = Path(self.output_path) / t_tag / "mcs"
-        figure_path = Path(self.output_path) / t_tag / "mcs_figures"
+        export_path = Path(self.output_path) / t_tag #/ "mcs"
+        # figure_path = Path(self.output_path) / t_tag / "mcs_figures"
 
         if verbose:
             tar_tag = t_tag
@@ -171,11 +171,11 @@ class Papyrus:
                 unique_smiles = df["SMILES"].nunique()
                 self.logger.info(f"Unique SMILES: {unique_smiles}")
 
-            export_df(df, Path(self.output_path) / t_tag / f"papyrus_filtered_{self.activity_key}_{tar_tag}.csv")
+            save_df(df, export_path / f"papyrus_filtered_{self.activity_key}_{tar_tag}.csv")
 
             self.logger.info("Calculating scaffolds")
             df = merge_scaffolds(df, "SMILES")
-            export_df(df, Path(self.output_path) / t_tag / f"papyrus_filtered_{self.activity_key}_{tar_tag}_with_scaffolds.csv")
+            save_df(df, export_path / f"papyrus_filtered_{self.activity_key}_{tar_tag}_with_scaffolds.csv")
             self.logger.info(f"Unique scaffolds: {df['scaffold'].nunique()}")
 
         split_idx = self.split(
@@ -183,8 +183,8 @@ class Papyrus:
             split_types,
             split_proportions,
             max_k_clusters=max_k_clusters,
-            fig_output_path=figure_path,
-            export_mcs_path=export_mcs_path,
+            # fig_output_path=figure_path,
+            export_mcs_path=export_path,
             return_indices=True,
             recalculate=recalculate,
         )
@@ -366,7 +366,7 @@ class Papyrus:
         split_type,
         split_proportions,
         max_k_clusters=100,
-        fig_output_path=None,
+        # fig_output_path=None,
         export_mcs_path=None,
         return_indices=False,
         recalculate=False,
@@ -390,14 +390,14 @@ class Papyrus:
                 time_col="Year",
                 fractions=split_proportions,
                 max_k_clusters=max_k_clusters,
-                fig_output_path=fig_output_path,
+                # fig_output_path=fig_output_path,
                 export_mcs_path=export_mcs_path,
                 return_indices=return_indices,
                 seed=42,
             )
             # save the splits
             self.logger.info(f"Exporting the splits to {split_path}")
-            export_pickle(split_data_dict, split_path)
+            save_pickle(split_data_dict, split_path)
 
         return split_data_dict
 
@@ -742,11 +742,26 @@ def get_datasets(
     for subset in ["train", "val", "test"]:
         file_path = dir_path / f"{filename_prefix}_{subset}.{ext}"
         if not file_path.is_file():
-            # TODO calculate them here if not found
-            raise FileNotFoundError(
-                f"File {subset} not found: {file_path} - you need to precalculate the dataset "
-                f"features and splits first with Papyrus class."
+            logger.warning(f"File {subset} not found: {file_path} - "
+                           f"calculating it now with default settings - "
+                           f"for non-default settings, please use Papyrus class first.")
+            Papyrus(activity_type=activity_type)(
+                n_targets=n_targets,
+                descriptor_protein=desc_prot,
+                descriptor_chemical=desc_chem,
+                split_type=split_type
             )
+            if not file_path.is_file():
+                raise FileNotFoundError(
+                    f"File {subset} still not found: {file_path} "
+                    f"even after trying to calculate with Papyrus class"
+                )
+
+            # # TODO calculate them here if not found
+            # raise FileNotFoundError(
+            #     f"File {subset} not found: {file_path} - you need to precalculate the dataset "
+            #     f"features and splits first with Papyrus class."
+            # )
 
         calc_median = (
             True
@@ -865,44 +880,44 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    # # Example of how to use the Papyrus class
-    # activity_type = "kx"
-    # std_smiles = True
-    # verbose_files = False
-    #
-    # # call args
-    # n_targets = 20
-    # desc_prot = None  # "ankh-base"  # For testing - it should become none
-    # desc_chem = None  # "mordred"
-    # split_type = "random"
-    # all_descs = True
-    # recalculate = True
-    # split_proportions = [0.7, 0.15, 0.15]
-    # file_ext = "pkl"
-    #
-    # papyrus = Papyrus(
-    #     activity_type=activity_type,
-    #     std_smiles=std_smiles,
-    #     verbose_files=verbose_files,
-    # )
-    #
-    # papyrus(
-    #     n_targets=n_targets,
-    #     descriptor_protein=desc_prot,
-    #     descriptor_chemical=desc_chem,
-    #     all_descriptors=all_descs,
-    #     recalculate=recalculate,
-    #     split_type=split_type,
-    #     split_proportions=split_proportions,
-    #     max_k_clusters=100,
-    #     min_datapoints=50,
-    #     min_actives=10,
-    #     active_threshold=6.5,
-    #     only_normal=False,
-    #     file_ext=file_ext,
-    #     verbose=True
-    # )
+    # main()
+    # Example of how to use the Papyrus class
+    activity_type = "xc50"
+    std_smiles = True
+    verbose_files = False
+
+    # call args
+    n_targets = -1
+    desc_prot = "ankh-large"  # "ankh-base"  # For testing - it should become none
+    desc_chem = "ecfp2048"  # "mordred"
+    split_type = "scaffold_cluster"
+    all_descs = True
+    recalculate = True
+    split_proportions = [0.7, 0.15, 0.15]
+    file_ext = "pkl"
+
+    papyrus = Papyrus(
+        activity_type=activity_type,
+        std_smiles=std_smiles,
+        verbose_files=verbose_files,
+    )
+
+    papyrus(
+        n_targets=n_targets,
+        descriptor_protein=desc_prot,
+        descriptor_chemical=desc_chem,
+        all_descriptors=all_descs,
+        recalculate=recalculate,
+        split_type=split_type,
+        split_proportions=split_proportions,
+        max_k_clusters=100,
+        min_datapoints=50,
+        min_actives=10,
+        active_threshold=6.5,
+        only_normal=False,
+        file_ext=file_ext,
+        verbose=True
+    )
     # #
     # # reg_dataset = get_datasets(
     # #     n_targets=n_targets,

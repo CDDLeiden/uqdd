@@ -7,7 +7,7 @@ from torch import nn
 
 from tqdm import tqdm
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, TODAY, FIGS_DIR, MODELS_DIR
-from uqdd.data.utils_data import get_topx, get_tasks, export_pickle
+from uqdd.data.utils_data import get_topx, get_tasks #, save_pickle
 
 from uqdd.models.loss import build_loss
 from uqdd.models.utils_metrics import (
@@ -29,7 +29,7 @@ from uqdd.models.utils_models import (
     compute_pnorm,
     compute_gnorm
 )
-from uqdd.utils import create_logger
+from uqdd.utils import create_logger, save_pickle
 
 
 def evidential_processing(outputs, alea_all):
@@ -856,7 +856,7 @@ def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, ep
     model_dir.mkdir(exist_ok=True)
     model_name = config.get("model_name", "ensemble") + "_recalibrate_model.pkl"
     # pickle save the model to model_dir
-    export_pickle(recal_model, model_dir / model_name)
+    save_pickle(recal_model, model_dir / model_name)
 
     # Test Set
     return recal_model

@@ -7,105 +7,11 @@ from typing import Union, List
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from uqdd import DATASET_DIR, DEVICE, FIGS_DIR, TODAY
-from uqdd.utils_chem import generate_scaffold, clustering
-from tqdm.auto import tqdm
-from concurrent.futures import ProcessPoolExecutor
+from uqdd import DATASET_DIR, FIGS_DIR, TODAY
+from uqdd.utils import load_pickle, save_df, load_df
+from uqdd.utils_chem import merge_scaffolds, clustering
 
 string_types = (type(b""), type(""))
-
-
-def export_pickle(data, file_path):
-    """Helper function to export a pickle file."""
-    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(file_path, "wb") as file:
-        pickle.dump(data, file)
-
-
-def load_pickle(filepath):
-    """Helper function to load a pickle file."""
-    try:
-        with open(filepath, "rb") as file:
-            return pickle.load(file)
-    except FileNotFoundError:
-        logging.error(f"File not found: {filepath}")
-    except Exception as e:
-        logging.error(f"Error loading file {filepath}: {e}")
-
-
-def export_df(
-    df, file_path=None, output_path="./", filename="exported_file", ext="csv", **kwargs
-):
-    """
-    Exports a DataFrame to a specified file format.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        The DataFrame to be exported.
-    file_path : str or Path, optional
-        The full file path for export.
-        If provided, output_path, filename, and ext are ignored.
-        Default is None.
-    output_path : str, optional
-        The path to the output directory. Default is the current directory.
-    filename : str, optional
-        The name of the output file. Default is 'exported_file'.
-    ext : str, optional
-        The file extension to use. Default is 'csv'.
-    """
-    if df.empty:
-        return logging.warning("DataFrame is empty. Nothing to export.")
-
-    if file_path:
-        path_obj = Path(file_path)
-        output_path = path_obj.parent
-        filename = path_obj.stem
-        ext = path_obj.suffix.lstrip(".")
-    else:
-        if not filename.endswith(ext):
-            filename = f"{filename}.{ext}"
-        file_path = os.path.join(output_path, filename)
-
-    os.makedirs(output_path, exist_ok=True)
-
-    if not filename.endswith(ext):
-        filename = f"{filename}.{ext}"
-    if ext == "csv":
-        df.to_csv(file_path, index=False, **kwargs)
-    elif ext == "parquet":
-        df.to_parquet(file_path, index=False, **kwargs)
-    elif ext == "feather":
-        df.to_feather(file_path, **kwargs)
-    elif ext == "pkl":
-        df.to_pickle(file_path, **kwargs)
-    else:
-        raise ValueError(f"Unsupported file extension: {ext}")
-
-    logging.info(f"DataFrame exported to {file_path}")
-
-
-def load_df(input_path, **kwargs):
-    """
-    Loads a DataFrame from a specified file format.
-
-    Parameters
-    ----------
-    input_path : str or Path
-        The path to the input file.
-    """
-    # we want to get the extension from the Path object
-    if isinstance(input_path, string_types):
-        input_path = Path(input_path)
-    ext = input_path.suffix.lstrip(".")
-    if ext == "csv":
-        return pd.read_csv(input_path, **kwargs)
-    elif ext == "parquet":
-        return pd.read_parquet(input_path, **kwargs)
-    elif ext == "pkl":
-        return pd.read_pickle(input_path, **kwargs)
-    else:
-        raise ValueError(f"Unsupported file extension for loading: {ext} provided")
 
 
 def export_tasks(data_name, activity, n_targets, label_col):
@@ -120,7 +26,7 @@ def export_tasks(data_name, activity, n_targets, label_col):
 
 def export_dataset(subsets_dict, files_paths, cols_to_include=None):
     for subset in ["train", "val", "test"]:
-        export_df(subsets_dict[subset][cols_to_include], file_path=files_paths[subset])
+        save_df(subsets_dict[subset][cols_to_include], file_path=files_paths[subset])
 
 
 def merge_preprocessed_desc(df, preprocessed_df, matching_col, desc_col):
@@ -272,45 +178,45 @@ def random_split(
         )
     return create_split_dict("random", train_df, val_df, test_df)
 
-
-def merge_scaffolds(df, smiles_col="SMILES"): # , verbose=False, output_path="./"
-    """
-    Merges the scaffold information into the DataFrame.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        The input DataFrame.
-    smiles_col : str, optional
-        The name of the column containing the SMILES strings. Default is 'smiles'.
-    verbose : bool, optional
-        If True, prints the progress of the scaffold generation. Default is False.
-    output_path : str, optional
-        The path to the output directory for scaffold clustering figures. Default is None.
-    Returns
-    -------
-
-    """
-    # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
-    unique_smiles = df[smiles_col].unique().tolist()
-
-    with ProcessPoolExecutor() as executor:
-        scaffolds = list(
-            tqdm(
-                executor.map(generate_scaffold, unique_smiles),
-                total=len(unique_smiles),
-                desc="Generating scaffolds",
-            )
-        )
-
-    smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
-    df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
-
-    # if verbose:
-    #     # print(f"Number of unique scaffolds: {df['scaffold'].nunique()}")
-    #     export_df(df, Path(output_path) / "merged_scaffolds.csv")
-
-    return df
+#
+# def merge_scaffolds(df, smiles_col="SMILES"):
+#     """
+#     Merges the scaffold information into the DataFrame.
+#
+#     Parameters
+#     ----------
+#     df : pandas.DataFrame
+#         The input DataFrame.
+#     smiles_col : str, optional
+#         The name of the column containing the SMILES strings. Default is 'smiles'.
+#     verbose : bool, optional
+#         If True, prints the progress of the scaffold generation. Default is False.
+#     output_path : str, optional
+#         The path to the output directory for scaffold clustering figures. Default is None.
+#     Returns
+#     -------
+#
+#     """
+#     # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
+#     unique_smiles = df[smiles_col].unique().tolist()
+#
+#     with ProcessPoolExecutor() as executor:
+#         scaffolds = list(
+#             tqdm(
+#                 executor.map(generate_scaffold, unique_smiles),
+#                 total=len(unique_smiles),
+#                 desc="Generating scaffolds",
+#             )
+#         )
+#
+#     smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
+#     df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
+#
+#     # if verbose:
+#     #     # print(f"Number of unique scaffolds: {df['scaffold'].nunique()}")
+#     #     export_df(df, Path(output_path) / "merged_scaffolds.csv")
+#
+#     return df
 
 
 def scaffold_split(
@@ -353,21 +259,7 @@ def scaffold_split(
     """
     # set random seed
     np.random.seed(seed)
-    df = merge_scaffolds(df, smiles_col=smiles_col, verbose=False)
-    # # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
-    # unique_smiles = df[smiles_col].unique().tolist()
-    #
-    # with ProcessPoolExecutor() as executor:
-    #     scaffolds = list(
-    #         tqdm(
-    #             executor.map(generate_scaffold, unique_smiles),
-    #             total=len(unique_smiles),
-    #             desc="Generating scaffolds",
-    #         )
-    #     )
-    #
-    # smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
-    # df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
+    df = merge_scaffolds(df, smiles_col=smiles_col)
 
     # get unique scaffolds
     scaffolds = list(df["scaffold"].unique())
@@ -407,17 +299,17 @@ def scaffold_cluster_split(
     val_frac=0.15,
     test_frac=0.15,
     max_k=100,
-    batch_size=10000,
+    # batch_size=10000,
     withH=False,
-    fig_output_path=None,
+    # fig_output_path=None,
     export_mcs_path=None,
     return_indices=False,
     seed=42,
 ) -> dict:
     # set random seed
     np.random.seed(seed)
-
-    df = merge_scaffolds(df, smiles_col=smiles_col, verbose=False)
+    if not 'scaffold' in df.columns:
+        df = merge_scaffolds(df, smiles_col=smiles_col)  # , verbose=False
     # # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
     # unique_smiles = df[smiles_col].unique().tolist()
     #
@@ -439,7 +331,7 @@ def scaffold_cluster_split(
         "scaffold",
         max_k=max_k,
         withH=withH,
-        fig_output_path=fig_output_path or FIGS_DIR / f"{TODAY}_scaffold_clustering/",
+        # fig_output_path=fig_output_path or FIGS_DIR / f"{TODAY}_scaffold_clustering/",
         export_mcs_path=export_mcs_path,
     )
     # get unique scaffolds
@@ -534,7 +426,7 @@ def split_data(
     time_col: str = "year",
     fractions: Union[List[float], None] = None,
     max_k_clusters: int = 100,
-    fig_output_path: Union[str, None] = None,
+    # fig_output_path: Union[str, None] = None,
     export_mcs_path: Union[str, None] = None,
     return_indices: bool = False,
     seed: int = 42,
@@ -589,23 +481,23 @@ def split_data(
     func_key = {
         "random": (random_split, {}),
         "scaffold": (scaffold_split, {"smiles_col": smiles_col}),
-        # "scaffold_cluster": (
-        #     scaffold_cluster_split,
-        #     {
-        #         "smiles_col": smiles_col,
-        #         "max_k": max_k_clusters,
-        #         "withH": False,
-        #         "fig_output_path": fig_output_path,
-        #         "export_mcs_path": export_mcs_path,
-        #     },
-        # ),
+        "scaffold_cluster": (
+            scaffold_cluster_split,
+            {
+                "smiles_col": smiles_col,
+                "max_k": max_k_clusters,
+                "withH": False,
+                # "fig_output_path": fig_output_path,
+                "export_mcs_path": export_mcs_path,
+            },
+        ),
         "time": (time_split, {"time_col": time_col}),
     }
 
     # POSTPONED for now - only one split at a time can be done here
     all_data = {}
     split_type = (
-        ["random", "scaffold", "time"] # "scaffold_cluster",
+        ["random", "scaffold", "time"]  # "scaffold_cluster",
         if split_type == "all"
         else split_type
     )
@@ -619,7 +511,7 @@ def split_data(
                 time_col=time_col,
                 max_k_clusters=max_k_clusters,
                 fractions=fractions,
-                fig_output_path=fig_output_path,
+                # fig_output_path=fig_output_path,
                 export_mcs_path=export_mcs_path,
                 return_indices=return_indices,
                 seed=seed,
@@ -645,7 +537,7 @@ def split_data(
                 split_type, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
             )
     else:
-        raise ValueError(f"split_type must be one of 'random', 'scaffold', or 'time', instead we got {split_type}")
+        raise ValueError(f"split_type must be one of 'random', 'scaffold', 'scaffold_cluster' or 'time', instead we got {split_type}")
 
     return all_data
 
@@ -792,7 +684,7 @@ def target_filtering(
     min_datapoints=50,
     min_actives=10,
     activity_threshold=6.5,
-    normal=True,
+    normal=False,
 ):
     """
     Filters the dataset based on the number of datapoints and active compounds.
@@ -858,7 +750,7 @@ def target_filtering(
 
 
 def check_homoscedasticity(y_true, y_pred):
-    from scipy.stats import bartlett, levene
+    from scipy.stats import bartlett #, levene
 
     stat, p = bartlett(y_true, y_pred)
     alpha = 0.05
@@ -926,3 +818,95 @@ def check_homoscedasticity(y_true, y_pred):
 #     results[split_type]["all_exists"] = all(file_p.exists() for file_p in results[split_type].values())
 #
 #     return results
+
+
+
+# def save_pickle(data, file_path):
+#     """Helper function to export a pickle file."""
+#     Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+#     with open(file_path, "wb") as file:
+#         pickle.dump(data, file)
+
+
+# def load_pickle(filepath):
+#     """Helper function to load a pickle file."""
+#     try:
+#         with open(filepath, "rb") as file:
+#             return pickle.load(file)
+#     except FileNotFoundError:
+#         logging.error(f"File not found: {filepath}")
+#     except Exception as e:
+#         logging.error(f"Error loading file {filepath}: {e}")
+#
+#
+# def save_df(
+#     df, file_path=None, output_path="./", filename="exported_file", ext="csv", **kwargs
+# ):
+#     """
+#     Exports a DataFrame to a specified file format.
+#
+#     Parameters
+#     ----------
+#     df : pandas.DataFrame
+#         The DataFrame to be exported.
+#     file_path : str or Path, optional
+#         The full file path for export.
+#         If provided, output_path, filename, and ext are ignored.
+#         Default is None.
+#     output_path : str, optional
+#         The path to the output directory. Default is the current directory.
+#     filename : str, optional
+#         The name of the output file. Default is 'exported_file'.
+#     ext : str, optional
+#         The file extension to use. Default is 'csv'.
+#     """
+#     if df.empty:
+#         return logging.warning("DataFrame is empty. Nothing to export.")
+#
+#     if file_path:
+#         path_obj = Path(file_path)
+#         output_path = path_obj.parent
+#         filename = path_obj.stem
+#         ext = path_obj.suffix.lstrip(".")
+#     else:
+#         if not filename.endswith(ext):
+#             filename = f"{filename}.{ext}"
+#         file_path = os.path.join(output_path, filename)
+#
+#     os.makedirs(output_path, exist_ok=True)
+#
+#     if ext == "csv":
+#         df.to_csv(file_path, index=False, **kwargs)
+#     elif ext == "parquet":
+#         df.to_parquet(file_path, index=False, **kwargs)
+#     elif ext == "feather":
+#         df.to_feather(file_path, **kwargs)
+#     elif ext == "pkl":
+#         df.to_pickle(file_path, **kwargs)
+#     else:
+#         raise ValueError(f"Unsupported file extension: {ext}")
+#
+#     logging.info(f"DataFrame exported to {file_path}")
+#
+#
+# def load_df(input_path, **kwargs):
+#     """
+#     Loads a DataFrame from a specified file format.
+#
+#     Parameters
+#     ----------
+#     input_path : str or Path
+#         The path to the input file.
+#     """
+#     # we want to get the extension from the Path object
+#     if isinstance(input_path, string_types):
+#         input_path = Path(input_path)
+#     ext = input_path.suffix.lstrip(".")
+#     if ext == "csv":
+#         return pd.read_csv(input_path, **kwargs)
+#     elif ext == "parquet":
+#         return pd.read_parquet(input_path, **kwargs)
+#     elif ext == "pkl":
+#         return pd.read_pickle(input_path, **kwargs)
+#     else:
+#         raise ValueError(f"Unsupported file extension for loading: {ext} provided")

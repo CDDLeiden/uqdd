@@ -2,9 +2,11 @@ import argparse
 import ast
 import os
 import json
+import pickle
 from pathlib import Path
 from typing import List, Union, Tuple  # , List, Tuple, Any, Set, Dict
 import logging
+import numpy as np
 import pandas as pd
 from uqdd import CONFIG_DIR, LOGS_DIR
 
@@ -323,3 +325,122 @@ def parse_list(argument):
         return val
     except ValueError:
         raise argparse.ArgumentTypeError("Argument is not a list of integers")
+
+
+def save_npy_file(array_data, filepath):
+    """
+    Save a numpy array to a file with a .pkl.npy or .npy extension.
+
+    Args:
+    array_data (numpy.ndarray): The numpy array to save.
+    filepath (str): The path where the file will be saved.
+    """
+    # Save the array to the specified filepath
+    np.save(filepath, array_data)
+
+
+def load_npy_file(filepath):
+    """
+    Load a .pkl.npy file into a numpy array.
+
+    Args:
+    filepath (str): The path to the file to load.
+
+    Returns:
+    numpy.ndarray: The array stored in the file.
+    """
+    # Load the file as a numpy array
+    return np.load(filepath)
+
+
+def save_pickle(data, file_path):
+    """Helper function to export a pickle file."""
+    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "wb") as file:
+        pickle.dump(data, file)
+
+
+def load_pickle(filepath):
+    """Helper function to load a pickle file."""
+    try:
+        with open(filepath, "rb") as file:
+            return pickle.load(file)
+    except FileNotFoundError:
+        logging.error(f"File not found: {filepath}")
+    except Exception as e:
+        logging.error(f"Error loading file {filepath}: {e}")
+
+def save_df(
+    df, file_path=None, output_path="./", filename="exported_file", ext="csv", **kwargs
+):
+    """
+    Exports a DataFrame to a specified file format.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The DataFrame to be exported.
+    file_path : str or Path, optional
+        The full file path for export.
+        If provided, output_path, filename, and ext are ignored.
+        Default is None.
+    output_path : str, optional
+        The path to the output directory. Default is the current directory.
+    filename : str, optional
+        The name of the output file. Default is 'exported_file'.
+    ext : str, optional
+        The file extension to use. Default is 'csv'.
+    """
+    if df.empty:
+        return logging.warning("DataFrame is empty. Nothing to export.")
+
+    if file_path:
+        path_obj = Path(file_path)
+        output_path = path_obj.parent
+        # filename = path_obj.stem
+        ext = path_obj.suffix.lstrip(".")
+    else:
+        if not filename.endswith(ext):
+            filename = f"{filename}.{ext}"
+        # file_path = Path(output_path) / filename
+        file_path = os.path.join(output_path, filename)
+
+    # os.makedirs(output_path, exist_ok=True)
+    Path(output_path).mkdir(parents=True, exist_ok=True)
+
+    if ext == "csv":
+        df.to_csv(file_path, index=False, **kwargs)
+    elif ext == "parquet":
+        df.to_parquet(file_path, index=False, **kwargs)
+    elif ext == "feather":
+        df.to_feather(file_path, **kwargs)
+    elif ext == "pkl":
+        df.to_pickle(file_path, **kwargs)
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
+
+    logging.info(f"DataFrame exported to {file_path}")
+
+
+def load_df(input_path, **kwargs):
+    """
+    Loads a DataFrame from a specified file format.
+
+    Parameters
+    ----------
+    input_path : str or Path
+        The path to the input file.
+    """
+    # we want to get the extension from the Path object
+    if isinstance(input_path, string_types):
+        input_path = Path(input_path)
+    ext = input_path.suffix.lstrip(".")
+    if ext == "csv":
+        return pd.read_csv(input_path, **kwargs)
+    elif ext == "parquet":
+        return pd.read_parquet(input_path, **kwargs)
+    elif ext == "pkl":
+        return pd.read_pickle(input_path, **kwargs)
+    else:
+        raise ValueError(f"Unsupported file extension for loading: {ext} provided")
+

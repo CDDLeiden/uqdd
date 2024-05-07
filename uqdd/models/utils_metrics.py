@@ -15,8 +15,8 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 
 from uqdd import FIGS_DIR, TODAY, DATA_DIR
-from uqdd.data.utils_data import export_pickle, export_df
-from uqdd.utils import create_logger
+# from uqdd.data.utils_data import save_pickle, save_df
+from uqdd.utils import create_logger, save_df, save_pickle
 from uqdd.utils_chem import smi_to_pil_image
 
 import math
@@ -367,7 +367,7 @@ def create_df_preds(
 
     if export and data_specific_path and model_name:
         export_path = get_preds_export_path(data_specific_path, model_name)
-        export_df(df, export_path)
+        save_df(df, export_path)
         logger.debug(f"Exported predictions to {export_path}")
 
     return df
@@ -620,7 +620,7 @@ def calculate_uct_metrics(
     # figures_path = FIGS_DIR / data_specific_path / model_name
     # figures_path.mkdir(parents=True, exist_ok=True)
     metrics_filepath = Path(figpath) / f"{task_name}_metrics.pkl"
-    export_pickle(metrics, metrics_filepath)
+    save_pickle(metrics, metrics_filepath)
 
     plots = make_uct_plots(
         y_pred,

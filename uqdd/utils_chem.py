@@ -19,17 +19,18 @@ from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculat
 from rdkit.Chem.rdchem import Mol as RdkitMol
 
 from uqdd import DATA_DIR, FIGS_DIR
-from uqdd.utils import check_nan_duplicated, custom_agg
+from uqdd.utils import check_nan_duplicated, custom_agg, load_npy_file, save_npy_file
 
 from papyrus_scripts.reader import read_molecular_descriptors
 from papyrus_scripts.preprocess import consume_chunks
 
 # scipy hierarchy clustering
-from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.cluster.hierarchy import dendrogram #, linkage
 from scipy.cluster.hierarchy import fcluster, cophenet
 import scipy.cluster.hierarchy as sch
 from scipy.spatial.distance import pdist
-
+import fastcluster as fc
+from fastcluster import linkage
 # SKlearn metrics
 from sklearn.metrics import (
     silhouette_samples,
@@ -490,6 +491,34 @@ def rdkit_standardize_wrapper(args):
     return rdkit_standardize(*args)
 
 
+def parallel_standardize(
+    df: pd.DataFrame,
+    smiles_col: str = "SMILES",
+    logger=None,
+    suppress_exception=True,
+    rd_standardize=False,
+):
+    # standardizing the SMILES in parallel
+    standardizer = rdkit_standardize_wrapper if rd_standardize else standardize_wrapper
+    unique_smiles = df[smiles_col].unique()
+    args_list = [(smi, logger, suppress_exception) for smi in unique_smiles]
+
+    with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
+        results = list(
+            tqdm(
+                executor.map(standardizer, args_list),
+                total=len(args_list),
+                desc="Standardizing Unique SMILES",
+            )
+        )
+    standardized_result = {smi: result for smi, result in zip(unique_smiles, results)}
+
+    # Apply the standardized result to the dataframe
+    df[smiles_col] = df[smiles_col].map(standardized_result)
+
+    return df
+
+
 def standardize_df(
     df: pd.DataFrame,
     smiles_col: str = "SMILES",
@@ -578,23 +607,24 @@ def standardize_df(
             f"is: {df_dup_before.shape[0]} duplicated rows"
         )
 
+    df_filtered = parallel_standardize(df_filtered, smiles_col, logger, suppress_exception)
     # standardizing the SMILES in parallel
     # tqdm.pandas(desc="Standardizing SMILES")
-    unique_smiles = df_filtered[smiles_col].unique()
-    args_list = [(smi, logger, suppress_exception) for smi in unique_smiles]
-
-    with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
-        results = list(
-            tqdm(
-                executor.map(standardize_wrapper, args_list),
-                total=len(args_list),
-                desc="Standardizing Unique SMILES",
-            )
-        )
-    standardized_result = {smi: result for smi, result in zip(unique_smiles, results)}
-
-    # Apply the standardized result to the dataframe
-    df_filtered[smiles_col] = df_filtered[smiles_col].map(standardized_result)
+    # unique_smiles = df_filtered[smiles_col].unique()
+    # args_list = [(smi, logger, suppress_exception) for smi in unique_smiles]
+    #
+    # with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
+    #     results = list(
+    #         tqdm(
+    #             executor.map(standardize_wrapper, args_list),
+    #             total=len(args_list),
+    #             desc="Standardizing Unique SMILES",
+    #         )
+    #     )
+    # standardized_result = {smi: result for smi, result in zip(unique_smiles, results)}
+    #
+    # # Apply the standardized result to the dataframe
+    # df_filtered[smiles_col] = df_filtered[smiles_col].map(standardized_result)
 
     # # progress_apply is a wrapper around apply that uses tqdm to show a progress bar
     # start_time = time.time()
@@ -1028,6 +1058,45 @@ def generate_scaffold(smiles, include_chirality=False):
     return scaffold
 
 
+def merge_scaffolds(df, smiles_col="SMILES"):
+    """
+    Merges the scaffold information into the DataFrame.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input DataFrame.
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings. Default is 'smiles'.
+    verbose : bool, optional
+        If True, prints the progress of the scaffold generation. Default is False.
+    output_path : str, optional
+        The path to the output directory for scaffold clustering figures. Default is None.
+    Returns
+    -------
+
+    """
+    # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
+    unique_smiles = df[smiles_col].unique().tolist()
+
+    with ProcessPoolExecutor() as executor:
+        scaffolds = list(
+            tqdm(
+                executor.map(generate_scaffold, unique_smiles),
+                total=len(unique_smiles),
+                desc="Generating scaffolds",
+            )
+        )
+
+    smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
+    df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
+
+    # standardize the scaffold column
+    df = parallel_standardize(df, "scaffold", None, True)
+
+    return df
+
+
 ### adopted from https://github.com/nina23bom/NPS-Pharmacological-profile-fingerprint-prediction-using-ML/blob/main/001.%20NPS%20unique%20compounds%20MCS%20Hierarchical%20clustering%20-%20Class%20Label.ipynb
 def tanimoto_mcs(smi1, smi2):
     # reading smiles of two molecules and create molecule
@@ -1165,6 +1234,38 @@ def hierarchical_clustering(
     withH=False,
     save_path=None,
 ):
+    """
+    Perform hierarchical clustering on a DataFrame of SMILES strings.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input DataFrame containing the SMILES strings.
+    smiles_col : str, optional
+        The name of the column containing the SMILES strings. Default is 'SMILES'.
+    batch_size : int, optional
+        The size of each chunk for processing the similarity matrix. Default is 10000.
+    withH : bool, optional
+        A boolean flag to include hydrogens in the MCS calculation. Default is False.
+    save_path : str, optional
+        The path to save the similarity matrix or to check for preprocessed files. Default is None.
+
+    Returns
+    -------
+    numpy.ndarray
+        The similarity matrix.
+    """
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        filepath = Path(save_path) / "mcs.pkl.npy"
+        # now checking if file exists
+        if filepath.exists():
+            print(f"Similarity matrix already exists at {filepath}")
+            return load_npy_file(filepath)
+
+    print(f"Chunk Size: {BATCH_SIZE}")
+    print(f"Number of Workers: {N_WORKERS}")
+
     cid_list = df[smiles_col].tolist()
     n_compounds = len(cid_list)
     print(f"Number of unique {smiles_col} for clustering: {df.shape[0]}")
@@ -1186,24 +1287,49 @@ def hierarchical_clustering(
     np.fill_diagonal(similarity_matrix, 1.0)
 
     # Save the similarity matrix to the specified path
-    if save_path:
-        file_path = Path(save_path) / "tanimoto_similarities.npy"
-        save_similarity_matrix(similarity_matrix, save_path)
+    if save_path is not None:
+        save_npy_file(similarity_matrix, filepath)
+        # file_path = Path(save_path) / "mcs.npy"
+        # save_similarity_matrix(similarity_matrix, save_path)
 
     return similarity_matrix
 
 
-def form_linkage(df_or_array_input):
-    X = (
-        df_or_array_input.values
-        if isinstance(df_or_array_input, pd.DataFrame)
-        else df_or_array_input
-    )
-    Z = linkage(X, method="ward")
+def form_linkage(X, save_path=None, calculate_cophenetic_coeff=False):
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        filepath = Path(save_path) / "mcs_linkage.pkl.npy"
+        # now checking if file exists
+        if filepath.exists():
+            print(f"Linkage matrix already exists at {filepath}")
+            return load_npy_file(filepath)
+    Z = linkage(X, method="ward") # TODO : save and load if existing
+    if save_path is not None:
+        save_npy_file(Z, filepath)
+    if calculate_cophenetic_coeff:
+        calculate_cophenet(X, Z, save_path=save_path)
+    return X, Z
+
+
+def calculate_cophenet(X, Z, save_path=None):
+    if save_path is not None:
+        Path(save_path).mkdir(parents=True, exist_ok=True)
+        Pdist_path = Path(save_path) / "mcs_pdist.pkl.npy"
+        Coph_dists_path = Path(save_path) / "mcs_coph_dists.pkl.npy"
+        C_path = Path(save_path) / "mcs_c.pkl"
+        # now checking if file exists
+        if C_path.exists():
+            print(f"Cophenetic Coefficient already exists at {C_path}")
+            return load_pickle_file(C_path)
+
     Pdist = pdist(X)
     c, coph_dists = cophenet(Z, Pdist)
-    print("Cophenetic coefficient: %0.4f" % c)
-    return X, Z
+    print("Cophenetic coefficient calculated: %0.4f" % c)
+    if save_path is not None:
+        save_npy_file(Pdist, Pdist_path)
+        save_npy_file(coph_dists, Coph_dists_path)
+        save_pickle_file(c, C_path)
+    return c
 
 
 def sil_K(X, Z, max_k=100):
@@ -1218,17 +1344,6 @@ def sil_K(X, Z, max_k=100):
     print("Optimal number of clusters: ", optimal_clu)
 
     return n_clu, sil, optimal_clu
-
-    #
-    # result = pd.DataFrame({"n_clusters": n_clu, "average_silouette": sil})
-    # print("Max Silhouette Score: ", result["average_silouette"].max())
-    # print(
-    #     "Optimal Number of Clusters: ",
-    #     result["n_clusters"][result["average_silouette"].idxmax()],
-    # )
-
-    # return result
-    # return n_clu, sil
 
 
 def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None):
@@ -1273,7 +1388,12 @@ def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None
 
 
 def plot_cluster_heatmap(data_matrix, output_path=None):
-    yticklabels = data_matrix.index
+    if hasattr(data_matrix, 'index'):
+        yticklabels = data_matrix.index
+    else:
+        # For numpy arrays, create numeric labels for each row
+        yticklabels = range(data_matrix.shape[0])
+    # yticklabels = data_matrix.index
     plt.figure(figsize=(12, 30), dpi=600)
     plt.rc("font", family="serif", size=8)
     sns.set_style("white")
@@ -1308,7 +1428,7 @@ def clustering(
     smiles_col: str = "scaffold",
     max_k=100,
     withH=False,
-    fig_output_path=None,
+    # fig_output_path=None,
     export_mcs_path=None,
 ):
     # pre cleaning
@@ -1319,9 +1439,9 @@ def clustering(
     df_clean.dropna(subset=[smiles_col], inplace=True)
     # print(f"after nan drop: {df_clean.shape}")
     df_clean.reset_index(inplace=True, drop=True)
-    print(f"Chunk Size: {BATCH_SIZE}")
-    print(f"Number of Workers: {N_WORKERS}")
+
     # TODO : only 10 scaffolds for testing
+    # TODO : checking mcs file existing then loading it instead of recalculation
 
     mcs_np = hierarchical_clustering(
         df_clean,
@@ -1336,10 +1456,11 @@ def clustering(
     # df_pair.to_csv(Path(export_mcs_path) / "scaffold_sim_pair.csv", index=True)
     mcs_x, mcs_z = form_linkage(mcs_np)
     mcs_k, mcs_sil, optimal_clu = sil_K(mcs_x, mcs_z, max_k=max_k)
-
-    plot_silhouette_analysis(mcs_k, mcs_sil, output_path=fig_output_path)
-
-    plot_cluster_heatmap(mcs_np, output_path=fig_output_path)
+    if export_mcs_path:
+        fig_output_path = Path(export_mcs_path) / "mcs_figures"
+        Path(fig_output_path).mkdir(parents=True, exist_ok=True)
+        plot_silhouette_analysis(mcs_k, mcs_sil, output_path=fig_output_path)
+        plot_cluster_heatmap(mcs_np, output_path=fig_output_path)
 
     df_clean["cluster"] = fcluster(mcs_z, optimal_clu, criterion="maxclust")
 
