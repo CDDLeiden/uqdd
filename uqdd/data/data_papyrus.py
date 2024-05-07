@@ -880,44 +880,44 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
+    main()
     # Example of how to use the Papyrus class
-    activity_type = "xc50"
-    std_smiles = True
-    verbose_files = False
-
-    # call args
-    n_targets = -1
-    desc_prot = "ankh-large"  # "ankh-base"  # For testing - it should become none
-    desc_chem = "ecfp2048"  # "mordred"
-    split_type = "scaffold_cluster"
-    all_descs = True
-    recalculate = True
-    split_proportions = [0.7, 0.15, 0.15]
-    file_ext = "pkl"
-
-    papyrus = Papyrus(
-        activity_type=activity_type,
-        std_smiles=std_smiles,
-        verbose_files=verbose_files,
-    )
-
-    papyrus(
-        n_targets=n_targets,
-        descriptor_protein=desc_prot,
-        descriptor_chemical=desc_chem,
-        all_descriptors=all_descs,
-        recalculate=recalculate,
-        split_type=split_type,
-        split_proportions=split_proportions,
-        max_k_clusters=100,
-        min_datapoints=50,
-        min_actives=10,
-        active_threshold=6.5,
-        only_normal=False,
-        file_ext=file_ext,
-        verbose=True
-    )
+    # activity_type = "xc50"
+    # std_smiles = True
+    # verbose_files = False
+    #
+    # # call args
+    # n_targets = -1
+    # desc_prot = "ankh-large"  # "ankh-base"  # For testing - it should become none
+    # desc_chem = "ecfp2048"  # "mordred"
+    # split_type = "scaffold_cluster"
+    # all_descs = True
+    # recalculate = True
+    # split_proportions = [0.7, 0.15, 0.15]
+    # file_ext = "pkl"
+    #
+    # papyrus = Papyrus(
+    #     activity_type=activity_type,
+    #     std_smiles=std_smiles,
+    #     verbose_files=verbose_files,
+    # )
+    #
+    # papyrus(
+    #     n_targets=n_targets,
+    #     descriptor_protein=desc_prot,
+    #     descriptor_chemical=desc_chem,
+    #     all_descriptors=all_descs,
+    #     recalculate=recalculate,
+    #     split_type=split_type,
+    #     split_proportions=split_proportions,
+    #     max_k_clusters=100,
+    #     min_datapoints=50,
+    #     min_actives=10,
+    #     active_threshold=6.5,
+    #     only_normal=False,
+    #     file_ext=file_ext,
+    #     verbose=True
+    # )
     # #
     # # reg_dataset = get_datasets(
     # #     n_targets=n_targets,
