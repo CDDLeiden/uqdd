@@ -19,14 +19,13 @@ from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculat
 from rdkit.Chem.rdchem import Mol as RdkitMol
 
 from uqdd import DATA_DIR, FIGS_DIR
-from uqdd.utils import check_nan_duplicated, custom_agg, load_npy_file, save_npy_file
+from uqdd.utils import check_nan_duplicated, custom_agg, load_npy_file, save_npy_file, save_pickle, load_pickle
 
 from papyrus_scripts.reader import read_molecular_descriptors
 from papyrus_scripts.preprocess import consume_chunks
 
 # scipy hierarchy clustering
-from scipy.cluster.hierarchy import dendrogram #, linkage
-from scipy.cluster.hierarchy import fcluster, cophenet
+from scipy.cluster.hierarchy import fcluster, cophenet, dendrogram, cut_tree
 import scipy.cluster.hierarchy as sch
 from scipy.spatial.distance import pdist
 import fastcluster as fc
@@ -45,6 +44,7 @@ import seaborn as sns
 
 from itertools import combinations, islice
 import math
+import time
 
 # Disable RDKit warnings
 RDLogger.DisableLog("rdApp.info")
@@ -1258,6 +1258,7 @@ def hierarchical_clustering(
     if save_path is not None:
         Path(save_path).mkdir(parents=True, exist_ok=True)
         filepath = Path(save_path) / "mcs.pkl.npy"
+
         # now checking if file exists
         if filepath.exists():
             print(f"Similarity matrix already exists at {filepath}")
@@ -1295,20 +1296,61 @@ def hierarchical_clustering(
     return similarity_matrix
 
 
-def form_linkage(X, save_path=None, calculate_cophenetic_coeff=False):
+def form_linkage(X, save_path=None, calculate_cophenetic_coeff=True):
+    # start = time.time()
+    n_rows, n_cols = X.shape
+    upper_indices = np.triu_indices(n_rows, 1)
+    x_dist = 1 - X[upper_indices]
+    X_ = 1 - X
+    # print(f"Time taken to calculate x_dist with triu indices: {time.time() - start:.2f} seconds")
+
+    # start = time.time()
+    # ss=[]
+    # x_dist2 = []
+    # X2 = X.copy()
+    # n_rows, n_cols = X2.shape
+    # for i in range(n_cols):
+    #     y = X2[i][i + 1:]
+    #     z = [1 - y1 for y1 in y]
+    #     x_dist2.extend(z)
+    #     for r in range(n_rows):
+    #         X2[r,i]=1-X[r,i]
+    # print(f"Time taken to calculate x_dist2 with FOR loops: {time.time() - start:.2f} seconds")
+
     if save_path is not None:
         Path(save_path).mkdir(parents=True, exist_ok=True)
         filepath = Path(save_path) / "mcs_linkage.pkl.npy"
         # now checking if file exists
         if filepath.exists():
             print(f"Linkage matrix already exists at {filepath}")
-            return load_npy_file(filepath)
-    Z = linkage(X, method="ward") # TODO : save and load if existing
+            return X_, load_npy_file(filepath)
+
+    # check if X_ and X2 are the same
+    Z = linkage(x_dist, method="ward")
+    # print(f"Time taken to calculate linkage with fastcluster: {time.time() - start:.2f} seconds")
+    #
+    # from scipy.cluster.hierarchy import linkage
+    # start = time.time()
+    # Z = linkage(x_dist, method="ward")
+    # print(f"Time taken to calculate linkage with scipy: {time.time() - start:.2f} seconds")
+    #
+
+    # Z = linkage(X, method="ward") # TODO : save and load if existing
     if save_path is not None:
         save_npy_file(Z, filepath)
     if calculate_cophenetic_coeff:
-        calculate_cophenet(X, Z, save_path=save_path)
-    return X, Z
+        calculate_cophenet(X_, Z, save_path=save_path)
+    return X_, Z
+    # ss=[]
+    # x_dist2 = []
+    # X2 = X.copy()
+    # n_rows, n_cols = X2.shape
+    # for i in range(n_cols):
+    #     y = X2[i][i + 1:]
+    #     z = [1 - y1 for y1 in y]
+    #     x_dist2.extend(z)
+    #     for r in range(n_rows):
+    #         X2[r,i]=1-X[r,i]
 
 
 def calculate_cophenet(X, Z, save_path=None):
@@ -1320,7 +1362,7 @@ def calculate_cophenet(X, Z, save_path=None):
         # now checking if file exists
         if C_path.exists():
             print(f"Cophenetic Coefficient already exists at {C_path}")
-            return load_pickle_file(C_path)
+            return load_pickle(C_path)
 
     Pdist = pdist(X)
     c, coph_dists = cophenet(Z, Pdist)
@@ -1328,15 +1370,16 @@ def calculate_cophenet(X, Z, save_path=None):
     if save_path is not None:
         save_npy_file(Pdist, Pdist_path)
         save_npy_file(coph_dists, Coph_dists_path)
-        save_pickle_file(c, C_path)
+        save_pickle(c, C_path)
     return c
 
 
-def sil_K(X, Z, max_k=100):
+def sil_K(X, Z, max_k=500):
     sil, n_clu = [], []
     for k in range(2, max_k):
-        cluster = fcluster(Z, k, criterion="maxclust")
-        silhouette_avg = silhouette_score(X, cluster)
+        # cluster = fcluster(Z, k, criterion="maxclust")
+        cluster_labels = cut_tree(Z, n_clusters=k).flatten()
+        silhouette_avg = silhouette_score(X, cluster_labels, metric="precomputed")  #  metric="euclidean"
         sil.append(silhouette_avg)
         n_clu.append(k)
 
@@ -1364,8 +1407,8 @@ def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None
     # Initialize the plot
     fig = plt.figure(figsize=(12, 5), dpi=600)
     plt.rc("font", family="serif")
-
-    plt.scatter(cluster_counts, silhouette_scores, label="MCS")
+    plt.plot(cluster_counts, silhouette_scores, label="MCS")
+    # plt.scatter(cluster_counts, silhouette_scores, label="MCS")
     # # Plot each series of cluster counts vs. silhouette scores
     # for i in range(len(cluster_counts)):
     #     plt.scatter(cluster_counts[i], silhouette_scores[i], label=labels[i])
@@ -1426,7 +1469,7 @@ def plot_cluster_heatmap(data_matrix, output_path=None):
 def clustering(
     df,
     smiles_col: str = "scaffold",
-    max_k=100,
+    max_k=500,
     withH=False,
     # fig_output_path=None,
     export_mcs_path=None,
@@ -1440,7 +1483,6 @@ def clustering(
     # print(f"after nan drop: {df_clean.shape}")
     df_clean.reset_index(inplace=True, drop=True)
 
-    # TODO : only 10 scaffolds for testing
     # TODO : checking mcs file existing then loading it instead of recalculation
 
     mcs_np = hierarchical_clustering(
@@ -1450,23 +1492,27 @@ def clustering(
         withH=withH,
         save_path=export_mcs_path,
     )
+    # Just for debugging
+    # df_clean = df_clean[:1000]
+    # mcs_np = mcs_np[:1000, :1000]
     # if export_mcs_path:
     #     Path(export_mcs_path).mkdir(parents=True, exist_ok=True)
     #     df_mcs.to_csv(Path(export_mcs_path) / "mcs_matrix.csv", index=True)
     # df_pair.to_csv(Path(export_mcs_path) / "scaffold_sim_pair.csv", index=True)
-    mcs_x, mcs_z = form_linkage(mcs_np)
+    mcs_x, mcs_z = form_linkage(mcs_np, save_path=export_mcs_path, calculate_cophenetic_coeff=True)
     mcs_k, mcs_sil, optimal_clu = sil_K(mcs_x, mcs_z, max_k=max_k)
     if export_mcs_path:
         fig_output_path = Path(export_mcs_path) / "mcs_figures"
         Path(fig_output_path).mkdir(parents=True, exist_ok=True)
         plot_silhouette_analysis(mcs_k, mcs_sil, output_path=fig_output_path)
-        plot_cluster_heatmap(mcs_np, output_path=fig_output_path)
+        # plot_cluster_heatmap(mcs_np, output_path=fig_output_path) # TAKES SO MUCH TIME
 
-    df_clean["cluster"] = fcluster(mcs_z, optimal_clu, criterion="maxclust")
+    # df_clean["cluster"] = fcluster(mcs_z, optimal_clu, criterion="maxclust")
+    df_clean["cluster"] = cut_tree(mcs_z, n_clusters=optimal_clu).flatten()
 
     # now we map the cluster to the original dataframe
     df = pd.merge(df, df_clean, on=smiles_col, how="left", validate="many_to_many")
-
+    df['cluster'] = df['cluster'].astype('Int64')
     return df
 
 #

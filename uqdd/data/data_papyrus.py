@@ -96,7 +96,7 @@ class Papyrus:
         recalculate: bool = False,
         split_type: str = "random",
         split_proportions: List[float] = None,
-        max_k_clusters: int = 100,
+        max_k_clusters: int = 500,
         min_datapoints: int = 50,
         min_actives: int = 10,
         active_threshold: float = 6.5,
@@ -365,7 +365,7 @@ class Papyrus:
         df,
         split_type,
         split_proportions,
-        max_k_clusters=100,
+        max_k_clusters=500,
         # fig_output_path=None,
         export_mcs_path=None,
         return_indices=False,
@@ -834,7 +834,7 @@ def main():
     parser.add_argument("--file-ext", type=str, default="pkl", help="File extension")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size")
     parser.add_argument(
-        "--max-k-clusters", type=int, default=100, help="Max k clusters"
+        "--max-k-clusters", type=int, default=1000, help="Max k clusters"
     )
     parser.add_argument("--min-datapoints", type=int, default=50, help="Min datapoints")
     parser.add_argument("--min-actives", type=int, default=10, help="Min actives")
@@ -881,17 +881,17 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # Example of how to use the Papyrus class
+    # # Example of how to use the Papyrus class
     # activity_type = "xc50"
     # std_smiles = True
     # verbose_files = False
-    #
+
     # # call args
     # n_targets = -1
     # desc_prot = "ankh-large"  # "ankh-base"  # For testing - it should become none
     # desc_chem = "ecfp2048"  # "mordred"
     # split_type = "scaffold_cluster"
-    # all_descs = True
+    # all_descs = False
     # recalculate = True
     # split_proportions = [0.7, 0.15, 0.15]
     # file_ext = "pkl"
@@ -910,7 +910,7 @@ if __name__ == "__main__":
     #     recalculate=recalculate,
     #     split_type=split_type,
     #     split_proportions=split_proportions,
-    #     max_k_clusters=100,
+    #     max_k_clusters=500,
     #     min_datapoints=50,
     #     min_actives=10,
     #     active_threshold=6.5,
