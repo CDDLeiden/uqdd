@@ -20,8 +20,8 @@ echo "Script started at: $(date)"
 # Predefine the args here
 ext="pkl"
 task_type="regression"
-wandb_project="${today}-all-models"
-logname="${wandb_project}-mcdp.txt"
+wandb_project="mcdp-test"
+logname="${wandb_project}.txt"
 
 python mcdropout.py --num_mc_samples $num_mc_samples --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "$wandb_project" 2>&1 | tee ../logs/"${logname}"
 

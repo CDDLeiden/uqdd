@@ -288,7 +288,7 @@ def main():
         "--split_type",
         type=str,
         default="random",
-        choices=["random", "scaffold", "time"],
+        choices=["random", "scaffold", "time", "scaffold_cluster"],
         help="Split argument",
     )
     parser.add_argument(

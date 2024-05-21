@@ -1,8 +1,12 @@
 import argparse
+from multiprocessing import Pool
+import time
+
 
 import wandb
 import torch
 import torch.nn as nn
+import torch.multiprocessing as mp
 
 from uqdd import DEVICE
 from uqdd.models.baseline import BaselineDNN
@@ -20,14 +24,16 @@ from uqdd.models.utils_models import (
     get_sweep_config, set_seed,
 )
 
+mp.set_start_method('spawn', force=True)
+
 
 class EnsembleDNN(nn.Module):
     def __init__(
-        self,
-        config=None,
-        model_class=BaselineDNN,
-        model_list=None,
-        **kwargs
+            self,
+            config=None,
+            model_class=BaselineDNN,
+            model_list=None,
+            **kwargs
     ):
         super(EnsembleDNN, self).__init__()
         if config is None:
@@ -78,17 +84,76 @@ class EnsembleDNN(nn.Module):
         #     return outputs
 
 
+def train_worker(rank, config, seed, results, device, logger):
+    # seed += rank
+    torch.cuda.set_device(device)
+    best_model, dataloaders, config_, _ = train_model_e2e(
+        config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device
+    )
+    results[rank] = (best_model, dataloaders, config_)
+
+
+def train_on_device(args):
+    rank, config, seed, results, available_gpus, num_gpus, ens_size, logger = args
+    device = available_gpus[rank % num_gpus]
+    train_worker(rank, config, seed + rank, results, device, logger)
+    if rank != ens_size - 1:
+        print("I AM HERE")
+        wandb.finish()
+        torch.cuda.empty_cache()
+        time.sleep(10)
+        print("I AM AWAKE")
+
+
 def run_ensemble(config=None):
-    ensemble_size = config.get("ensemble_size", 10)
+    ensemble_size = config.get("ensemble_size", 100)
+    parallelize = config.get("parallelize", False)
+    logger = LOGGER
     best_models = []
     seed = 42
-    for _ in range(ensemble_size):
-        best_model, dataloaders, config_, logger = train_model_e2e(
-            config, model=BaselineDNN, model_type="baseline", logger=LOGGER, seed=seed
-        )
-        best_models.append(best_model)
-        seed += 1
+    if not parallelize:
+        for _ in range(ensemble_size):
+            best_model, dataloaders, config_, logger = train_model_e2e(
+                config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed
+            )
+            best_models.append(best_model)
+            seed += 1
 
+    else:
+        print("Parallel training")
+        # Get the available GPUs
+        available_gpus = list(range(torch.cuda.device_count()))
+        num_gpus = len(available_gpus)
+        print(f"Available GPUs: {available_gpus} - {num_gpus} GPUs")
+        # Shared memory to store results from different processes
+        manager = mp.Manager()
+        results = manager.dict()
+        # Prepare arguments for the pool workers
+        args = [(rank, config, seed, results, available_gpus, num_gpus, ensemble_size, logger) for rank in range(ensemble_size)]
+
+        # Create a pool of workers
+        with Pool(processes=num_gpus) as pool:
+            pool.map(train_on_device, args)
+        #
+        # # Spawn processes for parallel training
+        # processes = []
+        # for rank in range(ensemble_size):
+        #     device = available_gpus[rank % ]
+        #     print(f"Rank: {rank}, Device: {device}")
+        #     p = mp.Process(target=train_worker, args=(rank, config, seed, results, device), )
+        #     p.start()
+        #     processes.append(p)
+        #
+        # # Ensure all processes have finished
+        # for p in processes:
+        #     p.join()
+
+        # Collect results from shared memory
+        for rank in range(ensemble_size):
+            best_model, dataloaders, config_ = results[rank]
+            best_models.append(best_model)
+
+    print(f"{len(best_models)=}")
     ensemble_model = EnsembleDNN(config_, model_list=best_models)
 
     preds, labels, alea_vars = predict(
@@ -112,7 +177,6 @@ def run_ensemble(config=None):
     recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config_, uct_logger=uct_logger)
 
     return ensemble_model, recal_model, metrics, plots
-
 
 
 def _run_ensemble(config=None):
@@ -182,6 +246,12 @@ def run_ensemble_hyperparm(**kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Ensemble Model")
+    parser.add_argument(
+        "--parallelize",
+        type=bool,
+        default=False,
+        help="Parallelize training"
+    )
     parser.add_argument(
         "--aleatoric",
         type=bool,
@@ -258,7 +328,7 @@ def main():
         "--split_type",
         type=str,
         default="random",
-        choices=["random", "scaffold", "time"],
+        choices=["random", "scaffold", "time", "scaffold_cluster"],
         help="Split argument",
     )
     parser.add_argument(
