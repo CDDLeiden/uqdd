@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from uqdd import DATASET_DIR, FIGS_DIR, TODAY
-from uqdd.utils import load_pickle, save_df, load_df
+from uqdd.utils import load_pickle, save_df, load_df, save_pickle
 from uqdd.utils_chem import merge_scaffolds, clustering
 
 string_types = (type(b""), type(""))
@@ -427,9 +427,11 @@ def split_data(
     fractions: Union[List[float], None] = None,
     max_k_clusters: int = 500,
     # fig_output_path: Union[str, None] = None,
-    export_mcs_path: Union[str, None] = None,
+    export_path: Union[str, None, Path] = None,
     return_indices: bool = False,
+    recalculate: bool = False,
     seed: int = 42,
+    logger=None,
 ) -> dict:
     """
     Splits a DataFrame into training, validation, and test sets based on the specified split type.
@@ -449,21 +451,23 @@ def split_data(
     fractions : list, optional
         A list of fractions to use for the training, validation, and test sets. Default is [0.7, 0.15, 0.15].
         The sum of the fractions must be 1. If only two fractions are provided, the second fraction is used for the test set.
-    fig_output_path : str, optional
-        The path to the output directory for scaffold clustering figures. Default is None.
-    export_mcs_path : str, optional
-        The path to the output directory for exporting the maximum common substructures. Default is None.
+    export_path : str, optional
+        The path to the output directory for exporting the split and mcs files (scaffold cluster). Default is None.
     return_indices : bool, optional
         If True, returns the indices of the split dataframes instead of the dataframes themselves. Default is False.
+    recalculate : bool, optional
+        If True, recalculates the splits even if the files already exist. Default is False.
     seed : int, optional
         The random seed to use for splitting the data. Default is 42.
-
+    logger : logging.Logger, optional
+        The logger object to use for logging. Default is None.
 
     Returns
     -------
     dict
         A dictionary with key as split_type and value is another dict containing the training, validation, and test dataframes.
     """
+    logger = logger or logging.getLogger(__name__)
     if fractions is None:
         fractions = [0.7, 0.15, 0.15]
     if sum(fractions) != 1:
@@ -487,8 +491,7 @@ def split_data(
                 "smiles_col": smiles_col,
                 "max_k": max_k_clusters,
                 "withH": False,
-                # "fig_output_path": fig_output_path,
-                "export_mcs_path": export_mcs_path,
+                "export_mcs_path": export_path,
             },
         ),
         "time": (time_split, {"time_col": time_col}),
@@ -497,7 +500,7 @@ def split_data(
     # POSTPONED for now - only one split at a time can be done here
     all_data = {}
     split_type = (
-        ["random", "scaffold", "time"]  # "scaffold_cluster",
+        ["random", "time", "scaffold", "scaffold_cluster"]  # ,
         if split_type == "all"
         else split_type
     )
@@ -512,7 +515,7 @@ def split_data(
                 max_k_clusters=max_k_clusters,
                 fractions=fractions,
                 # fig_output_path=fig_output_path,
-                export_mcs_path=export_mcs_path,
+                export_path=export_path,
                 return_indices=return_indices,
                 seed=seed,
             )
@@ -520,6 +523,13 @@ def split_data(
 
     elif split_type in func_key.keys():
         try:
+            split_file_name = f"{split_type}_split_dict{'_indices' if return_indices else ''}.pkl"
+            if export_path:
+                split_file_path = Path(export_path) / split_file_name
+                if split_file_path.exists() and not recalculate:
+                    logger.info(f"Loading splits from {split_file_path}")
+                    return load_pickle(split_file_path)
+            logger.info(f"Splitting the data using {split_type} split")
             split_func, split_kwargs = func_key[split_type]
             sub_dict = split_func(
                 df,
@@ -531,6 +541,9 @@ def split_data(
                 seed=seed,
             )
             all_data.update(sub_dict)
+            if export_path:
+                logger.info(f"Saving splits to {split_file_path}")
+                save_pickle(sub_dict, split_file_path)
         except Exception as e:
             logging.error(f"Error splitting the data: {e}")
             all_data = create_split_dict(
@@ -670,11 +683,6 @@ def check_normality(series):
     stat, p = shapiro(series)
     alpha = 0.05
     return stat, p, p > alpha
-    # alpha = 0.05
-    # if p > alpha:
-    #     return True
-    # else:
-    #     return False
 
 
 def target_filtering(

@@ -700,6 +700,7 @@ def train_model_e2e(
         model_kwargs=None,
         logger=None,
         seed=42,
+        device=DEVICE,
         # max_norm=None, #10.0
 ):
     start_time = datetime.now()
@@ -736,6 +737,7 @@ def train_model_e2e(
         "random",
         "scaffold",
         "time",
+        "scaffold_cluster"
     ], "Split type must be either random or scaffold or time"
 
     m_tag = "median_scaling" if median_scaling else "no_median_scaling"
@@ -794,6 +796,7 @@ def train_model_e2e(
         task_type,
         ext,
         logger,
+        # 'cpu'
     )
 
     desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein, descriptor_chemical)
@@ -805,14 +808,14 @@ def train_model_e2e(
     batch_size = config.get("batch_size", 128)
     dataloaders = build_loader(datasets, batch_size, shuffle=False)
 
-    model_ = model(config=config, **model_kwargs, logger=logger).to(DEVICE)
+    model_ = model(config=config, **model_kwargs, logger=logger).to(device)
     logger.info(f"Model: {model_}")
 
     best_model, _ = run_model(
         config,
         model_,
         dataloaders,
-        device=DEVICE,
+        device=device,
         logger=logger,
         max_norm=max_norm
     )

@@ -27,11 +27,8 @@ from uqdd.data.utils_data import (
     check_if_processed_file,
     export_tasks,
     apply_median_scaling,
-    target_filtering,  #merge_scaffolds,
+    target_filtering,
 )
-# load_df,
-# load_pickle,
-# save_pickle,save_df,
 
 
 class Papyrus:
@@ -177,17 +174,30 @@ class Papyrus:
             df = merge_scaffolds(df, "SMILES")
             save_df(df, export_path / f"papyrus_filtered_{self.activity_key}_{tar_tag}_with_scaffolds.csv")
             self.logger.info(f"Unique scaffolds: {df['scaffold'].nunique()}")
-
-        split_idx = self.split(
-            df,
-            split_types,
-            split_proportions,
-            max_k_clusters=max_k_clusters,
-            # fig_output_path=figure_path,
-            export_mcs_path=export_path,
-            return_indices=True,
-            recalculate=recalculate,
-        )
+        #
+        # split_idx = self.split(
+        #     df,
+        #     split_types,
+        #     split_proportions,
+        #     max_k_clusters=max_k_clusters,
+        #     # fig_output_path=figure_path,
+        #     export_path=export_path,
+        #     return_indices=True,
+        #     recalculate=recalculate,
+        # )
+        split_idx = split_data(
+                df,
+                split_type=split_type,
+                smiles_col="SMILES",
+                time_col="Year",
+                fractions=split_proportions,
+                max_k_clusters=max_k_clusters,
+                export_path=export_path,
+                return_indices=True,
+                recalculate=recalculate,
+                seed=42,
+                logger=self.logger
+            )
 
         if all_descriptors:
             args_combinations = (
@@ -281,8 +291,8 @@ class Papyrus:
     def _get_split_types(self, split_type: str = None):
         if split_type == "all":
             if self.MT:
-                return ["random", "scaffold"] # , "scaffold_cluster"
-            return ["random", "scaffold", "time"] # , "scaffold_cluster"
+                return ["random", "scaffold", "scaffold_cluster"] # , "scaffold_cluster"
+            return ["random", "scaffold", "time", "scaffold_cluster"] # , "scaffold_cluster"
         return [split_type]
 
     @staticmethod
@@ -360,46 +370,48 @@ class Papyrus:
 
         return df, label_col
 
-    def split(
-        self,
-        df,
-        split_type,
-        split_proportions,
-        max_k_clusters=500,
-        # fig_output_path=None,
-        export_mcs_path=None,
-        return_indices=False,
-        recalculate=False,
-    ):
-        # calculate the splits or load them if they exist
-        split_path = (
-            self.output_path
-            / f"split_data_dict{'_indices' if return_indices else ''}.pkl"
-        )
-        if split_path.is_file() and not recalculate:
-            self.logger.info("Loading previously calculated splits")
-            split_data_dict = load_pickle(split_path)
-        else:
-            self.logger.info("Calculating the splits")
-            if split_proportions is None:
-                split_proportions = [0.7, 0.15, 0.15]
-            split_data_dict = split_data(
-                df,
-                split_type=split_type,
-                smiles_col="SMILES",
-                time_col="Year",
-                fractions=split_proportions,
-                max_k_clusters=max_k_clusters,
-                # fig_output_path=fig_output_path,
-                export_mcs_path=export_mcs_path,
-                return_indices=return_indices,
-                seed=42,
-            )
-            # save the splits
-            self.logger.info(f"Exporting the splits to {split_path}")
-            save_pickle(split_data_dict, split_path)
-
-        return split_data_dict
+    # def split(
+    #     self,
+    #     df,
+    #     split_type,
+    #     split_proportions,
+    #     max_k_clusters=500,
+    #     # fig_output_path=None,
+    #     export_path=None,
+    #     return_indices=False,
+    #     recalculate=False,
+    # ):
+    #
+    #
+    #     # calculate the splits or load them if they exist
+    #     split_path = (
+    #         self.output_path
+    #         / f"split_data_dict{'_indices' if return_indices else ''}.pkl"
+    #     )
+    #     if split_path.is_file() and not recalculate:
+    #         self.logger.info("Loading previously calculated splits")
+    #         split_data_dict = load_pickle(split_path)
+    #     else:
+    #         self.logger.info("Calculating the splits")
+    #         if split_proportions is None:
+    #             split_proportions = [0.7, 0.15, 0.15]
+    #         split_data_dict = split_data(
+    #             df,
+    #             split_type=split_type,
+    #             smiles_col="SMILES",
+    #             time_col="Year",
+    #             fractions=split_proportions,
+    #             max_k_clusters=max_k_clusters,
+    #             # fig_output_path=fig_output_path,
+    #             export_path=export_path,
+    #             return_indices=return_indices,
+    #             seed=42,
+    #         )
+    #         # save the splits
+    #         self.logger.info(f"Exporting the splits to {split_path}")
+    #         save_pickle(split_data_dict, split_path)
+    #
+    #     return split_data_dict
 
     @staticmethod
     def get_cols_to_include(
@@ -708,6 +720,7 @@ def get_datasets(
     task_type: str = "regression",
     ext: str = "pkl",
     logger: Union[None, logging.Logger] = None,
+    device=DEVICE,
 ):
     activity_type = activity_type.lower()
     desc_chem = desc_chem.lower()
@@ -778,6 +791,7 @@ def get_datasets(
             median_scaling=median_scaling,
             median_point=median_point,
             logger=logger,
+            device=device
         )
         median_point = dataset.median_point
         datasets[subset] = dataset
@@ -834,7 +848,7 @@ def main():
     parser.add_argument("--file-ext", type=str, default="pkl", help="File extension")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size")
     parser.add_argument(
-        "--max-k-clusters", type=int, default=1000, help="Max k clusters"
+        "--max-k-clusters", type=int, default=10000, help="Max k clusters"
     )
     parser.add_argument("--min-datapoints", type=int, default=50, help="Min datapoints")
     parser.add_argument("--min-actives", type=int, default=10, help="Min actives")
@@ -881,11 +895,11 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # # Example of how to use the Papyrus class
+    # Example of how to use the Papyrus class
     # activity_type = "xc50"
     # std_smiles = True
     # verbose_files = False
-
+    #
     # # call args
     # n_targets = -1
     # desc_prot = "ankh-large"  # "ankh-base"  # For testing - it should become none
@@ -910,7 +924,7 @@ if __name__ == "__main__":
     #     recalculate=recalculate,
     #     split_type=split_type,
     #     split_proportions=split_proportions,
-    #     max_k_clusters=500,
+    #     max_k_clusters=50,
     #     min_datapoints=50,
     #     min_actives=10,
     #     active_threshold=6.5,

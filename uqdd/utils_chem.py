@@ -1,57 +1,48 @@
 import copy
 import logging
-from typing import Union, List, Tuple, Dict, Any, Optional
+from typing import Union, List, Tuple, Any, Optional
 from pathlib import Path
 from PIL import Image
 import numpy as np
 import pandas as pd
-from scipy.sparse import coo_matrix
 from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 
 import rdkit
-from rdkit import Chem, RDLogger, DataStructs
-from rdkit.Chem import Draw, AllChem, MACCSkeys, rdFMCS
+from rdkit import Chem, RDLogger
+from rdkit.Chem import Draw, AllChem, rdFMCS
 from rdkit.Chem import MolToSmiles, MolFromSmiles, MolFromSmarts, SanitizeMol
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 from rdkit.Chem.rdchem import Mol as RdkitMol
 
-from uqdd import DATA_DIR, FIGS_DIR
+from uqdd import DATA_DIR
 from uqdd.utils import check_nan_duplicated, custom_agg, load_npy_file, save_npy_file, save_pickle, load_pickle
 
 from papyrus_scripts.reader import read_molecular_descriptors
 from papyrus_scripts.preprocess import consume_chunks
 
 # scipy hierarchy clustering
-from scipy.cluster.hierarchy import fcluster, cophenet, dendrogram, cut_tree
-import scipy.cluster.hierarchy as sch
+from scipy.cluster.hierarchy import cophenet, cut_tree
 from scipy.spatial.distance import pdist
-import fastcluster as fc
 from fastcluster import linkage
 # SKlearn metrics
-from sklearn.metrics import (
-    silhouette_samples,
-    silhouette_score,
-    adjusted_rand_score,
-    adjusted_mutual_info_score,
-)
-from sklearn.neighbors import NearestCentroid
+from sklearn.metrics import silhouette_score
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 from itertools import combinations, islice
 import math
-import time
 
 # Disable RDKit warnings
 RDLogger.DisableLog("rdApp.info")
 print(f"rdkit {rdkit.__version__}")
 
 N_WORKERS = 20
-BATCH_SIZE = 20000
+BATCH_SIZE = 10000
 
 all_models = [
     "ecfp1024",
@@ -1068,13 +1059,11 @@ def merge_scaffolds(df, smiles_col="SMILES"):
         The input DataFrame.
     smiles_col : str, optional
         The name of the column containing the SMILES strings. Default is 'smiles'.
-    verbose : bool, optional
-        If True, prints the progress of the scaffold generation. Default is False.
-    output_path : str, optional
-        The path to the output directory for scaffold clustering figures. Default is None.
+
     Returns
     -------
-
+    pandas.DataFrame
+        The DataFrame with the scaffold information merged in column 'scaffold'.
     """
     # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
     unique_smiles = df[smiles_col].unique().tolist()
@@ -1097,7 +1086,7 @@ def merge_scaffolds(df, smiles_col="SMILES"):
     return df
 
 
-### adopted from https://github.com/nina23bom/NPS-Pharmacological-profile-fingerprint-prediction-using-ML/blob/main/001.%20NPS%20unique%20compounds%20MCS%20Hierarchical%20clustering%20-%20Class%20Label.ipynb
+# adopted from https://github.com/nina23bom/NPS-Pharmacological-profile-fingerprint-prediction-using-ML/blob/main/001.%20NPS%20unique%20compounds%20MCS%20Hierarchical%20clustering%20-%20Class%20Label.ipynb
 def tanimoto_mcs(smi1, smi2):
     # reading smiles of two molecules and create molecule
     m1 = Chem.MolFromSmiles(smi1)
@@ -1264,7 +1253,7 @@ def hierarchical_clustering(
             print(f"Similarity matrix already exists at {filepath}")
             return load_npy_file(filepath)
 
-    print(f"Chunk Size: {BATCH_SIZE}")
+    print(f"Chunk Size: {batch_size}")
     print(f"Number of Workers: {N_WORKERS}")
 
     cid_list = df[smiles_col].tolist()
@@ -1374,19 +1363,34 @@ def calculate_cophenet(X, Z, save_path=None):
     return c
 
 
+def calculate_silhouette(k, X, Z):
+    cluster_labels = cut_tree(Z, n_clusters=k).flatten()
+    silhouette_avg = silhouette_score(X, cluster_labels, metric="precomputed")
+    return k, silhouette_avg
+
+
 def sil_K(X, Z, max_k=500):
-    sil, n_clu = [], []
-    for k in range(2, max_k):
-        # cluster = fcluster(Z, k, criterion="maxclust")
-        cluster_labels = cut_tree(Z, n_clusters=k).flatten()
-        silhouette_avg = silhouette_score(X, cluster_labels, metric="precomputed")  #  metric="euclidean"
-        sil.append(silhouette_avg)
-        n_clu.append(k)
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        results = pool.starmap(calculate_silhouette, [(k, X, Z) for k in range(2, max_k)])
+    results.sort(key=lambda x: x[0])  # Ensure the results are sorted by k
+
+    # Unpack the results using zip
+    n_clu, sil = zip(*results)
+    # n_clu = [k for k, _ in results]
+    # sil = [s for _, s in results]
+
+    # sil, n_clu = [], []
+    # for k in range(2, max_k):
+    #     # cluster = fcluster(Z, k, criterion="maxclust")
+    #     cluster_labels = cut_tree(Z, n_clusters=k).flatten()
+    #     silhouette_avg = silhouette_score(X, cluster_labels, metric="precomputed")  #  metric="euclidean"
+    #     sil.append(silhouette_avg)
+    #     n_clu.append(k)
 
     optimal_clu = n_clu[sil.index(max(sil))]
     print("Optimal number of clusters: ", optimal_clu)
 
-    return n_clu, sil, optimal_clu
+    return list(n_clu), list(sil), optimal_clu
 
 
 def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None):
@@ -1407,7 +1411,7 @@ def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None
     # Initialize the plot
     fig = plt.figure(figsize=(12, 5), dpi=600)
     plt.rc("font", family="serif")
-    plt.plot(cluster_counts, silhouette_scores, label="MCS")
+    plt.plot(cluster_counts, silhouette_scores) # , label="MCS"
     # plt.scatter(cluster_counts, silhouette_scores, label="MCS")
     # # Plot each series of cluster counts vs. silhouette scores
     # for i in range(len(cluster_counts)):
@@ -1427,7 +1431,7 @@ def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None
             bbox_inches="tight",
         )
 
-    plt.show()
+    # plt.show()
 
 
 def plot_cluster_heatmap(data_matrix, output_path=None):
@@ -1463,7 +1467,7 @@ def plot_cluster_heatmap(data_matrix, output_path=None):
         )
 
     # Show the plot
-    plt.show()
+    # plt.show()
 
 
 def clustering(
@@ -1500,7 +1504,10 @@ def clustering(
     #     df_mcs.to_csv(Path(export_mcs_path) / "mcs_matrix.csv", index=True)
     # df_pair.to_csv(Path(export_mcs_path) / "scaffold_sim_pair.csv", index=True)
     mcs_x, mcs_z = form_linkage(mcs_np, save_path=export_mcs_path, calculate_cophenetic_coeff=True)
-    mcs_k, mcs_sil, optimal_clu = sil_K(mcs_x, mcs_z, max_k=max_k)
+    # max_k = min(max_k, df_clean[smiles_col].nunique())
+    max_k = df_clean[smiles_col].nunique()
+    print(f"Max number of clusters: {max_k}")
+    mcs_k, mcs_sil, optimal_clu = sil_K(mcs_x, mcs_z, max_k=max_k) # , max_k=max_k
     if export_mcs_path:
         fig_output_path = Path(export_mcs_path) / "mcs_figures"
         Path(fig_output_path).mkdir(parents=True, exist_ok=True)

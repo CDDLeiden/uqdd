@@ -178,6 +178,7 @@ def build_datasets(
     # label_scaling_func: Callable[[torch.Tensor], torch.Tensor] | str = None,
     ext: str = "pkl",
     logger: logging.Logger = None,
+    device: str = DEVICE,
 ):
     logger = create_logger(name="build_datasets") if not logger else logger
     logger.debug(f"Building datasets for {data_name}")
@@ -196,6 +197,7 @@ def build_datasets(
             task_type=task_type,
             ext=ext,
             logger=logger,
+            device=device
         )
     elif data_name == "tdc":
         from uqdd.data.data_tdc import get_datasets
