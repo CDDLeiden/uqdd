@@ -1370,8 +1370,50 @@ def calculate_silhouette(k, X, Z):
 
 
 def sil_K(X, Z, max_k=500):
-    with mp.Pool(processes=mp.cpu_count()) as pool:
-        results = pool.starmap(calculate_silhouette, [(k, X, Z) for k in range(2, max_k)])
+    # Chunking
+    results = []
+    chunk_size = 50
+    k_ranges = [range(i, min(i + chunk_size, max_k)) for i in range(2, max_k, chunk_size)]
+    # def process_k_range(k):
+    #     return calculate_silhouette(k, X, Z)
+    #
+    # with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
+    #     results = list(
+    #         tqdm(
+    #             executor.map(
+    #                 process_k_range, range(2, max_k)
+    #             ),
+    #             total=max_k - 2,
+    #             desc="Calculating Silhouette Scores",
+    #         )
+    #     )
+    # tqdm of k_ranges
+    for k_range in tqdm(k_ranges, desc="Calculating Silhouette Scores", unit="chunk"):
+    # for k_range in k_ranges:
+        with mp.Pool(processes=N_WORKERS) as pool: # mp.cpu_count()
+            chunk_results = pool.starmap(calculate_silhouette, [(k, X, Z) for k in k_range])
+            results.extend(chunk_results)
+    # with (mp.Manager() as manager):
+    #     shared_X = manager.list(X)
+    #     shared_Z = manager.list(Z)
+    #     # def process_k_range(k):
+    #     #     return calculate_silhouette(k, shared_X, shared_Z)
+    #
+    #     with mp.Pool(processes=N_WORKERS) as pool:
+    #         results = pool.starmap(calculate_silhouette, [(k, shared_X, shared_Z) for k in range(2, max_k)])
+    #
+    #         # results = list(
+    #         #     tqdm(
+    #         #         pool.imap(process_k_range, range(2, max_k)),
+    #         #         total=max_k - 2,
+    #         #         desc="Calculating Silhouette Scores",
+    #         #     )
+    #         # )
+    #         # results = pool.map(process_k_range, range(2, max_k))
+
+    # with mp.Pool(processes=N_WORKERS) as pool:
+    #     results = pool.starmap(calculate_silhouette, [(k, X, Z) for k in range(2, max_k)])
+
     results.sort(key=lambda x: x[0])  # Ensure the results are sorted by k
 
     # Unpack the results using zip
