@@ -6,6 +6,7 @@ from typing import Union, List
 
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from uqdd import DATASET_DIR, FIGS_DIR, TODAY
 from uqdd.utils import load_pickle, save_df, load_df, save_pickle
@@ -131,6 +132,7 @@ def random_split(
     val_frac=0.15,
     test_frac=0.15,
     return_indices=False,
+    stratify_col=None,
     seed=42,
 ) -> dict:
     """
@@ -146,6 +148,10 @@ def random_split(
         The fraction of the dataset to be used as the validation set.
     test_frac : float
         The fraction of the dataset to be used as the test set.
+    return_indices : bool
+        If True, returns the indices of the split dataframes instead of the dataframes themselves.
+    stratify_col : str or None
+        The name of the column to stratify the split on.
     seed : int
         The random seed for reproducible splits.
     Returns:
@@ -159,16 +165,23 @@ def random_split(
     """
     # First split: separate the training set from the rest
     rest_frac = val_frac + test_frac
-    train_df, temp_df = train_test_split(df, test_size=rest_frac, random_state=seed)
+    st = None
+    if stratify_col:
+        assert stratify_col in df.columns, f"Column {stratify_col} not found in the DataFrame"
+        st = df[stratify_col]
+
+    train_df, temp_df = train_test_split(df, test_size=rest_frac, stratify=st, random_state=seed)
 
     # Adjust the proportion for the second split
     # The proportion of validation set out of the rest (val + test)
     adjusted_val_frac = val_frac / rest_frac
 
+    st = temp_df[stratify_col] if stratify_col else None
     # Second split: separate the validation set from the test set
     val_df, test_df = train_test_split(
-        temp_df, test_size=1 - adjusted_val_frac, random_state=seed
+        temp_df, test_size=1 - adjusted_val_frac, stratify=st, random_state=seed
     )
+
     if return_indices:
         return create_split_dict(
             "random",
@@ -177,46 +190,6 @@ def random_split(
             test_df.index.tolist(),
         )
     return create_split_dict("random", train_df, val_df, test_df)
-
-#
-# def merge_scaffolds(df, smiles_col="SMILES"):
-#     """
-#     Merges the scaffold information into the DataFrame.
-#
-#     Parameters
-#     ----------
-#     df : pandas.DataFrame
-#         The input DataFrame.
-#     smiles_col : str, optional
-#         The name of the column containing the SMILES strings. Default is 'smiles'.
-#     verbose : bool, optional
-#         If True, prints the progress of the scaffold generation. Default is False.
-#     output_path : str, optional
-#         The path to the output directory for scaffold clustering figures. Default is None.
-#     Returns
-#     -------
-#
-#     """
-#     # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
-#     unique_smiles = df[smiles_col].unique().tolist()
-#
-#     with ProcessPoolExecutor() as executor:
-#         scaffolds = list(
-#             tqdm(
-#                 executor.map(generate_scaffold, unique_smiles),
-#                 total=len(unique_smiles),
-#                 desc="Generating scaffolds",
-#             )
-#         )
-#
-#     smi_sc_mapper = {smi: scaffold for smi, scaffold in zip(unique_smiles, scaffolds)}
-#     df["scaffold"] = df[smiles_col].map(smi_sc_mapper)
-#
-#     # if verbose:
-#     #     # print(f"Number of unique scaffolds: {df['scaffold'].nunique()}")
-#     #     export_df(df, Path(output_path) / "merged_scaffolds.csv")
-#
-#     return df
 
 
 def scaffold_split(
@@ -424,6 +397,7 @@ def split_data(
     split_type: Union[str, List[str]] = "random",
     smiles_col: str = "smiles",
     time_col: str = "year",
+    stratify_col: str = None,
     fractions: Union[List[float], None] = None,
     max_k_clusters: int = 500,
     # fig_output_path: Union[str, None] = None,
@@ -483,7 +457,7 @@ def split_data(
     val_frac = fractions[1] if len(fractions) == 3 else 0.0
 
     func_key = {
-        "random": (random_split, {}),
+        "random": (random_split, {"stratify_col": stratify_col}),
         "scaffold": (scaffold_split, {"smiles_col": smiles_col}),
         "scaffold_cluster": (
             scaffold_cluster_split,
@@ -553,6 +527,119 @@ def split_data(
         raise ValueError(f"split_type must be one of 'random', 'scaffold', 'scaffold_cluster' or 'time', instead we got {split_type}")
 
     return all_data
+
+
+def stratified_distribution(df, stratified_col='scaffold'):
+    """
+    Calculates the distribution of scaffolds in a DataFrame.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The input DataFrame.
+    stratified_col : str, optional
+        The name of the column to stratify the distribution on. Default is 'scaffold'.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame with the scaffold distribution.
+    """
+    stratified_dist = df[stratified_col].value_counts(normalize=True).to_dict() # reset_index()
+    # stratified_dist.columns = [stratified_col, "count"]
+    # stratified_dist["fraction"] = stratified_dist["count"] / len(df)
+    return stratified_dist
+
+
+def plot_scaffold_distribution(train_df, val_df, test_df, stratified_col='scaffold', split_type='random', output_path=None):
+    train_dist = stratified_distribution(train_df, stratified_col)
+    val_dist = stratified_distribution(val_df, stratified_col)
+    test_dist = stratified_distribution(test_df, stratified_col)
+
+    # Combine scaffold distributions into a DataFrame for comparison
+    dist_df = pd.DataFrame({
+        'train': train_dist,
+        'val': val_dist,
+        'test': test_dist
+    }).fillna(0)
+
+    print(dist_df)  # FOR DEBUGGING
+
+    # Plot the scaffold distributions
+    dist_df.plot(kind='bar', x=stratified_col, y=['train', 'val', 'test'], figsize=(12, 6))
+    plt.title(f'{split_type.upper()} split - {stratified_col.upper()} Distribution in Train, Validation, and Test Sets')
+    plt.xlabel(f'{stratified_col.upper()}')
+    plt.ylabel('Fraction of Compounds')
+
+    if output_path:
+        plt.savefig(output_path)
+    plt.show()
+
+
+def check_distribution_js_similarity(dist_df):
+    """
+    Checks the similarity of the scaffold distributions between the training, validation, and test sets.
+
+    Parameters
+    ----------
+    dist_df : pandas.DataFrame
+        The DataFrame containing the scaffold distributions.
+
+    Returns
+    -------
+    bool
+        True if the distributions are similar, False otherwise.
+    """
+    # Calculate the Jensen-Shannon divergence between the distributions
+    from scipy.spatial.distance import jensenshannon
+
+    train_val_js = jensenshannon(dist_df['train'], dist_df['val'])
+    train_test_js = jensenshannon(dist_df['train'], dist_df['test'])
+    val_test_js = jensenshannon(dist_df['val'], dist_df['test'])
+
+    # Check if the JS divergences are below a threshold
+    threshold = 0.1
+    js_diff = train_val_js < threshold and train_test_js < threshold and val_test_js < threshold
+    print(f'Train vs. Val JS divergence: {train_val_js:.4f}')
+    print(f'Train vs. Test JS divergence: {train_test_js:.4f}')
+    print(f'Val vs. Test JS divergence: {val_test_js:.4f}')
+
+    return js_diff
+
+
+def check_distribution_similarity(dist_df):
+    train_val_diff = np.abs(dist_df['train'] - dist_df['val']).mean()
+    train_test_diff = np.abs(dist_df['train'] - dist_df['test']).mean()
+    val_test_diff = np.abs(dist_df['val'] - dist_df['test']).mean()
+
+    print(f'Mean absolute difference between train and val distributions: {train_val_diff:.4f}')
+    print(f'Mean absolute difference between train and test distributions: {train_test_diff:.4f}')
+    print(f'Mean absolute difference between val and test distributions: {val_test_diff:.4f}')
+
+    return train_val_diff, train_test_diff, val_test_diff
+
+
+def check_distribution(split_dict, stratified_col='scaffold', output_path=None):
+    split_types = list(split_dict.keys())
+
+    for split_type in split_types:
+        train_df = split_dict[split_type]['train']
+        val_df = split_dict[split_type]['val']
+        test_df = split_dict[split_type]['test']
+
+        plot_scaffold_distribution(train_df, val_df, test_df, stratified_col, split_type, output_path)
+        dist_df = pd.DataFrame({
+            'train': stratified_distribution(train_df, stratified_col),
+            'val': stratified_distribution(val_df, stratified_col),
+            'test': stratified_distribution(test_df, stratified_col)
+        }).fillna(0)
+
+        js_diff = check_distribution_js_similarity(dist_df)
+        print(f"JS divergence between scaffold distributions in {split_type} split: {js_diff}")
+        check_distribution_similarity(dist_df)
+        print("")
+
+
 
 
 def check_if_processed_file(
