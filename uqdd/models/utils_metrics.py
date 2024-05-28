@@ -617,8 +617,7 @@ def calculate_uct_metrics(
         scaled=True,
         verbose=True,
     )
-    # figures_path = FIGS_DIR / data_specific_path / model_name
-    # figures_path.mkdir(parents=True, exist_ok=True)
+
     metrics_filepath = Path(figpath) / f"{task_name}_metrics.pkl"
     save_pickle(metrics, metrics_filepath)
 
@@ -634,9 +633,6 @@ def calculate_uct_metrics(
         savefig=True,
         save_dir=Path(figpath),
     )
-
-    # img = wandb.Image(fig)
-    # plots = {"UCT"}
     return metrics, plots
 
 
@@ -1438,7 +1434,7 @@ class MetricsTable:
         """
         Export the UCT metrics table to wandb.
         """
-        wandb.log({f" Uncertainty Metrics Table - {self.model_type}": self.table})
+        wandb.log({f"Uncertainty Metrics Table": self.table}) #  - {self.model_type}
 
 
 def recalibrate(

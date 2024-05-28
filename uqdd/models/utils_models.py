@@ -76,11 +76,14 @@ def get_desc_len_from_dataset(dataset):  # , desc_prot=True):
         raise ValueError("Unknown input type to get_desc_len function.")
 
 
-def get_desc_len(*descriptors: str):
+def get_desc_len(*descriptors: str, logger=None):
     desc_config = get_config(config_name="desc_dim", config_dir=CONFIG_DIR)
     lengths = []
     for d in descriptors:
-        lengths.append(desc_config.get(d, 0))
+        l = desc_config.get(d, 0)
+        if logger:
+            logger.info(f"{d} descriptor length: {l}")
+        lengths.append(l)
     return tuple(lengths)
 
 
@@ -473,6 +476,7 @@ def save_model(
     desc_prot_len=0,
     desc_chem_len=1024,
     onnx=True,
+    tracker="wandb",
 ):
     # n_targets=-1,
     # data_name="papyrus",
@@ -501,12 +505,12 @@ def save_model(
 
         if onnx:
             onnx_path = model_dir / f"{model_name}.onnx"
-            # batch_size = config.get("batch_size", 64)
+            batch_size = config.get("batch_size", 64)
             # in case we have two inputs ?
             if desc_prot_len == 0:
                 dummy_input = {
                     "inputs": torch.zeros(
-                        (config.batch_size, desc_chem_len),
+                        (batch_size, desc_chem_len),
                         dtype=torch.float32,
                         device=DEVICE,
                         requires_grad=False,
@@ -517,13 +521,13 @@ def save_model(
                     "inputs": tuple(
                         (
                             torch.zeros(
-                                (config.batch_size, desc_prot_len),
+                                (batch_size, desc_prot_len),
                                 dtype=torch.float32,
                                 device=DEVICE,
                                 requires_grad=False,
                             ),
                             torch.zeros(
-                                (config.batch_size, desc_chem_len),
+                                (batch_size, desc_chem_len),
                                 dtype=torch.float32,
                                 device=DEVICE,
                                 requires_grad=False,
@@ -534,8 +538,9 @@ def save_model(
             torch.onnx.export(model, dummy_input, onnx_path)
             wandb_model_path = str(onnx_path)
 
-        # Model logging
-        wandb.save(wandb_model_path, base_path=model_dir)
+        # Model logging if wandb
+        if tracker.lower() == "wandb":
+            wandb.save(wandb_model_path, base_path=model_dir)
 
     except Exception as e:
         print("Error saving models: " + str(e))

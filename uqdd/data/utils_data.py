@@ -7,6 +7,7 @@ from typing import Union, List
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 from uqdd import DATASET_DIR, FIGS_DIR, TODAY
 from uqdd.utils import load_pickle, save_df, load_df, save_pickle
@@ -126,14 +127,27 @@ def create_split_dict(split_type, train_df, val_df, test_df):  # , **kwargs):
     return out
 
 
+def from_split_data_to_idx(split_dict):
+    return {
+        split_type: {
+            "train": split_dict[split_type]["train"].index.tolist(),
+            "val": split_dict[split_type]["val"].index.tolist(),
+            "test": split_dict[split_type]["test"].index.tolist(),
+        }
+        for split_type in split_dict.keys()
+    }
+
+
 def random_split(
     df: pd.DataFrame,
     train_frac=0.7,
     val_frac=0.15,
     test_frac=0.15,
-    return_indices=False,
+    # return_indices=False,
     stratify_col=None,
+    # export_path=None,
     seed=42,
+    print_info=True,
 ) -> dict:
     """
     Splits a DataFrame into training, validation, and test sets based on specified fractions.
@@ -164,32 +178,96 @@ def random_split(
         The testing dataframe or list of indices.
     """
     # First split: separate the training set from the rest
-    rest_frac = val_frac + test_frac
+    # rest_frac = val_frac + test_frac
     st = None
-    if stratify_col:
+    if stratify_col == "scaffold" and "scaffold" not in df.columns:
+        df = merge_scaffolds(df)
+        st = df[stratify_col]
+    elif stratify_col:
         assert stratify_col in df.columns, f"Column {stratify_col} not found in the DataFrame"
         st = df[stratify_col]
 
-    train_df, temp_df = train_test_split(df, test_size=rest_frac, stratify=st, random_state=seed)
+    train_df, val_df = train_test_split(df, test_size=val_frac, train_size=train_frac, stratify=st, random_state=seed)
+    # now we get the rest of the data
+    test_df = df.drop(train_df.index).drop(val_df.index)
+    #
+    # train_df, temp_df = train_test_split(df, test_size=rest_frac, stratify=st, random_state=seed)
+    #
+    # # Adjust the proportion for the second split
+    # # The proportion of validation set out of the rest (val + test)
+    # adjusted_val_frac = val_frac / rest_frac
+    #
+    # st = temp_df[stratify_col] if stratify_col else None
+    # # Second split: separate the validation set from the test set
+    # val_df, test_df = train_test_split(
+    #     temp_df, test_size=1 - adjusted_val_frac, stratify=st, random_state=seed
+    # )
 
-    # Adjust the proportion for the second split
-    # The proportion of validation set out of the rest (val + test)
-    adjusted_val_frac = val_frac / rest_frac
-
-    st = temp_df[stratify_col] if stratify_col else None
-    # Second split: separate the validation set from the test set
-    val_df, test_df = train_test_split(
-        temp_df, test_size=1 - adjusted_val_frac, stratify=st, random_state=seed
-    )
-
-    if return_indices:
-        return create_split_dict(
-            "random",
-            train_df.index.tolist(),
-            val_df.index.tolist(),
-            test_df.index.tolist(),
-        )
+    # if return_indices:
+    #     return create_split_dict(
+    #         "random",
+    #         train_df.index.tolist(),
+    #         val_df.index.tolist(),
+    #         test_df.index.tolist(),
+    #     )
+    if print_info:
+        print(f"Random Split - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
     return create_split_dict("random", train_df, val_df, test_df)
+
+
+def separate_min_count_df(df, counting_col="scaffold", threshold_count=3):
+    counts = df[counting_col].value_counts()
+    below_classes = counts[counts < threshold_count].index
+    df_below_class = df[df[counting_col].isin(below_classes)]
+    df_above_class = df[~df[counting_col].isin(below_classes)]
+
+    return df_below_class, df_above_class
+
+
+def random_split_stratified(
+        df,
+        stratify_by="scaffold",
+        max_k=500,
+        optimal_k=None,
+        train_frac=0.7,
+        val_frac=0.15,
+        test_frac=0.15,
+        seed=42,
+        export_path=None
+):
+    if stratify_by == "scaffold" and "scaffold" not in df.columns:
+        df = merge_scaffolds(df)
+    elif stratify_by == "cluster" and "cluster" not in df.columns:
+        if "scaffold" not in df.columns:
+            df = merge_scaffolds(df)
+        df = clustering(df, "scaffold", max_k=max_k, optimal_k=optimal_k, withH=False, export_mcs_path=export_path)
+
+    df_below, df_above = separate_min_count_df(df, counting_col=stratify_by, threshold_count=3)
+    below_train, below_val, below_test = random_split(
+        df_below,
+        train_frac=train_frac,
+        val_frac=val_frac,
+        test_frac=test_frac,
+        seed=seed,
+        print_info=False,
+    )['random'].values()
+    above_train, above_val, above_test = random_split(
+        df_above,
+        train_frac=train_frac,
+        val_frac=val_frac,
+        test_frac=test_frac,
+        stratify_col=stratify_by,
+        seed=seed,
+        print_info=False,
+    )['random'].values()
+    train_df, val_df, test_df = pd.concat([below_train, above_train]), pd.concat([below_val, above_val]), pd.concat([below_test, above_test])
+    print(f"Random Split Stratified By {stratify_by} - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+    return create_split_dict(
+        "random",
+        train_df,
+        val_df,
+        test_df,
+    )
 
 
 def scaffold_split(
@@ -198,7 +276,8 @@ def scaffold_split(
     train_frac=0.7,
     val_frac=0.15,
     test_frac=0.15,
-    return_indices=False,
+    # return_indices=False,
+    # stratify_col=None,
     seed=42,
 ) -> dict:
     """
@@ -232,7 +311,8 @@ def scaffold_split(
     """
     # set random seed
     np.random.seed(seed)
-    df = merge_scaffolds(df, smiles_col=smiles_col)
+    if 'scaffold' not in df.columns:
+        df = merge_scaffolds(df, smiles_col=smiles_col)
 
     # get unique scaffolds
     scaffolds = list(df["scaffold"].unique())
@@ -253,14 +333,14 @@ def scaffold_split(
     train_df = df[df["scaffold"].isin(scaffold_train)]
     val_df = df[df["scaffold"].isin(scaffold_val)]
     test_df = df[df["scaffold"].isin(scaffold_test)]
-
-    if return_indices:
-        return create_split_dict(
-            "scaffold",
-            train_df.index.tolist(),
-            val_df.index.tolist(),
-            test_df.index.tolist(),
-        )
+    print(f"Scaffold Split - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+    # if return_indices:
+    #     return create_split_dict(
+    #         "scaffold",
+    #         train_df.index.tolist(),
+    #         val_df.index.tolist(),
+    #         test_df.index.tolist(),
+    #     )
     # create result dictionary for return
     return create_split_dict("scaffold", train_df, val_df, test_df)
 
@@ -272,16 +352,17 @@ def scaffold_cluster_split(
     val_frac=0.15,
     test_frac=0.15,
     max_k=500,
+    optimal_k=None,
     # batch_size=10000,
     withH=False,
     # fig_output_path=None,
     export_mcs_path=None,
-    return_indices=False,
+    # return_indices=False,
     seed=42,
 ) -> dict:
     # set random seed
     np.random.seed(seed)
-    if not 'scaffold' in df.columns:
+    if 'scaffold' not in df.columns:
         df = merge_scaffolds(df, smiles_col=smiles_col)  # , verbose=False
     # # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
     # unique_smiles = df[smiles_col].unique().tolist()
@@ -303,13 +384,13 @@ def scaffold_cluster_split(
         df,
         "scaffold",
         max_k=max_k,
+        optimal_k=optimal_k,
         withH=withH,
         # fig_output_path=fig_output_path or FIGS_DIR / f"{TODAY}_scaffold_clustering/",
         export_mcs_path=export_mcs_path,
     )
     # get unique scaffolds
     clusters = list(df["cluster"].unique())
-
     rng = np.random.default_rng(seed=seed)
     rng.shuffle(clusters)
     len_clusters = len(clusters)
@@ -326,15 +407,21 @@ def scaffold_cluster_split(
     train_df = df[df["cluster"].isin(clusters_train)]
     val_df = df[df["cluster"].isin(clusters_val)]
     test_df = df[df["cluster"].isin(clusters_test)]
-    print(f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+    print(f"Scaffold Clustered Split - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+    # check scaffold distribution:
 
-    if return_indices:
-        return create_split_dict(
-            "scaffold_cluster",
-            train_df.index.tolist(),
-            val_df.index.tolist(),
-            test_df.index.tolist(),
-        )
+    # if export_mcs_path:
+    #     sub_dict = create_split_dict("scaffold_cluster", train_df, val_df, test_df)
+    #     fig_output_path = Path(export_mcs_path) / "mcs_figures"
+    #     check_distribution(sub_dict, "scaffold", output_path=fig_output_path)
+    #
+    # if return_indices:
+    #     return create_split_dict(
+    #         "scaffold_cluster",
+    #         train_df.index.tolist(),
+    #         val_df.index.tolist(),
+    #         test_df.index.tolist(),
+    #     )
     # create result dictionary for return
     return create_split_dict("scaffold_cluster", train_df, val_df, test_df)
 
@@ -345,7 +432,7 @@ def time_split(
     train_frac=0.7,
     val_frac=0.15,
     test_frac=0.15,
-    return_indices=False,
+    # return_indices=False,
     **kwargs,
 ):
     """
@@ -381,13 +468,14 @@ def time_split(
     train_df = df.iloc[: int(train_frac * len(df))]
     val_df = df.iloc[int(train_frac * len(df)) : int((train_frac + val_frac) * len(df))]
     test_df = df.iloc[int((train_frac + val_frac) * len(df)) :]
-    if return_indices:
-        return create_split_dict(
-            "time",
-            train_df.index.tolist(),
-            val_df.index.tolist(),
-            test_df.index.tolist(),
-        )
+    print(f"Time Split - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
+    # if return_indices:
+    #     return create_split_dict(
+    #         "time",
+    #         train_df.index.tolist(),
+    #         val_df.index.tolist(),
+    #         test_df.index.tolist(),
+    #     )
     # create result dictionary for return
     return create_split_dict("time", train_df, val_df, test_df)
 
@@ -400,6 +488,7 @@ def split_data(
     stratify_col: str = None,
     fractions: Union[List[float], None] = None,
     max_k_clusters: int = 500,
+    optimal_k: int = None,
     # fig_output_path: Union[str, None] = None,
     export_path: Union[str, None, Path] = None,
     return_indices: bool = False,
@@ -420,6 +509,8 @@ def split_data(
         The name of the column containing the SMILES strings. Default is 'smiles'.
     time_col : str, optional
         The name of the column containing the time information. Default is 'year'.
+    stratify_col : str, optional
+        The name of the column to stratify the split on. Default is None.
     max_k_clusters : int, optional
         The maximum number of clusters to use for scaffold clustering. Default is 100.
     fractions : list, optional
@@ -456,20 +547,9 @@ def split_data(
     train_frac, test_frac = fractions[0], fractions[-1]
     val_frac = fractions[1] if len(fractions) == 3 else 0.0
 
-    func_key = {
-        "random": (random_split, {"stratify_col": stratify_col}),
-        "scaffold": (scaffold_split, {"smiles_col": smiles_col}),
-        "scaffold_cluster": (
-            scaffold_cluster_split,
-            {
-                "smiles_col": smiles_col,
-                "max_k": max_k_clusters,
-                "withH": False,
-                "export_mcs_path": export_path,
-            },
-        ),
-        "time": (time_split, {"time_col": time_col}),
-    }
+    if stratify_col == "scaffold" or split_type in ["scaffold", "scaffold_cluster", "all"]:
+        if "scaffold" not in df.columns:
+            df = merge_scaffolds(df, smiles_col=smiles_col)
 
     # POSTPONED for now - only one split at a time can be done here
     all_data = {}
@@ -486,16 +566,20 @@ def split_data(
                 split_type=t,
                 smiles_col=smiles_col,
                 time_col=time_col,
+                stratify_col=stratify_col,
                 max_k_clusters=max_k_clusters,
+                optimal_k=optimal_k,
                 fractions=fractions,
                 # fig_output_path=fig_output_path,
                 export_path=export_path,
                 return_indices=return_indices,
+                recalculate=recalculate,
                 seed=seed,
+                logger=logger,
             )
             all_data.update(sub_dict)
 
-    elif split_type in func_key.keys():
+    elif split_type in ["random", "time", "scaffold", "scaffold_cluster"]:
         try:
             split_file_name = f"{split_type}_split_dict{'_indices' if return_indices else ''}.pkl"
             if export_path:
@@ -503,23 +587,58 @@ def split_data(
                 if split_file_path.exists() and not recalculate:
                     logger.info(f"Loading splits from {split_file_path}")
                     return load_pickle(split_file_path)
+
+                optimal_k_path = Path(export_path) / f"mcs_optimal_k.pkl"
+                if optimal_k_path.exists():
+                    optimal_k = optimal_k or load_pickle(optimal_k_path)
+
             logger.info(f"Splitting the data using {split_type} split")
-            split_func, split_kwargs = func_key[split_type]
+            func_key = {
+                "random": (random_split, {"stratify_col": stratify_col}),  # , "export_path": export_path
+                "random_stratified": (
+                    random_split_stratified,
+                    {
+                        "max_k": max_k_clusters,
+                        "optimal_k": optimal_k,
+                        "stratify_by": stratify_col,
+                        "export_path": export_path,
+                    }),
+                "scaffold": (scaffold_split, {"smiles_col": smiles_col}),
+                "scaffold_cluster": (
+                    scaffold_cluster_split,
+                    {
+                        "smiles_col": smiles_col,
+                        "max_k": max_k_clusters,
+                        "optimal_k": optimal_k,
+                        "withH": False,
+                        "export_mcs_path": export_path,
+                    },
+                ),
+                "time": (time_split, {"time_col": time_col}),
+            }
+
+            split_type_key = "random_stratified" if split_type == "random" and stratify_col else split_type
+            split_func, split_kwargs = func_key[split_type_key]
+
             sub_dict = split_func(
                 df,
                 **split_kwargs,
                 train_frac=train_frac,
                 val_frac=val_frac,
                 test_frac=test_frac,
-                return_indices=return_indices,
+                # return_indices=return_indices,
                 seed=seed,
             )
+            sub_dict = from_split_data_to_idx(sub_dict) if return_indices else sub_dict
             all_data.update(sub_dict)
             if export_path:
                 logger.info(f"Saving splits to {split_file_path}")
                 save_pickle(sub_dict, split_file_path)
+
         except Exception as e:
             logging.error(f"Error splitting the data: {e}")
+            logging.error(f"Split type: {split_type}, stratify_col: {stratify_col}, fractions: {fractions}")
+
             all_data = create_split_dict(
                 split_type, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
             )
@@ -551,7 +670,7 @@ def stratified_distribution(df, stratified_col='scaffold'):
     return stratified_dist
 
 
-def plot_scaffold_distribution(train_df, val_df, test_df, stratified_col='scaffold', split_type='random', output_path=None):
+def get_dist_df(train_df, val_df, test_df, stratified_col='scaffold'):
     train_dist = stratified_distribution(train_df, stratified_col)
     val_dist = stratified_distribution(val_df, stratified_col)
     test_dist = stratified_distribution(test_df, stratified_col)
@@ -563,16 +682,25 @@ def plot_scaffold_distribution(train_df, val_df, test_df, stratified_col='scaffo
         'test': test_dist
     }).fillna(0)
 
-    print(dist_df)  # FOR DEBUGGING
+    return dist_df
 
+
+def plot_scaffold_distribution(dist_df, stratified_col='scaffold', split_type='random', output_path=None):
     # Plot the scaffold distributions
-    dist_df.plot(kind='bar', x=stratified_col, y=['train', 'val', 'test'], figsize=(12, 6))
-    plt.title(f'{split_type.upper()} split - {stratified_col.upper()} Distribution in Train, Validation, and Test Sets')
-    plt.xlabel(f'{stratified_col.upper()}')
-    plt.ylabel('Fraction of Compounds')
+    # dist_df.plot(kind='bar', x=stratified_col, y=['train', 'val', 'test'], figsize=(12, 6))
+    dist_df.plot(kind='bar', figsize=(24, 12)) # , color=['blue', 'orange', 'green'], alpha=0.75, edgecolor='black', linewidth=1.5
+
+    plt.title(f'{split_type.capitalize()} split - {stratified_col.capitalize()} Distribution in Train, Validation, '
+              f'and Test Sets')
+    plt.xlabel(f'{stratified_col.capitalize()}')
+    plt.ylabel(f'Fraction of {stratified_col.capitalize()}')
+    # make the x axis labels more readable
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
 
     if output_path:
-        plt.savefig(output_path)
+        file_path = Path(output_path) / f'{split_type}_{stratified_col}_distribution.png'
+        plt.savefig(file_path)
     plt.show()
 
 
@@ -620,26 +748,21 @@ def check_distribution_similarity(dist_df):
 
 
 def check_distribution(split_dict, stratified_col='scaffold', output_path=None):
+
     split_types = list(split_dict.keys())
 
     for split_type in split_types:
         train_df = split_dict[split_type]['train']
         val_df = split_dict[split_type]['val']
         test_df = split_dict[split_type]['test']
+        dist_df = get_dist_df(train_df, val_df, test_df, stratified_col)
 
-        plot_scaffold_distribution(train_df, val_df, test_df, stratified_col, split_type, output_path)
-        dist_df = pd.DataFrame({
-            'train': stratified_distribution(train_df, stratified_col),
-            'val': stratified_distribution(val_df, stratified_col),
-            'test': stratified_distribution(test_df, stratified_col)
-        }).fillna(0)
+        plot_scaffold_distribution(dist_df, stratified_col, split_type, output_path)
 
         js_diff = check_distribution_js_similarity(dist_df)
         print(f"JS divergence between scaffold distributions in {split_type} split: {js_diff}")
         check_distribution_similarity(dist_df)
         print("")
-
-
 
 
 def check_if_processed_file(
@@ -651,7 +774,6 @@ def check_if_processed_file(
     desc_chem="ecfp1024",
     file_ext="pkl",
 ):
-
     topx = f"top{n_targets}" if n_targets > 0 else "all"
     output_path = DATASET_DIR / data_name / activity_type / topx
     prefix = (
@@ -853,6 +975,75 @@ def check_homoscedasticity(y_true, y_pred):
         return True
     else:
         return False
+
+
+def get_target_data_distribution(df, target_col, ):
+    distribution = df[target_col].value_counts()
+    distribution = distribution.reset_index()
+
+    # calculate mean and std of labels per each target and add it to col of distribution
+    mean_std = df.groupby(target_col).agg(['mean', 'std']).reset_index()
+    distribution = distribution.merge(mean_std, on=target_col)
+
+    distribution.columns = ['target_id', 'count', 'mean', 'std']
+
+    # calculate mean of means and mean of stds
+    mean_mean = distribution['mean'].mean()
+    mean_std = distribution['std'].mean()
+
+    print(f"Mean of means: {mean_mean:.2f}, Mean of stds: {mean_std:.2f}")
+
+    return distribution
+
+
+def fig_target_data_distribution(df, target_col, output_path=None):
+    distribution = get_target_data_distribution(df, target_col)
+    plt.figure(figsize=(10, 6))
+    sns.histplot(distribution['count'], bins=100, kde=True)
+    plt.title('Target Data Distribution')
+    plt.xlabel('Number of data points per target')
+    plt.ylabel('Number of targets')
+    plt.tight_layout()
+
+    if output_path:
+        file_path = Path(output_path) / 'target_data_distribution.png'
+        plt.savefig(file_path)
+
+    plt.show()
+
+
+def fig_label_distribution(df, label_col='pchembl_value_Mean', output_path=None):
+    plt.figure(figsize=(10, 6))
+    sns.histplot(df[label_col], bins=100, kde=True)
+    plt.title(f'{label_col} Distribution')
+    plt.xlabel(f'{label_col} values')
+    plt.ylabel('Number of data points')
+    plt.tight_layout()
+
+    if output_path:
+        file_path = Path(output_path) / 'label_distribution.png'
+        plt.savefig(file_path)
+
+
+def fig_label_distribution_across_splits(split_dict, label_col='pchembl_value_Mean', output_path=None):
+    if isinstance(label_col, list):
+        label_col = label_col[0]
+    split_types = list(split_dict.keys())
+    for split_type in split_types:
+        fig, axes = plt.subplots(1, 3, figsize=(24, 6))
+        for i, subset in enumerate(['train', 'val', 'test']):
+            df = split_dict[split_type][subset]
+            sns.histplot(df[label_col], bins=100, kde=True, ax=axes[i])
+            axes[i].set_title(f'{split_type.capitalize()} Split - {subset.capitalize()} - {label_col} Distribution')
+            axes[i].set_xlabel(f'{label_col} values')
+            axes[i].set_ylabel('Number of data points')
+            # axes[i].tight_layout()
+
+        plt.tight_layout()
+        if output_path:
+            file_path = Path(output_path) / f'{split_type}_split_label_distribution_across_splits.png'
+            plt.savefig(file_path)
+        # plt.show()
 
 
 # def check_multicollinearity(df, threshold=0.9):

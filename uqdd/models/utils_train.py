@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import wandb
 import torch
 from torch import nn
@@ -48,8 +49,8 @@ def evidential_processing(outputs, alea_all):
 
 # def apply_model_aleatoric_option()
 def train(
-        model, dataloader, loss_fn, optimizer, device=DEVICE, epoch=0, max_norm=None, #10.0,
-        lossfname="EvidenceRegressionLoss"  # pbar=None,
+        model, dataloader, loss_fn, optimizer, device=DEVICE, epoch=0, max_norm=None,
+        lossfname="EvidenceRegressionLoss", tracker="wandb"  # pbar=None,
 ):
     # max_norm = 10.0
     model.train()
@@ -70,23 +71,16 @@ def train(
         #     _, _, num_repeats = outputs.shape
         #     targets = targets.repeat(num_repeats, 1).t()
         # t = t.unsqueeze(2).expand(-1,-1,5)
-        args = (outputs, targets, vars_) if lossfname == 'gaussnll' else (
-        outputs, targets)  # instead we need to specify here if loss fn is gaussnll
+        args = (outputs, targets, vars_) if lossfname == 'gaussnll' else (outputs, targets)
         loss = loss_fn(*args)
         vars_all.append(vars_)
-        # if aleatoric:
-        #     outputs, vars_ = model(inputs)
-        #     # vars_ = torch.exp(logvars)
-        #     loss = loss_fn(outputs, targets, vars_)
-        #     vars_all.append(vars_)
-        # else:
-        #     outputs = model(inputs)
-        #     loss = loss_fn(outputs, targets)
 
         loss.backward()
         if max_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(),
-                                       max_norm=max_norm)  # TODO : does this actually work with Ensemble
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                max_norm=max_norm
+            )
         optimizer.step()
         total_loss += loss.item()  # * outputs.size(0)
         # outputs, vars_all = evidential_processing(outputs, vars_all)
@@ -104,42 +98,37 @@ def train(
     )
     pnorm = compute_pnorm(model)
     gnorm = compute_gnorm(model)
-
-    wandb.log(
-        data={
-            # "epoch": epoch,
-            "train/loss": total_loss,
-            "train/rmse": train_rmse,
-            "train/r2": train_r2,
-            "train/evs": train_evs,
-            "model/pnorm": pnorm,
-            "model/gnorm": gnorm,
-        },
-        step=epoch,
-    )
     vars_all = torch.cat(vars_all, dim=0)
     vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
-    wandb.log(
-        data={
-            "train/alea_mean": vars_mean.item(),
-            "train/alea_var": vars_var.item(),
-        },
-        step=epoch,
-    )
-    # if aleatoric:
-    #     # vars_all = torch.exp(torch.stack(vars_all))
-    #     # vars_mean = torch.mean(vars_all, dim=0)
-    #     # vars_var = torch.var(vars_all, dim=0)
-    #
-    #     vars_all = torch.cat(vars_all, dim=0)
-    #     vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
-    #     wandb.log(
-    #         data={
-    #             "train/alea_mean": vars_mean.item(),
-    #             "train/alea_var": vars_var.item(),
-    #         },
-    #         step=epoch,
-    #     )
+
+    # TODO: ADD CHOICES for TRACKING -
+    #  1) PKL Tracking into a 3D tensor dim 1 will be running epochs (this dim will change depend on how long it actually runs)
+    #  , dim 2 is the number of models (ensemble_size or num_mc_samples)
+    #  and dim 3 is the number of tracked parameters that is [
+    #  "train/loss", "train/rmse", "train/r2", "train/evs",
+    #  "train/alea_mean", "train/alea_var", "model/pnorm",
+    #  "model/gnorm", "val/loss", "val/rmse", "val/r2", "val/evs"
+    #  ]    # 2) wandb as it is here
+    if tracker.lower() == "wandb":
+        wandb.log(
+            data={
+                "train/loss": total_loss,
+                "train/rmse": train_rmse,
+                "train/r2": train_r2,
+                "train/evs": train_evs,
+                "model/pnorm": pnorm,
+                "model/gnorm": gnorm,
+                "train/alea_mean": vars_mean.item(),
+                "train/alea_var": vars_var.item(),
+            },
+            step=epoch,
+        )
+
+    elif tracker.lower() == "tensor":
+        tracked_vals = np.array([epoch, total_loss, train_rmse, train_r2, train_evs,
+            vars_mean.item(), vars_var.item()], dtype=np.float32) # pnorm, gnorm
+        return tracked_vals
+
     return total_loss
 
 
@@ -147,13 +136,12 @@ def evaluate(
         model,
         dataloader,
         loss_fn,
-        # aleatoric=False,
         device=DEVICE,
-        # pbar=None,
         metrics_per_task=False,
         subset="val",  # can be "train", "val" or "test"
         epoch=0,
-        lossfname="EvidenceRegressionLoss"
+        lossfname="EvidenceRegressionLoss",
+        tracker="wandb"
 ):
     model.eval()
     total_loss = 0.0
@@ -170,18 +158,7 @@ def evaluate(
             args = (outputs, targets, vars_) if lossfname.lower() == 'gaussnll' else (outputs, targets)
             loss = loss_fn(*args)
             vars_all.append(vars_)
-
-            # if aleatoric:
-            #     outputs, vars_ = model(inputs)
-            #     # vars_ = torch.exp(logvars)
-            #     loss = loss_fn(outputs, targets, vars_)
-            #     vars_all.append(vars_)
-            # else:
-            #     outputs = model(inputs)
-            #     loss = loss_fn(outputs, targets)
-
             total_loss += loss.item()  # * outputs.size(0)
-            # outputs, vars_all = evidential_processing(outputs, vars_all)
             targets_all.append(targets)
             outputs = outputs[0] if lossfname.lower() == "evidential_regression" else outputs  # Because it gets 4 outputs
             outputs_all.append(outputs)
@@ -192,54 +169,44 @@ def evaluate(
 
         # Calculate metrics
         rmse, r2, evs = calc_regr_metrics(targets_all, outputs_all)
+        # Aleatoric Uncertainty
+        vars_all = torch.cat(vars_all, dim=0)
+        vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
 
-        wandb.log(
-            data={
-                f"{subset}/loss": total_loss,
-                f"{subset}/rmse": rmse,
-                f"{subset}/r2": r2,
-                f"{subset}/evs": evs,
-            },
-            step=epoch,
-        )
+        if tracker.lower() == "wandb":
+            wandb.log(
+                data={
+                    f"{subset}/loss": total_loss,
+                    f"{subset}/rmse": rmse,
+                    f"{subset}/r2": r2,
+                    f"{subset}/evs": evs,
+                    f"{subset}/alea_mean": vars_mean.item(),
+                    f"{subset}/alea_var": vars_var.item(),
+                },
+                step=epoch,
+            )
+        elif tracker.lower() == "tensor":
+            tracked_vals = np.array([epoch, total_loss, rmse, r2, evs, vars_mean.item(), vars_var.item()], dtype=np.float32)
+
         # Calculate metrics
         if metrics_per_task:
             tasks_rmse, tasks_r2, tasks_evs = calc_regr_metrics(
                 targets_all, outputs_all, metrics_per_task
             )
             for task_idx in range(len(tasks_rmse)):
-                wandb.log(
-                    data={
-                        f"{subset}/rmse/task_{task_idx}": tasks_rmse[task_idx],
-                        f"{subset}/r2/task_{task_idx}": tasks_r2[task_idx],
-                        f"{subset}/evs/task_{task_idx}": tasks_evs[task_idx],
-                    },
-                    step=epoch,
-                )
-        # Aleatoric Uncertainty
-        vars_all = torch.cat(vars_all, dim=0)
-        vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
-        wandb.log(
-            data={
-                f"{subset}/alea_mean": vars_mean.item(),
-                f"{subset}/alea_var": vars_var.item(),
-            },
-            step=epoch,
-        )
-        # if aleatoric:
-        #     vars_all = torch.cat(vars_all, dim=0)
-        #     vars_mean, vars_var = calc_aleatoric_mean_var_notnan(vars_all, targets_all)
-        #     # vars_all = torch.cat(vars_all, dim=0)
-        #     # # vars_all = torch.exp(torch.cat(logvars_all, dim=0))
-        #     # vars_mean = torch.mean(vars_all)
-        #     # vars_var = torch.var(vars_all)
-        #     wandb.log(
-        #         data={
-        #             f"{subset}/alea_mean": vars_mean.item(),
-        #             f"{subset}/alea_var": vars_var.item(),
-        #         },
-        #         step=epoch,
-        #     )
+                if tracker.lower() == "wandb":
+                    wandb.log(
+                        data={
+                            f"{subset}/rmse/task_{task_idx}": tasks_rmse[task_idx],
+                            f"{subset}/r2/task_{task_idx}": tasks_r2[task_idx],
+                            f"{subset}/evs/task_{task_idx}": tasks_evs[task_idx],
+                        },
+                        step=epoch,
+                    )
+                elif tracker.lower() == "tensor":
+                    tracked_vals = np.append(tracked_vals, [tasks_rmse[task_idx], tasks_r2[task_idx], tasks_evs[task_idx]])
+    if tracker.lower() == "tensor":
+        return tracked_vals
 
     return total_loss
 
@@ -262,12 +229,6 @@ def predict(
             inputs = tuple(x.to(device) for x in inputs)
             outputs, vars_ = model(inputs)
             vars_all.append(vars_)
-            # if aleatoric:
-            #     outputs, vars_ = model(inputs)
-            #     # vars_ = torch.exp(logvars)
-            #     vars_all.append(vars_)
-            # else:
-            #     outputs = model(inputs)
             outputs_all.append(outputs)
             targets_all.append(targets)
 
@@ -275,101 +236,6 @@ def predict(
     targets_all = torch.cat(targets_all, dim=0).cpu()
     vars_all = torch.cat(vars_all, dim=0).cpu()
     return outputs_all, targets_all, vars_all
-    # if aleatoric:
-    #     vars_all = torch.cat(vars_all, dim=0).cpu()
-    #     return outputs_all, targets_all, vars_all
-    #
-    # return outputs_all, targets_all, None
-
-
-#
-# def _predict(
-#         model,
-#         dataloader,
-#         aleatoric=False,
-#         # evidential=False,
-#         # num_mc_samples=1, # Default to 1 to mimic standard predict behavior, otherwise MC
-#         device=DEVICE,
-# ):
-#     # Determine mode based on num_samples
-#     # if num_mc_samples == 1:
-#     model.eval()  # Standard evaluation mode for prediction
-#     #     desc = "Predicting"
-#     # else:
-#     #     model.train()  # Enable dropout for MC prediction
-#     #     desc = f"MC Dropout Prediction ({num_mc_samples})"
-#
-#     outputs_all = []
-#     targets_all = []
-#     aleatoric_all = []
-#     epistemic_all = []
-#
-#     with torch.no_grad():
-#         for inputs, targets in tqdm(
-#                 dataloader, total=len(dataloader), desc="Predicting"
-#         ):
-#             inputs = tuple(x.to(device) for x in inputs)
-#             targets = targets.to(device)
-#             # output_samples, alea_samples, epistemic_samples = [], [], []
-#             # for _ in range(num_mc_samples): # Multiple forward passes
-#             if aleatoric:
-#                 outputs, logvars = model(inputs)
-#                 alea_vars = torch.exp(logvars)
-#                 # vars_all.append(vars_)
-#                 # output_samples.append(outputs)
-#                 # alea_samples.append(alea_vars)
-#
-#             else:
-#                 outputs = model(inputs)
-#
-#                 # if len(outputs) == 4: # EVidential Model
-#                 #     mu, v, alpha, beta = (d.squeeze() for d in outputs)
-#                 #     alea_vars = beta / (alpha - 1)  # aleatoric
-#                 #     epist_var = torch.sqrt(beta / (v * (alpha - 1)))
-#                 #     outputs = mu
-#                 #     output_samples.append(outputs)
-#                 #     alea_samples.append(alea_vars)
-#                 #     epistemic_samples.append(epist_var)
-#                 # else:
-#                 #     output_samples.append(outputs)
-#                 #
-#                 #     alea_vars = torch.zeros_like(outputs)
-#                 #     alea_samples.append(alea_vars)
-#             #
-#             # if num_mc_samples > 1: # MC Dropout - stack them dim 2
-#             #     outputs = torch.stack(output_samples, dim=2)
-#             #     alea_vars = torch.stack(alea_samples, dim=2)
-#             #
-#             # if len(outputs) == 4: # Evidential model
-#             #     outputs = torch.cat(outputs, dim=0) # ??
-#             #     alea_vars = torch.cat(alea_vars, dim=0)
-#             #     epist_var = torch.cat(epistemic_samples, dim=0)
-#             #
-#             #     epistemic_all.append(epist_var)
-#             outputs_all.append(outputs)
-#             targets_all.append(targets)
-#             if aleatoric:
-#                 aleatoric_all.append(alea_vars)
-#
-#     # # Clean up: revert to evaluation mode if in MC dropout mode
-#     # if num_mc_samples > 1:
-#     #     model.eval()
-#
-#     outputs_all = torch.cat(outputs_all, dim=0).cpu()
-#     targets_all = torch.cat(targets_all, dim=0).cpu()
-#
-#     if aleatoric:
-#         # vars_all = torch.exp(torch.stack(logvars_all)).cpu()
-#         vars_all = torch.cat(aleatoric_all, dim=0).cpu()
-#         return outputs_all, targets_all, vars_all
-#     return outputs_all, targets_all, None
-
-# if return_targets and not aleatoric:
-#     return outputs_all, targets_all, None
-# elif return_targets and aleatoric:
-#     return outputs_all, targets_all, logvars_all
-#
-# return outputs_all
 
 
 def evaluate_predictions(
@@ -436,19 +302,13 @@ def evaluate_predictions(
 
 
 def initial_evaluation(
-        model, train_loader, val_loader, loss_fn, device=DEVICE, epoch=0, lossfname=""  # pbar=None,
+        model, train_loader, val_loader, loss_fn, device=DEVICE, epoch=0, lossfname="", tracker="wandb"  # pbar=None,
 ):
-    # val_loss, val_rmse, val_r2, val_evs = evaluate(
-    #     model, val_loader, loss_fn, aleatoric, device, pbar, False, epoch
-    # )
-    # train_loss, train_rmse, train_r2, train_evs = evaluate(
-    #     model, train_loader, loss_fn, aleatoric, device, pbar, False, epoch
-    # )
     val_loss = evaluate(
-        model, val_loader, loss_fn, device, False, "val", epoch, lossfname
+        model, val_loader, loss_fn, device, False, "val", epoch, lossfname, tracker=tracker
     )
     train_loss = evaluate(
-        model, train_loader, loss_fn, device, False, "train", epoch, lossfname
+        model, train_loader, loss_fn, device, False, "train", epoch, lossfname, tracker=tracker
     )
     return train_loss, val_loss
 
@@ -462,8 +322,9 @@ def run_one_epoch(
         lr_scheduler,
         epoch=0,
         device=DEVICE,
-        max_norm=None, #=10.0,
-        lossfname=""
+        max_norm=None,
+        lossfname="",
+        tracker="wandb"
 ):
     """
     Run a single epoch of training and evaluation.
@@ -486,31 +347,39 @@ def run_one_epoch(
         Current epoch number. Default is 0.
     device : torch.device, optional
         Device to run the model on. Default is DEVICE var.
+    max_norm : float, optional
+        Maximum norm value for gradient clipping. Default is None.
+    lossfname : str, optional
+        Loss function name. Default is "".
+    tracker : str, optional
+        Tracker to log the results. Default is "wandb". Other option is "tensor".
 
     Returns
     -------
     float
         Validation loss for the epoch.
     """
-    # total_steps = len(train_loader) + len(val_loader)
-    # with tqdm(total=total_steps, desc=f"Epoch {epoch+1}", unit="batch") as pbar:
     # pbar = None
     if epoch == 0:
+        # TODO fix values returned to accomodate the array from tensor tracker.
         train_loss, val_loss = initial_evaluation(
-            model, train_loader, val_loader, loss_fn, device, epoch, lossfname
+            model, train_loader, val_loader, loss_fn, device, epoch, lossfname, tracker
         )
 
     else:
         train_loss = train(
-            model, train_loader, loss_fn, optimizer, device, epoch, max_norm=max_norm, lossfname=lossfname
+            model, train_loader, loss_fn, optimizer, device, epoch, max_norm=max_norm, lossfname=lossfname, tracker=tracker
         )
         val_loss = evaluate(
-            model, val_loader, loss_fn, device, False, "val", epoch, lossfname
+            model, val_loader, loss_fn, device, False, "val", epoch, lossfname, tracker=tracker
         )
 
         if lr_scheduler is not None:
+            # check if val_loss in np array or not
+            vloss = val_loss if not isinstance(val_loss, np.ndarray) else val_loss[1]
+            # v = val_loss if not isinstance(val_loss, )
             # Update the learning rate
-            lr_scheduler.step(val_loss)
+            lr_scheduler.step(vloss)
 
     return epoch, train_loss, val_loss
 
@@ -579,6 +448,7 @@ def train_model(
         device=DEVICE,
         logger=None,
         max_norm=None, #10.0
+        tracker="wandb"
 ):
     try:
         set_seed(seed)
@@ -591,21 +461,14 @@ def train_model(
         early_stop_counter = 0
 
         optimizer = build_optimizer(
-            model, config.optimizer, config.lr, config.weight_decay
+            model,
+            config.get("optimizer", "adam"),
+            lr=config.get("lr", 1e-3),
+            weight_decay=config.get("weight_decay", 0.0),
         )
-        # aleatoric = config.get("aleatoric", False)
-
-        # if aleatoric and config.loss.lower() != "gaussnll":
-        #     logger.warning(f"Aleatoric Uncertainty is to be calculated "
-        #                    f"but the loss function provided = {config.loss} doesnt allow this. "
-        #                    f"Changing loss to gaussianNLL")
-        #     config.loss = "gaussnll"
-
-        # if multitask:
-        #     reduction='none'
 
         loss_fn = build_loss(
-            config.loss,
+            config.get("loss", "mse"),
             reduction=config.get("loss_reduction", "mean"),
             lamb=config.get("lamb", 1e-2),
             mt=multitask,
@@ -617,14 +480,16 @@ def train_model(
             config.get("lr_scheduler_patience", None),
             config.get("lr_scheduler_factor", None),
         )
-
+        # start empty np array
+        # results_arr = np.array([], dtype=np.float32)
+        results_arr = []
         # "none", "mean", "sum"
-        for epoch in tqdm(range(config.epochs), desc="Epochs"):
+        for epoch in tqdm(range(config.get("epochs", 10)), desc="Epochs"):
             # for epoch in range(config.epochs + 1):
             try:
                 (
                     epoch,
-                    train_loss,
+                    train_loss, # this can be an array if tracker is tensor
                     val_loss,
                 ) = run_one_epoch(
                     model,
@@ -633,26 +498,35 @@ def train_model(
                     loss_fn=loss_fn,
                     optimizer=optimizer,
                     lr_scheduler=lr_scheduler,
-                    # aleatoric=aleatoric,
                     epoch=epoch,
                     device=device,
                     max_norm=max_norm,
-                    lossfname=config.loss
+                    lossfname=config.get("loss", "mse"),
+                    tracker=tracker
                 )
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
+                vloss = val_loss if not isinstance(val_loss, np.ndarray) else val_loss[1]
+                if vloss < best_val_loss:
+                    best_val_loss = vloss
                     early_stop_counter = 0
                     best_model = model
                 else:
                     early_stop_counter += 1
-                    if early_stop_counter > config.early_stop:
+                    if early_stop_counter > config.get("early_stop", 10):
                         break
+                if tracker.lower() == "tensor":
+                    results_arr.append(np.append(train_loss, val_loss[1:]))
+                    # results_tensor.append(train_loss)
+                    # results_tensor.append(val_loss[1:])
+
             except Exception as e:
                 raise RuntimeError(
                     f"The following exception occurred inside the epoch loop {e}"
                 )
+        if tracker.lower() == "tensor":
+            # stack all the list of arrays on dim 1
+            results_arr = np.stack(results_arr, axis=0)
 
-        return best_model, loss_fn
+        return best_model, loss_fn, results_arr
     except Exception as e:
         raise RuntimeError(f"The following exception occurred in train_model {e}")
 
@@ -664,13 +538,14 @@ def run_model(
         device=DEVICE,
         logger=create_logger("run_model"),
         max_norm=None, #10.0
+        tracker="wandb"
 ):
-    seed = 42
+    seed = config.get("seed", 42)
     n_targets = config.get("n_targets", -1)
     # aleatoric = config.get("aleatoric", False)
     mt = n_targets > 1
     # Train the model
-    best_model, loss_fn = train_model(
+    best_model, loss_fn, results_arr = train_model(
         model,
         config,
         dataloaders["train"],
@@ -679,49 +554,69 @@ def run_model(
         seed,
         device,
         logger=logger,
-        max_norm=max_norm
+        max_norm=max_norm,
+        tracker=tracker
     )
 
     # Testing metrics on the best model
     test_loss = evaluate(
-        best_model, dataloaders["test"], loss_fn, device, metrics_per_task=mt, subset="test", epoch=None, lossfname=config.loss
+        best_model, dataloaders["test"], loss_fn, device, metrics_per_task=mt, subset="test", epoch=None, lossfname=config.get("loss", "mse"), tracker=tracker
     )
 
     # TODO FOR TESTING
     # outputs_all, targets_all, vars_all = predict(best_model, dataloaders["test"], aleatoric=aleatoric, device=device)
 
-    return best_model, test_loss
+    return best_model, test_loss, results_arr
 
 
-def train_model_e2e(
-        config,
-        model,
-        model_type="baseline",
-        model_kwargs=None,
-        logger=None,
-        seed=42,
-        device=DEVICE,
-        # max_norm=None, #10.0
+# def model_vmap(models, x):
+#     # https://pytorch.org/tutorials//intermediate/ensembling.html#using-vmap-to-vectorize-the-ensemble
+#     from torch.func import stack_module_state
+#     params, buffers = stack_module_state(models)
+#
+#     from torch.func import functional_call
+#     import copy
+#
+#     base_model = copy.deepcopy(models[0])
+#     base_model = base_model.to('meta')
+#
+#     def fmodel(params, buffers, x):
+#         return functional_call(base_model, (params, buffers), (x,))
+#
+#     from torch import vmap
+#     predictions1_vmap = vmap(fmodel)(params, buffers, minibatches)
+
+
+def assign_wandb_tags(run, config):
+    median_scaling = config.get("median_scaling", False)
+    m_tag = "median_scaling" if median_scaling else "no_median_scaling"
+    mt = config.get("MT", False)
+    mt_tag = "MT" if mt else "ST"
+    wandb_tags = [
+        config.get("model_type", "baseline"),
+        config.get("data_name", "papyrus"),
+        config.get("activity_type", "xc50"),
+        config.get("descriptor_protein", None),
+        config.get("descriptor_chemical", None),
+        config.get("split_type", "random"),
+        config.get("task_type", "regression"),
+        m_tag,
+        mt_tag,
+        f"max_norm={config.get('max_norm', None)}",
+        TODAY,
+        config.get("tags", None),
+    ]
+    # filter out None values
+    wandb_tags = [tag for tag in wandb_tags if tag]
+    run.tags += tuple(wandb_tags)
+    return run
+
+
+def get_dataloadar(
+    config,
+    device=DEVICE,
+    logger=None,
 ):
-    start_time = datetime.now()
-    # seed = 42
-    set_seed(seed)
-
-    if model_kwargs is None:
-        model_kwargs = {}
-
-    if config is not None:
-        wandb_project_name = config.get(
-            "wandb_project_name", "test-project"
-        )  # add it to config only in baseline not the sweep
-        run = wandb.init(
-            config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name, reinit=True
-        )
-    else:  # TODO check the effect here?
-        run = wandb.init(config=config, dir=WANDB_DIR, mode=WANDB_MODE)
-
-    config = wandb.config
-
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
     n_targets = config.get("n_targets", -1)
@@ -731,59 +626,6 @@ def train_model_e2e(
     split_type = config.get("split_type", "random")
     ext = config.get("ext", "pkl")
     task_type = config.get("task_type", "regression")
-    max_norm = config.get("max_norm", None)  # 10.0
-    # aleatoric = config.get("aleatoric", False)
-    assert split_type in [
-        "random",
-        "scaffold",
-        "time",
-        "scaffold_cluster"
-    ], "Split type must be either random or scaffold or time"
-
-    m_tag = "median_scaling" if median_scaling else "no_median_scaling"
-    mt = n_targets > 1
-    mt_tag = "MT" if mt else "ST"
-    config["MT"] = mt
-    if mt and descriptor_protein:
-        logger.warning(
-            "For multitask learning, only chemical descriptors will be used."
-            "Setting descriptor_protein to None"
-        )
-        descriptor_protein = None
-    if mt and split_type == "time":
-        logger.warning(
-            "For multitask learning, only random or scaffold split will be used."
-            "Setting split_type to random"
-        )
-        split_type = "random"
-
-    wandb_tags = [
-        model_type,
-        data_name,
-        activity_type,
-        descriptor_protein,
-        descriptor_chemical,
-        split_type,
-        task_type,
-        m_tag,
-        mt_tag,
-        f"max_norm={max_norm}",
-        TODAY
-    ]
-    # filter out None values
-    wandb_tags = [tag for tag in wandb_tags if tag]
-    run.tags += tuple(wandb_tags)
-
-    logger = (
-        create_logger(name=model_type, file_level="debug", stream_level="info")
-        if not logger
-        else logger
-    )
-    logger.info(f"{model_type} - start time: {start_time}")
-
-    data_specific_path = Path(data_name) / activity_type / get_topx(n_targets)
-    logger.info(f"Data specific path: {data_specific_path}")
-    config["data_specific_path"] = data_specific_path
 
     datasets = build_datasets(
         data_name,
@@ -796,47 +638,194 @@ def train_model_e2e(
         task_type,
         ext,
         logger,
-        # 'cpu'
+        device=device,
     )
-
-    desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein, descriptor_chemical)
-    logger.info(f"Chemical descriptor {descriptor_chemical} of length: {desc_chem_len}")
-    logger.info(f"Protein descriptor {descriptor_protein} of length: {desc_prot_len}")
-    config["prot_input_dim"] = desc_prot_len
-    config["chem_input_dim"] = desc_chem_len
 
     batch_size = config.get("batch_size", 128)
     dataloaders = build_loader(datasets, batch_size, shuffle=False)
 
-    model_ = model(config=config, **model_kwargs, logger=logger).to(device)
-    logger.info(f"Model: {model_}")
+    return dataloaders
 
-    best_model, _ = run_model(
+
+def post_training_save_model(
+        model,
+        config,
+        model_type="baseline",
+        onnx=True,
+        tracker="wandb",
+        run=None,
+        logger=None,
+):
+    data_name = config.get("data_name", "papyrus")
+    activity_type = config.get("activity_type", "xc50")
+    n_targets = config.get("n_targets", -1)
+    descriptor_protein = config.get("descriptor_protein", None)
+    descriptor_chemical = config.get("descriptor_chemical", None)
+    split_type = config.get("split_type", "random")
+
+    model_name = f"{TODAY}-{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}"
+    model_name += f"{run.name}" if tracker.lower() == "wandb" else ""
+    desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein, descriptor_chemical)
+
+    # config["model_name"] = model_name
+    data_specific_path = Path(data_name) / activity_type / get_topx(n_targets)
+    if logger:
+        logger.info(f"Data specific path: {data_specific_path}")
+    config["data_specific_path"] = data_specific_path
+
+    save_model(
+        config,
+        model,
+        model_name,
+        data_specific_path,
+        desc_prot_len,
+        desc_chem_len,
+        onnx=onnx,
+        tracker=tracker
+    )
+
+    return model_name
+
+
+def get_tracker(config, tracker="wandb"):
+    if tracker.lower() == "wandb":
+        run = wandb.init(
+            config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=config.get("wandb_project_name", "test-project")
+        )
+        config = wandb.config
+        run = assign_wandb_tags(run, config)
+    else:
+        run = None
+
+    return run, config
+    # if tracker.lower() == "wandb":
+    #     if config is not None:
+    #         wandb_project_name = config.get(
+    #             "wandb_project_name", "test-project"
+    #         )  # add it to config only in baseline not the sweep
+    #         run = wandb.init(
+    #             config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name, reinit=False
+    #         )
+    #     else:  # TODO check the effect here?
+    #         run = wandb.init(config=config, dir=WANDB_DIR, mode=WANDB_MODE)
+    #
+    #     config = wandb.config
+
+
+def train_model_e2e(
+        config,
+        model,
+        model_type="baseline",
+        model_kwargs=None,
+        logger=None,
+        seed=42,
+        device=DEVICE,
+        tracker="wandb"
+):
+    # start_time = datetime.now()
+    # logger = (
+    #     create_logger(name=model_type, file_level="debug", stream_level="info")
+    #     if not logger
+    #     else logger
+    # )
+
+    if model_kwargs is None:
+        model_kwargs = {}
+
+    run, config = get_tracker(config, tracker=tracker)
+
+    n_targets = config.get("n_targets", -1)
+    descriptor_protein = config.get("descriptor_protein", None)
+    descriptor_chemical = config.get("descriptor_chemical", None)
+    split_type = config.get("split_type", "random")
+    max_norm = config.get("max_norm", None)
+    seed = config.get("seed", seed)  # it has to be in that order here
+
+    set_seed(seed)
+    assert split_type in [
+        "random",
+        "scaffold",
+        "time",
+        "scaffold_cluster"
+    ], "Split type must be either random or scaffold or scaffold_cluster or time"
+
+    mt = n_targets > 1
+    config["MT"] = mt
+    if mt and descriptor_protein:
+        logger.warning(
+            "For multitask learning, only chemical descriptors will be used."
+            "Setting descriptor_protein to None"
+        )
+        descriptor_protein = None
+    if mt and split_type == "time":
+        logger.warning(
+            "For multitask learning, only random or scaffold split will be used."
+            f"Setting split_type={split_type} to random"
+        )
+        config["split_type"] = "random"
+
+    config["prot_input_dim"], config["chem_input_dim"] = get_desc_len(descriptor_protein, descriptor_chemical, logger=logger)
+
+    model_ = model(config=config, **model_kwargs, logger=logger).to(device)
+
+    dataloaders = get_dataloadar(config, device=device, logger=logger)
+    best_model, test_loss, results_arr = run_model(
         config,
         model_,
         dataloaders,
         device=device,
         logger=logger,
-        max_norm=max_norm
+        max_norm=max_norm,
+        tracker=tracker
     )
+    config["model_name"] = post_training_save_model(best_model, config, model_type=model_type,
+                                                    tracker=tracker, run=run if tracker.lower() == "wandb" else None, logger=logger)
 
-    model_name = f"{TODAY}-{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}-{run.name}"
-    config["model_name"] = model_name
+    return best_model, config, results_arr
+    # return best_model, dataloaders, config, logger, results_arr
 
-    save_model(
-        config,
-        best_model,
-        model_name,
-        data_specific_path,
-        desc_prot_len,
-        desc_chem_len,
-        onnx=True,
-    )
+    # logger.info(f"{model_type} - start time: {start_time}")
+    # # Adding WANDB TAGS to the tracker if.
+    # if tracker.lower() == "wandb":
+    #     run = assign_wandb_tags(run, config)
+    #     # m_tag = "median_scaling" if median_scaling else "no_median_scaling"
+    #     # mt_tag = "MT" if mt else "ST"
+    #     # wandb_tags = [
+    #     #     model_type,
+    #     #     data_name,
+    #     #     activity_type,
+    #     #     descriptor_protein,
+    #     #     descriptor_chemical,
+    #     #     split_type,
+    #     #     task_type,
+    #     #     m_tag,
+    #     #     mt_tag,
+    #     #     f"max_norm={max_norm}",
+    #     #     TODAY,
+    #     #     tags
+    #     # ]
+    #     # # filter out None values
+    #     # wandb_tags = [tag for tag in wandb_tags if tag]
+    #     # run.tags += tuple(wandb_tags)
 
-    logger.info(f"Baseline - end time: {datetime.now()}")
-    logger.info(f"Baseline - duration: {datetime.now() - start_time}")
-
-    return best_model, dataloaders, config, logger
+    # datasets = build_datasets(
+    #     data_name,
+    #     n_targets,
+    #     activity_type,
+    #     split_type,
+    #     descriptor_protein,
+    #     descriptor_chemical,
+    #     median_scaling,
+    #     task_type,
+    #     ext,
+    #     logger,
+    #     device=device,
+    # )
+    # batch_size = config.get("batch_size", 128)
+    # dataloaders = build_loader(datasets, batch_size, shuffle=False)
+    # logger.info(f"Model: {model_}")
+    # logger.debug(f"{model_type} - end time: {datetime.now()}")
+    # logger.debug(f"{model_type} - duration: {datetime.now() - start_time}")
 
 
 def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, epi_val=None, epi_test=None,
@@ -855,7 +844,7 @@ def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, ep
         n_subset=None, savefig=True, save_dir=figures_path, uct_logger=uct_logger
     )
     # TODO add task_name
-    model_dir = MODELS_DIR / "saved_models" / data_specific_path
+    model_dir = MODELS_DIR / "saved_models" / data_specific_path if data_specific_path else MODELS_DIR / "saved_models"
     model_dir.mkdir(exist_ok=True)
     model_name = config.get("model_name", "ensemble") + "_recalibrate_model.pkl"
     # pickle save the model to model_dir
