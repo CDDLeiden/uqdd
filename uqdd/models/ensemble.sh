@@ -9,7 +9,7 @@
 #desc_chem=${6:-"ecfp2048"}
 #split_type=${7:-"random"}
 #n_targets=${8:--1}
-ens_size=100
+ens_size=30
 data="papyrus"
 activity="xc50"
 desc_prot="ankh-large"
@@ -40,7 +40,9 @@ echo "Script started at: $(date)"
 # "${today}-all-models"
 #logname="${wandb_project}-ensemble.txt"
 
-python ensemble.py --parallelize $parallelize --ensemble_size $ens_size --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "$wandb_project" #2>&1 | tee ../logs/"${logname}"
+#python ensemble.py --parallelize $parallelize --ensemble_size $ens_size --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "$wandb_project" #2>&1 | tee ../logs/"${logname}"
+
+python model_parser.py --model ensemble --seed 44 --parallelize $parallelize --ensemble_size $ens_size --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "ensemble_test" # "$wandb_project" #2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"

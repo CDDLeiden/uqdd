@@ -1,5 +1,6 @@
 import argparse
-from multiprocessing import Pool
+import logging
+from multiprocessing import Pool, Manager, Queue, Lock
 import time
 
 import numpy as np
@@ -73,15 +74,6 @@ class EnsembleDNN(nn.Module):
 
 
 def log_wandb_ensemble(results_tensor_avg, config):
-    # start wandb run
-    run = wandb.init(
-        config=config,
-        dir=WANDB_DIR,
-        mode=WANDB_MODE,
-        project=config.get("wandb_project_name", "ensemble_test"),
-    )
-
-    run = assign_wandb_tags(run, config)
 
     wandb_keys = [
         "epoch",
@@ -116,38 +108,147 @@ def log_wandb_ensemble(results_tensor_avg, config):
             data=dict(zip(wandb_keys[1:], results_tensor_avg[epoch, 1:])),
             step=int(results_tensor_avg[epoch, 0]),
         )
-    return run
     # run.finish()
 
 
-def train_worker(rank, config, seed, results, device, logger):
+# def gpu_manager(gpu_id, available_gpus, lock):
+#     with lock:
+#         gpu = available_gpus[gpu_id % len(available_gpus)]
+#         while gpu in gpu_id:
+#             gpu_id += 1
+#             gpu = available_gpus[gpu_id % len(available_gpus)]
+#         return gpu
+
+
+# def gpu_manager(available_gpus, gpu_status, lock):
+#     with lock:
+#         for idx, gpu in enumerate(available_gpus):
+#             if not gpu_status[idx]:  # If the GPU is not busy
+#                 gpu_status[idx] = True
+#                 return gpu, idx
+#         return None, -1  # No GPU available
+#
+#
+# def release_gpu(gpu_idx, gpu_status, lock):
+#     with lock:
+#         gpu_status[gpu_idx] = False
+
+
+def train_worker(rank, config, seed, results, device, logger, lock):
+# def train_worker(rank, config, seed, results, available_gpus, lock, logger):
     # seed += rank
-    torch.cuda.set_device(device)
-    # best_model, dataloaders, config_, _, results_arr = train_model_e2e(
-    best_model, config_, results_arr = train_model_e2e(
-        config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
-    )
-    print(rank)
-    results[rank] = (best_model.cpu(), config_, results_arr)
-    # clear memory cache on GPU
-    torch.cuda.empty_cache()
+    # device = gpu_manager(rank, available_gpus, lock)
+    with lock:
+        torch.cuda.set_device(device)
+
+        best_model, config_, results_arr = train_model_e2e(
+            config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
+        )
+        # print(rank)
+        results[rank] = (best_model.cpu(), config_, results_arr)
+        # clear memory cache on GPU
+        torch.cuda.empty_cache()
 
 
 def train_on_device(args):
-    rank, config, results, available_gpus, num_gpus, ens_size, logger = args
+    # rank, config, results, available_gpus, lock, logger = args
+    # seed = config.get("seed", 42)
+    # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
+    # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
+    rank, config, results, device, logger, seed, lock, max_retries = args
+    # seed = config.get("seed", 42)
+    # device = available_gpus[rank % num_gpus]
+    # print(f"{device=}")
+    retries = 0
+    while retries < max_retries:
+        try:
+            train_worker(rank, config, seed, results, device, logger, lock)
+            break
+        except Exception as e:
+            logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
+            time.sleep(5)
+            retries += 1
+    # try:
+    #     train_worker(rank, config, seed + rank, results, device, logger, lock)
+    # except Exception as e:
+    #     logger.exception(f"Process {rank} failed with error: {e}. Retrying in 5 seconds...")
+    #     time.sleep(5)
+    #     train_on_device(args)
+
+
+def parallel_train_ensemble(ensemble_size, config, logger):
+    best_models = []
+    result_arrs = []
+    if torch.cuda.is_available():
+        logger.info("Parallel training on several GPUs")
+        # Get the available GPUs
+        available_devices = list(range(torch.cuda.device_count()))
+        num_processes = len(available_devices)
+        logger.info(f"Number of Available GPUs: {num_processes} GPUs")
+
+    else:
+        logger.info("Parallel training on several CPUs")
+        num_processes = mp.cpu_count()
+        available_devices = list(range(num_processes))
+        logger.info(f"Number of Available CPUs: {num_processes} CPUs")
+
+    manager = Manager()
+    results = manager.dict()
+    args_queue = Queue()
+    lock = manager.Lock()
+    for i in range(num_processes):
+        args_queue.put(i)
+
+    args = []
     seed = config.get("seed", 42)
-    device = available_gpus[rank % num_gpus]
-    print(f"{device=}")
-    train_worker(rank, config, seed + rank, results, device, logger)
+    max_retries = 3
+    for rank in range(ensemble_size):
+        print(seed)
+        device = args_queue.get()
+        # device = available_devices[rank % num_processes]
+        args.append((rank, config, results, device, logger, seed, lock, max_retries))
+        # args_queue.put(device)
+        seed += 1
+        config["seed"] = seed
+
+    with Pool(processes=num_processes) as pool:
+        pool.map(train_on_device, args)
+
+    for rank in range(ensemble_size):
+        # best_model, dataloaders, config_, results_arr = results[rank]
+        best_model, config_, results_arr = results[rank]
+        best_models.append(best_model)
+        result_arrs.append(results_arr)
+    if len(best_models) < ensemble_size:
+        # get how many are left
+        num_models_left = ensemble_size - len(best_models)
+        b_models_left, res_arrs_left, config_ = parallel_train_ensemble(num_models_left, config, logger)
+        best_models.extend(b_models_left)
+        result_arrs.extend(res_arrs_left)
+
+    return best_models, result_arrs, config_
 
 
 def run_ensemble(config=None):
     ensemble_size = config.get("ensemble_size", 100)
     parallelize = config.get("parallelize", False)
     logger = LOGGER
+    # logger_print = logger.info if logger else print
     best_models = []
     # seed = config.get("seed", 42)
     result_arrs = []
+
+    # Here we should init the wandb to track the resources
+    # start wandb run
+    run = wandb.init(
+        config=config,
+        dir=WANDB_DIR,
+        mode=WANDB_MODE,
+        project=config.get("wandb_project_name", "ensemble_test"),
+    )
+
+    assign_wandb_tags(run, config)
+
     if not parallelize:
         for _ in range(ensemble_size):
             # best_model, dataloaders, config_, logger, results_arr = train_model_e2e(
@@ -159,41 +260,20 @@ def run_ensemble(config=None):
 
             result_arrs.append(results_arr)
     else:
-        print("Parallel training")
-        # Get the available GPUs
-        available_gpus = list(range(torch.cuda.device_count()))
-        num_gpus = len(available_gpus)
-        print(f"Number of Available GPUs: {num_gpus} GPUs")
-        # Shared memory to store results from different processes
-        manager = mp.Manager()
-        results = manager.dict()
-
-        # Prepare arguments for the pool workers
-        args = [(rank, config, results, available_gpus, num_gpus, ensemble_size, logger) for rank in range(ensemble_size)]
-
-        # Create a pool of workers
-        with Pool(processes=num_gpus) as pool:
-            pool.map(train_on_device, args)
-
-        for rank in range(ensemble_size):
-            # best_model, dataloaders, config_, results_arr = results[rank]
-            best_model, config_, results_arr = results[rank]
-            best_models.append(best_model)
-            result_arrs.append(results_arr)
+        best_models, result_arrs, config_ = parallel_train_ensemble(ensemble_size, config, logger)
 
     # now we stack result tensors on dim 2
     result_arrs = np.stack(result_arrs, axis=2)
-    # results_tensor = torch.stack(result_arrs, dim=2)
-    print(f"{result_arrs.shape=}")  # this should equal to (num_epochs, metrics_collected, ensemble_size)
+    logger.debug(f"{result_arrs.shape=}")  # this should equal to (num_epochs, metrics_collected, ensemble_size)
     # Here we want to save a pkl file with the results tensor
     save_pickle(result_arrs, DATASET_DIR / config_.get("data_specific_path") / "ensemble_results.pkl")
     # Take average across model metrics
     results_tensor_avg = result_arrs.mean(2)
     print(f"{results_tensor_avg.shape=}")
     # HERE we should report to wandb
-    run = log_wandb_ensemble(results_tensor_avg, config_)
+    log_wandb_ensemble(results_tensor_avg, config_)
 
-    print(f"{len(best_models)=}")
+    logger.debug(f"{len(best_models)=}")
     ensemble_model = EnsembleDNN(config_, model_list=best_models).to(DEVICE)
     dataloaders = get_dataloadar(config, device=DEVICE, logger=LOGGER)
 
@@ -216,8 +296,8 @@ def run_ensemble(config=None):
         ensemble_model, dataloaders["val"], device=DEVICE
     )
     recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config_, uct_logger=uct_logger)
-    if run is not None:
-        run.finish()
+
+    wandb.finish()
 
     return ensemble_model, recal_model, metrics, plots
 
@@ -227,7 +307,54 @@ def run_ensemble(config=None):
     #     torch.cuda.empty_cache()
     #     time.sleep(10)
     #     print("I AM AWAKE")
-
+# if torch.cuda.is_available():
+#     logger.info("Parallel training on several GPUs")
+#     # Get the available GPUs
+#     available_gpus = list(range(torch.cuda.device_count()))
+#     num_processes = len(available_gpus)
+#     # num_processes = num_gpus
+#     logger.info(f"Number of Available GPUs: {num_processes} GPUs")
+#
+# else:
+#     logger.info("Parallel training on several CPUs")
+#     num_processes = mp.cpu_count()
+#     logger.info(f"Number of Available CPUs: {num_processes} CPUs")
+# # lock = manager.Lock()
+# # Prepare arguments for the pool workers
+# # args = [(rank, config, results, available_gpus, num_gpus, ensemble_size, logger) for rank in range(ensemble_size)]
+# # args = [(rank, config, results, available_gpus, lock, logger) for rank in range(ensemble_size)]
+# # Create a pool of workers
+# # Shared memory to store results from different processes
+# manager = Manager()
+# results = manager.dict()
+# args_queue = Queue()
+# lock = manager.Lock()
+# for i in range(num_processes):
+#     args_queue.put(i)
+#
+# args = []
+# seed = config.get("seed", 42)
+# max_retries = 3
+# for rank in range(ensemble_size):
+#     device = args_queue.get()
+#     args.append((rank, config, results, device, logger, seed, lock, max_retries))
+#     args_queue.put(device)
+#     seed += 1
+#     config["seed"] = seed
+#
+# with Pool(processes=num_processes) as pool:
+#     pool.map(train_on_device, args)
+#
+# for rank in range(ensemble_size):
+#     # best_model, dataloaders, config_, results_arr = results[rank]
+#     best_model, config_, results_arr = results[rank]
+#     best_models.append(best_model)
+#     result_arrs.append(results_arr)
+# if len(best_models) != ensemble_size:
+#     # get how many are left
+#     num_models_left = ensemble_size - len(best_models)
+#
+#     # raise ValueError(f"Number of models {len(best_models)} does not match ensemble size {ensemble_size}")
 # full_runs = ensemble_size // num_gpus
 # remaining_runs = ensemble_size % num_gpus
 # for r in range(full_runs):
@@ -328,198 +455,198 @@ def run_ensemble_hyperparm(**kwargs):
     print(f"Running sweep with SWEEP_ID: {sweep_id}")
     wandb.agent(sweep_id, function=run_ensemble, count=sweep_count)
 
-
-def main():
-    parser = argparse.ArgumentParser(description="Run Ensemble Model")
-    parser.add_argument(
-        "--parallelize",
-        type=bool,
-        default=False,
-        help="Parallelize training"
-    )
-    parser.add_argument(
-        "--aleatoric",
-        type=bool,
-        default=True,
-        help="Aleatoric inference"
-    )
-    parser.add_argument(
-        "--ensemble_size",
-        type=int,
-        default=100,
-        help="Size of the ensemble",
-    )
-    parser.add_argument(
-        "--data_name",
-        type=str,
-        default="papyrus",
-        choices=["papyrus", "tdc", "other"],
-        help="Data name argument",
-    )
-    parser.add_argument(
-        "--activity_type",
-        type=str,
-        default="xc50",
-        choices=["xc50", "kx"],
-        help="Activity argument",
-    )
-    parser.add_argument(
-        "--n_targets",
-        type=int,
-        default=-1,
-        help="Number of targets argument (default=-1 for all targets)",
-    )
-    parser.add_argument(
-        "--descriptor_protein",
-        type=str,
-        default=None,
-        choices=[
-            None,
-            "ankh-base",
-            "ankh-large",
-            "unirep",
-            "protbert",
-            "protbert_bfd",
-            "esm1_t34",
-            "esm1_t12",
-            "esm1_t6",
-            "esm1b",
-            "esm_msa1",
-            "esm_msa1b",
-            "esm1v",
-        ],
-        help="Protein descriptor argument",
-    )
-    parser.add_argument(
-        "--descriptor_chemical",
-        type=str,
-        default="ecfp2048",
-        choices=[
-            "ecfp1024",
-            "ecfp2048",
-            "mold2",
-            "mordred",
-            "cddd",
-            "fingerprint",  # "moldesc"
-        ],
-        help="Chemical descriptor argument",
-    )
-    parser.add_argument(
-        "--median_scaling",
-        action="store_true",
-        help="Use median scaling",
-    )
-    parser.add_argument(
-        "--split_type",
-        type=str,
-        default="random",
-        choices=["random", "scaffold", "time", "scaffold_cluster"],
-        help="Split argument",
-    )
-    parser.add_argument(
-        "--ext",
-        type=str,
-        default="pkl",
-        choices=["pkl", "parquet", "csv", "feather"],
-        help="File extension argument",
-    )
-    parser.add_argument(
-        "--task_type",
-        type=str,
-        default="regression",
-        choices=["regression", "classification"],
-        help="Task type argument",
-    )
-    parser.add_argument(
-        "--wandb-project-name",
-        type=str,
-        default="ensemble-test",
-        help="Wandb project name argument",
-    )
-    parser.add_argument(
-        "--sweep-count",
-        type=int,
-        default=None,
-        help="Sweep count argument",
-    )
-    # take chem layers as list input
-    parser.add_argument(
-        "--chem_layers",
-        type=parse_list,
-        default=None,
-        help="Chem layers sizes",
-    )
-    parser.add_argument(
-        "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
-    )
-    parser.add_argument(
-        "--regressor_layers",
-        type=parse_list,
-        default=None,
-        help="Regressor layers sizes",
-    )
-    parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
-    parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
-    parser.add_argument(
-        "--early_stop", type=int, default=None, help="Early stopping patience"
-    )
-    parser.add_argument("--loss", type=str, default=None, help="Loss function")
-    parser.add_argument(
-        "--loss_reduction", type=str, default=None, help="Loss reduction method"
-    )
-    parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
-    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
-    parser.add_argument(
-        "--weight_decay", type=float, default=None, help="Weight decay rate"
-    )
-    parser.add_argument(
-        "--lr_scheduler", type=str, default=None, help="LR scheduler type"
-    )
-    parser.add_argument(
-        "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
-    )
-    parser.add_argument(
-        "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
-    )
-    parser.add_argument(
-        "--max_norm", type=float, default=None, help="Max norm for gradient clipping"
-    )
-    args = parser.parse_args()
-    # Construct kwargs, excluding arguments that were not provided
-    kwargs = {k: v for k, v in vars(args).items() if v is not None}
-
-    sweep_count = args.sweep_count
-    if sweep_count is not None and sweep_count > 0:
-        run_ensemble_hyperparm(
-            **kwargs,
-        )
-    else:
-        run_ensemble_wrapper(
-            **kwargs,
-        )
-
-
-if __name__ == "__main__":
-    # main()
-    #
-    best_model, recal_model, metrics, plots = run_ensemble_wrapper(
-        data_name="papyrus",
-        activity_type="xc50",
-        n_targets=-1,
-        descriptor_protein="ankh-base",
-        descriptor_chemical="ecfp2048",
-        median_scaling=False,
-        split_type="random",
-        ext="pkl",
-        task_type="regression",
-        wandb_project_name="ensemble-test",
-        ensemble_size=5,
-        parallelize=True,
-        seed=44
-    )
-    #
-    print("Done!")
+#
+# def main():
+#     parser = argparse.ArgumentParser(description="Run Ensemble Model")
+#     parser.add_argument(
+#         "--parallelize",
+#         type=bool,
+#         default=False,
+#         help="Parallelize training"
+#     )
+#     parser.add_argument(
+#         "--aleatoric",
+#         type=bool,
+#         default=True,
+#         help="Aleatoric inference"
+#     )
+#     parser.add_argument(
+#         "--ensemble_size",
+#         type=int,
+#         default=100,
+#         help="Size of the ensemble",
+#     )
+#     parser.add_argument(
+#         "--data_name",
+#         type=str,
+#         default="papyrus",
+#         choices=["papyrus", "tdc", "other"],
+#         help="Data name argument",
+#     )
+#     parser.add_argument(
+#         "--activity_type",
+#         type=str,
+#         default="xc50",
+#         choices=["xc50", "kx"],
+#         help="Activity argument",
+#     )
+#     parser.add_argument(
+#         "--n_targets",
+#         type=int,
+#         default=-1,
+#         help="Number of targets argument (default=-1 for all targets)",
+#     )
+#     parser.add_argument(
+#         "--descriptor_protein",
+#         type=str,
+#         default=None,
+#         choices=[
+#             None,
+#             "ankh-base",
+#             "ankh-large",
+#             "unirep",
+#             "protbert",
+#             "protbert_bfd",
+#             "esm1_t34",
+#             "esm1_t12",
+#             "esm1_t6",
+#             "esm1b",
+#             "esm_msa1",
+#             "esm_msa1b",
+#             "esm1v",
+#         ],
+#         help="Protein descriptor argument",
+#     )
+#     parser.add_argument(
+#         "--descriptor_chemical",
+#         type=str,
+#         default="ecfp2048",
+#         choices=[
+#             "ecfp1024",
+#             "ecfp2048",
+#             "mold2",
+#             "mordred",
+#             "cddd",
+#             "fingerprint",  # "moldesc"
+#         ],
+#         help="Chemical descriptor argument",
+#     )
+#     parser.add_argument(
+#         "--median_scaling",
+#         action="store_true",
+#         help="Use median scaling",
+#     )
+#     parser.add_argument(
+#         "--split_type",
+#         type=str,
+#         default="random",
+#         choices=["random", "scaffold", "time", "scaffold_cluster"],
+#         help="Split argument",
+#     )
+#     parser.add_argument(
+#         "--ext",
+#         type=str,
+#         default="pkl",
+#         choices=["pkl", "parquet", "csv", "feather"],
+#         help="File extension argument",
+#     )
+#     parser.add_argument(
+#         "--task_type",
+#         type=str,
+#         default="regression",
+#         choices=["regression", "classification"],
+#         help="Task type argument",
+#     )
+#     parser.add_argument(
+#         "--wandb-project-name",
+#         type=str,
+#         default="ensemble-test",
+#         help="Wandb project name argument",
+#     )
+#     parser.add_argument(
+#         "--sweep-count",
+#         type=int,
+#         default=None,
+#         help="Sweep count argument",
+#     )
+#     # take chem layers as list input
+#     parser.add_argument(
+#         "--chem_layers",
+#         type=parse_list,
+#         default=None,
+#         help="Chem layers sizes",
+#     )
+#     parser.add_argument(
+#         "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
+#     )
+#     parser.add_argument(
+#         "--regressor_layers",
+#         type=parse_list,
+#         default=None,
+#         help="Regressor layers sizes",
+#     )
+#     parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
+#     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
+#     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
+#     parser.add_argument(
+#         "--early_stop", type=int, default=None, help="Early stopping patience"
+#     )
+#     parser.add_argument("--loss", type=str, default=None, help="Loss function")
+#     parser.add_argument(
+#         "--loss_reduction", type=str, default=None, help="Loss reduction method"
+#     )
+#     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
+#     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+#     parser.add_argument(
+#         "--weight_decay", type=float, default=None, help="Weight decay rate"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler", type=str, default=None, help="LR scheduler type"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
+#     )
+#     parser.add_argument(
+#         "--max_norm", type=float, default=None, help="Max norm for gradient clipping"
+#     )
+#     args = parser.parse_args()
+#     # Construct kwargs, excluding arguments that were not provided
+#     kwargs = {k: v for k, v in vars(args).items() if v is not None}
+#
+#     sweep_count = args.sweep_count
+#     if sweep_count is not None and sweep_count > 0:
+#         run_ensemble_hyperparm(
+#             **kwargs,
+#         )
+#     else:
+#         run_ensemble_wrapper(
+#             **kwargs,
+#         )
+#
+#
+# if __name__ == "__main__":
+#     main()
+#     #
+    # best_model, recal_model, metrics, plots = run_ensemble_wrapper(
+    #     data_name="papyrus",
+    #     activity_type="xc50",
+    #     n_targets=-1,
+    #     descriptor_protein="ankh-base",
+    #     descriptor_chemical="ecfp2048",
+    #     median_scaling=False,
+    #     split_type="random",
+    #     ext="pkl",
+    #     task_type="regression",
+    #     wandb_project_name="ensemble-test",
+    #     ensemble_size=20,
+    #     parallelize=True,
+    #     seed=440
+    # )
+    # #
+    # print("Done!")
     # TEST
     # run_ensemble(
     #     data_name="papyrus",
