@@ -10,12 +10,14 @@ from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
     recalibrate_model,
+    get_dataloadar,
 )
 
 from uqdd.models.utils_models import (
     get_model_config,
     get_sweep_config,
 )
+
 #
 #
 #
@@ -105,10 +107,10 @@ from uqdd.models.utils_models import (
 #         return outputs_all, targets_all, vars_all
 #
 #     return outputs_all, targets_all, None
-    # if return_targets:
-    #     targets_all = torch.cat(targets_all, dim=0)
-    #     return outputs_all, targets_all
-    # return outputs_all
+# if return_targets:
+#     targets_all = torch.cat(targets_all, dim=0)
+#     return outputs_all, targets_all
+# return outputs_all
 
 
 # def mc_uncertainty_estimate(outputs):
@@ -139,23 +141,19 @@ from uqdd.models.utils_models import (
 #     plt.show()
 
 
-def mc_predict(
-    model,
-    test_loader,
-    aleatoric=False,
-    num_mc_samples=100,
-    device=DEVICE
-):
+def mc_predict(model, test_loader, aleatoric=False, num_mc_samples=100, device=DEVICE):
     model.train()  # Enable dropout
     outputs_all = []
     targets_all = []
     aleatoric_all = []
 
     with torch.no_grad():
-        for inputs, targets in tqdm(test_loader, total=len(test_loader), desc="MC prediction"):
+        for inputs, targets in tqdm(
+            test_loader, total=len(test_loader), desc="MC prediction"
+        ):
             inputs = tuple(x.to(device) for x in inputs)
             output_samples, alea_samples = [], []
-            for _ in range(num_mc_samples): # Multiple forward passes
+            for _ in range(num_mc_samples):  # Multiple forward passes
                 if aleatoric:
                     outputs, logvars = model(inputs)
                     vars_ = torch.exp(logvars)
@@ -186,12 +184,14 @@ def mc_predict(
 def run_mcdropout(config=None):
     if config is None:
         config = get_model_config("mcdropout")
-    best_model, dataloaders, config, logger = train_model_e2e(
+    # best_model, dataloaders, config, logger, _ = train_model_e2e(
+    best_model, config, _ = train_model_e2e(
         config,
         model=BaselineDNN,
         model_type="mcdropout",
         logger=LOGGER,
     )
+    dataloaders = get_dataloadar(config, device=DEVICE, logger=LOGGER)
     aleatoric = config.get("aleatoric", False)
     num_mc_samples = config.get("num_mc_samples", 100)
 
@@ -200,17 +200,12 @@ def run_mcdropout(config=None):
         dataloaders["test"],
         aleatoric=aleatoric,
         num_mc_samples=num_mc_samples,
-        device=DEVICE
+        device=DEVICE,
     )
 
     # Then comes the predict metrics part
     metrics, plots, uct_logger = evaluate_predictions(
-        config,
-        preds,
-        labels,
-        alea_vars,
-        "mcdropout",
-        logger
+        config, preds, labels, alea_vars, "mcdropout", LOGGER
     )
 
     # RECALIBRATION
@@ -219,11 +214,16 @@ def run_mcdropout(config=None):
         dataloaders["val"],
         aleatoric=aleatoric,
         num_mc_samples=num_mc_samples,
-        device=DEVICE
+        device=DEVICE,
     )
-    recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config)
+    iso_recal_model, std_recal = recalibrate_model(
+        preds_val, labels_val, preds, labels, config, uct_logger=uct_logger
+    )
 
-    return best_model, recal_model, metrics, plots
+    uct_logger.wandb_log()
+    wandb.finish()
+
+    return best_model, iso_recal_model, std_recal, metrics, plots
 
 
 def run_mcdropout_wrapper(**kwargs):
@@ -241,7 +241,6 @@ def run_mcdropout_hyperparm(**kwargs):
     LOGGER = create_logger(
         name="mcdropout-sweep", file_level="debug", stream_level="info"
     )
-
     sweep_count = kwargs.pop("sweep_count")
     wandb_project_name = kwargs.pop("wandb_project_name")
 
@@ -255,179 +254,179 @@ def run_mcdropout_hyperparm(**kwargs):
     wandb.agent(sweep_id, function=run_mcdropout, count=sweep_count)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run MC Dropout Model")
-    parser.add_argument(
-        "--num_mc_samples",
-        type=int,
-        default=100,
-        help="Number of MC dropout samples",
-    )
-    parser.add_argument(
-        "--data_name",
-        type=str,
-        default="papyrus",
-        choices=["papyrus", "tdc", "other"],
-        help="Data name argument",
-    )
-    parser.add_argument(
-        "--activity_type",
-        type=str,
-        default="xc50",
-        choices=["xc50", "kx"],
-        help="Activity argument",
-    )
-    parser.add_argument(
-        "--n_targets",
-        type=int,
-        default=-1,
-        help="Number of targets argument (default=-1 for all targets)",
-    )
-    parser.add_argument(
-        "--descriptor_protein",
-        type=str,
-        default=None,
-        choices=[
-            None,
-            "ankh-base",
-            "ankh-large",
-            "unirep",
-            "protbert",
-            "protbert_bfd",
-            "esm1_t34",
-            "esm1_t12",
-            "esm1_t6",
-            "esm1b",
-            "esm_msa1",
-            "esm_msa1b",
-            "esm1v",
-        ],
-        help="Protein descriptor argument",
-    )
-    parser.add_argument(
-        "--descriptor_chemical",
-        type=str,
-        default="ecfp2048",
-        choices=[
-            "ecfp1024",
-            "ecfp2048",
-            "mold2",
-            "mordred",
-            "cddd",
-            "fingerprint",  # "moldesc"
-        ],
-        help="Chemical descriptor argument",
-    )
-    parser.add_argument(
-        "--median_scaling",
-        action="store_true",
-        help="Use median scaling",
-    )
-    parser.add_argument(
-        "--split_type",
-        type=str,
-        default="random",
-        choices=["random", "scaffold", "time", "scaffold_cluster"],
-        help="Split argument",
-    )
-    parser.add_argument(
-        "--ext",
-        type=str,
-        default="pkl",
-        choices=["pkl", "parquet", "csv", "feather"],
-        help="File extension argument",
-    )
-    parser.add_argument(
-        "--task_type",
-        type=str,
-        default="regression",
-        choices=["regression", "classification"],
-        help="Task type argument",
-    )
-    parser.add_argument(
-        "--wandb-project-name",
-        type=str,
-        default="ensemble-test",
-        help="Wandb project name argument",
-    )
-    parser.add_argument(
-        "--sweep-count",
-        type=int,
-        default=None,
-        help="Sweep count argument",
-    )
-    # take chem layers as list input
-    parser.add_argument(
-        "--chem_layers",
-        type=parse_list,
-        default=None,
-        help="Chem layers sizes",
-    )
-    parser.add_argument(
-        "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
-    )
-    parser.add_argument(
-        "--regressor_layers",
-        type=parse_list,
-        default=None,
-        help="Regressor layers sizes",
-    )
-    parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
-    parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
-    parser.add_argument(
-        "--early_stop", type=int, default=None, help="Early stopping patience"
-    )
-    parser.add_argument("--loss", type=str, default=None, help="Loss function")
-    parser.add_argument(
-        "--loss_reduction", type=str, default=None, help="Loss reduction method"
-    )
-    parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
-    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
-    parser.add_argument(
-        "--weight_decay", type=float, default=None, help="Weight decay rate"
-    )
-    parser.add_argument(
-        "--lr_scheduler", type=str, default=None, help="LR scheduler type"
-    )
-    parser.add_argument(
-        "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
-    )
-    parser.add_argument(
-        "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
-    )
+# if __name__ == "__main__":
+#     run_mcdropout_wrapper(
+#         data_name="papyrus",
+#         activity_type="xc50",
+#         n_targets=-1,
+#         descriptor_protein="ankh-large",
+#         descriptor_chemical="ecfp2048",
+#         median_scaling=False,
+#         split_type="random",
+#         ext="pkl",
+#         task_type="regression",
+#         wandb_project_name=f"mcdp-test",
+#         num_mc_samples=100,
+#     )
+# #
+# def main():
+#     parser = argparse.ArgumentParser(description="Run MC Dropout Model")
+#     parser.add_argument(
+#         "--num_mc_samples",
+#         type=int,
+#         default=100,
+#         help="Number of MC dropout samples",
+#     )
+#     parser.add_argument(
+#         "--data_name",
+#         type=str,
+#         default="papyrus",
+#         choices=["papyrus", "tdc", "other"],
+#         help="Data name argument",
+#     )
+#     parser.add_argument(
+#         "--activity_type",
+#         type=str,
+#         default="xc50",
+#         choices=["xc50", "kx"],
+#         help="Activity argument",
+#     )
+#     parser.add_argument(
+#         "--n_targets",
+#         type=int,
+#         default=-1,
+#         help="Number of targets argument (default=-1 for all targets)",
+#     )
+#     parser.add_argument(
+#         "--descriptor_protein",
+#         type=str,
+#         default=None,
+#         choices=[
+#             None,
+#             "ankh-base",
+#             "ankh-large",
+#             "unirep",
+#             "protbert",
+#             "protbert_bfd",
+#             "esm1_t34",
+#             "esm1_t12",
+#             "esm1_t6",
+#             "esm1b",
+#             "esm_msa1",
+#             "esm_msa1b",
+#             "esm1v",
+#         ],
+#         help="Protein descriptor argument",
+#     )
+#     parser.add_argument(
+#         "--descriptor_chemical",
+#         type=str,
+#         default="ecfp2048",
+#         choices=[
+#             "ecfp1024",
+#             "ecfp2048",
+#             "mold2",
+#             "mordred",
+#             "cddd",
+#             "fingerprint",  # "moldesc"
+#         ],
+#         help="Chemical descriptor argument",
+#     )
+#     parser.add_argument(
+#         "--median_scaling",
+#         action="store_true",
+#         help="Use median scaling",
+#     )
+#     parser.add_argument(
+#         "--split_type",
+#         type=str,
+#         default="random",
+#         choices=["random", "scaffold", "time", "scaffold_cluster"],
+#         help="Split argument",
+#     )
+#     parser.add_argument(
+#         "--ext",
+#         type=str,
+#         default="pkl",
+#         choices=["pkl", "parquet", "csv", "feather"],
+#         help="File extension argument",
+#     )
+#     parser.add_argument(
+#         "--task_type",
+#         type=str,
+#         default="regression",
+#         choices=["regression", "classification"],
+#         help="Task type argument",
+#     )
+#     parser.add_argument(
+#         "--wandb-project-name",
+#         type=str,
+#         default="ensemble-test",
+#         help="Wandb project name argument",
+#     )
+#     parser.add_argument(
+#         "--sweep-count",
+#         type=int,
+#         default=None,
+#         help="Sweep count argument",
+#     )
+#     # take chem layers as list input
+#     parser.add_argument(
+#         "--chem_layers",
+#         type=parse_list,
+#         default=None,
+#         help="Chem layers sizes",
+#     )
+#     parser.add_argument(
+#         "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
+#     )
+#     parser.add_argument(
+#         "--regressor_layers",
+#         type=parse_list,
+#         default=None,
+#         help="Regressor layers sizes",
+#     )
+#     parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
+#     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
+#     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
+#     parser.add_argument(
+#         "--early_stop", type=int, default=None, help="Early stopping patience"
+#     )
+#     parser.add_argument("--loss", type=str, default=None, help="Loss function")
+#     parser.add_argument(
+#         "--loss_reduction", type=str, default=None, help="Loss reduction method"
+#     )
+#     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
+#     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+#     parser.add_argument(
+#         "--weight_decay", type=float, default=None, help="Weight decay rate"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler", type=str, default=None, help="LR scheduler type"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
+#     )
+#
+#     args = parser.parse_args()
+#     # Construct kwargs, excluding arguments that were not provided
+#     kwargs = {k: v for k, v in vars(args).items() if v is not None}
+#
+#     sweep_count = args.sweep_count
+#     if sweep_count is not None and sweep_count > 0:
+#         run_mcdropout_hyperparm(
+#             **kwargs,
+#         )
+#     else:
+#         run_mcdropout_wrapper(
+#             **kwargs,
+#         )
+#
+#
 
-    args = parser.parse_args()
-    # Construct kwargs, excluding arguments that were not provided
-    kwargs = {k: v for k, v in vars(args).items() if v is not None}
-
-    sweep_count = args.sweep_count
-    if sweep_count is not None and sweep_count > 0:
-        run_mcdropout_hyperparm(
-            **kwargs,
-        )
-    else:
-        run_mcdropout_wrapper(
-            **kwargs,
-        )
-
-
-if __name__ == "__main__":
-    main()
-    #
-    # run_mcdropout_wrapper(
-    #     data_name="papyrus",
-    #     activity_type="xc50",
-    #     n_targets=-1,
-    #     descriptor_protein="ankh-base",
-    #     descriptor_chemical="ecfp2048",
-    #     median_scaling=False,
-    #     split_type="random",
-    #     ext="pkl",
-    #     task_type="regression",
-    #     wandb_project_name=f"mcdp-test",
-    #     num_mc_samples=100,
-    # )
 #
 # def run_mcdropout(
 #     datasets=None,

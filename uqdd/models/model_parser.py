@@ -3,7 +3,7 @@ import argparse
 from uqdd.models.baseline import run_baseline_wrapper, run_baseline_hyperparam
 from uqdd.models.ensemble import run_ensemble_wrapper, run_ensemble_hyperparm
 from uqdd.models.mcdropout import run_mcdropout_wrapper, run_mcdropout_hyperparm
-from uqdd.models.evidential import run_evidential_wrapper #, run_evidential_hyperparam
+from uqdd.models.evidential import run_evidential_wrapper  # , run_evidential_hyperparam
 from uqdd.utils import float_or_none, parse_list
 
 query_dict = {
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--descriptor_protein",
         type=str,
-        default="ankh-base",
+        default="ankh-large",
         choices=[
             None,
             "ankh-base",
@@ -115,6 +115,12 @@ if __name__ == "__main__":
         default="baseline",
         choices=["baseline", "ensemble", "mcdropout", "evidential"],
         help="Model name argument",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Number of sequential repeats of runs",
     )
     parser.add_argument(
         "--wandb-project-name",
@@ -167,27 +173,30 @@ if __name__ == "__main__":
         "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
     )
     parser.add_argument(
-        "--lr_scheduler_factor", type=float_or_none, default=None, help="LR scheduler factor",
+        "--lr_scheduler_factor",
+        type=float_or_none,
+        default=None,
+        help="LR scheduler factor",
     )
     parser.add_argument(
-        "--max_norm", type=float_or_none, default=None, help="Max norm for gradient clipping" #, choices=[None, 10.0, 50.0]
+        "--max_norm",
+        type=float_or_none,
+        default=50.0,
+        help="Max norm for gradient clipping",  # , choices=[None, 10.0, 50.0]
     )
 
     # * uncertainty args * #
     parser.add_argument(
-        "--aleatoric",
-        type=bool,
-        default=True,
-        help="Aleatoric inference"
+        "--aleatoric", type=bool, default=True, help="Aleatoric inference"
     )
 
     # * Ensemble args * #
-    parser.add_argument(
-        "--parallelize",
-        type=bool,
-        default=False,
-        help="Parallelize training"
-    )
+    # parser.add_argument(
+    #     "--parallelize",
+    #     type=bool,
+    #     default=False,
+    #     help="Parallelize training"
+    # )
     parser.add_argument(
         "--ensemble_size",
         type=int,
@@ -205,12 +214,7 @@ if __name__ == "__main__":
 
     # * Evidential args * #
 
-    parser.add_argument(
-        "--tags",
-        type=str,
-        default=None,
-        help="Extra Tags for wandb"
-    )
+    parser.add_argument("--tags", type=str, default=None, help="Extra Tags for wandb")
     parser.add_argument(
         "--seed",
         type=int,
@@ -223,13 +227,23 @@ if __name__ == "__main__":
     kwargs = {k: v for k, v in vars(args).items() if v is not None}
 
     sweep_count = args.sweep_count
+    repeats = args.repeats
+    seed = args.seed
 
     if sweep_count is not None:
         if args.model in ["baseline", "ensemble", "mcdropout"]:
             query_dict[f"{args.model}_hyperparam"](**kwargs)
         else:
-            print("Sweep count only supported for baseline, ensemble, and mcdropout models.")
-
+            print(
+                "Sweep count only supported for baseline, ensemble, and mcdropout models."
+            )
     else:
-        query_dict[args.model](**kwargs)
+        if repeats > 1:
+            for i in range(repeats):
+                kwargs["seed"] = seed
+                print(f"Run {i+1}/{repeats}")
+                query_dict[args.model](**kwargs)
+                seed += 1 if args.model != "ensemble" else int(args.ensemble_size)
 
+        else:
+            query_dict[args.model](**kwargs)

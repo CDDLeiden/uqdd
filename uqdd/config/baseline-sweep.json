@@ -4,7 +4,7 @@
   "method": "bayes",
   "metric": {
     "goal": "minimize",
-    "name": "val/rmse"
+    "name": "val/loss"
   },
   "parameters": {
     "aleatoric": {
@@ -71,7 +71,7 @@
       "value": null
     },
     "max_norm": {
-      "value": null
+      "values": [null,50.0,100.0]
     }
   }
 }

@@ -94,7 +94,7 @@ class BaselineDNN(nn.Module):
         # return output
 
     @staticmethod
-    def create_mlp(input_dim, layer_dims, dropout): # , output_dim=None
+    def create_mlp(input_dim, layer_dims, dropout):  # , output_dim=None
         modules = []
         for i in range(len(layer_dims)):
             if i == 0:
@@ -150,7 +150,7 @@ class BaselineDNN(nn.Module):
         if self.aleatoric:
             self.aleavar_layer = nn.Sequential(
                 nn.Linear(regressor_layers[-1], output_dim),
-                nn.Softplus()  # TODO questionable
+                nn.Softplus(),  # TODO questionable
             )
         # if self.aleatoric:
         #     self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
@@ -165,7 +165,8 @@ class BaselineDNN(nn.Module):
 
 
 def run_baseline(config=None):
-    best_model, _, _, _ = train_model_e2e(
+    # best_model, _, _, _, _ = train_model_e2e(
+    best_model, _, _ = train_model_e2e(
         config, model=BaselineDNN, model_type="baseline", logger=LOGGER
     )
 
@@ -185,19 +186,6 @@ def run_baseline_wrapper(
     run_baseline(config=config)
 
 
-# args mentioned for readibility
-
-
-# data_name = (data_name,)
-# activity_type = (activity_type,)
-# n_targets = (n_targets,)
-# descriptor_protein = (descriptor_protein,)
-# descriptor_chemical = (descriptor_chemical,)
-# median_scaling = (median_scaling,)
-# split_type = (split_type,)
-# ext = (ext,)
-# task_type = (task_type,)
-# wandb_project_name = (wandb_project_name,)
 def run_baseline_hyperparam(**kwargs):
     global LOGGER
     LOGGER = create_logger(
@@ -265,229 +253,222 @@ def run_baseline_hyperparam(**kwargs):
 #
 #     wandb.finish()
 
+#
+# def main():
+#     parser = argparse.ArgumentParser(description="Baseline Model Running")
+#     parser.add_argument(
+#         "--aleatoric",
+#         type=bool,
+#         default=True,
+#         help="Aleatoric inference"
+#     )
+#     parser.add_argument(
+#         "--data_name",
+#         type=str,
+#         default="papyrus",
+#         choices=["papyrus", "tdc", "other"],
+#         help="Data name argument",
+#     )
+#     parser.add_argument(
+#         "--activity_type",
+#         type=str,
+#         default="xc50",
+#         choices=["xc50", "kx"],
+#         help="Activity argument",
+#     )
+#     parser.add_argument(
+#         "--n_targets",
+#         type=int,
+#         default=-1,
+#         help="Number of targets argument (default=-1 for all targets)",
+#     )
+#     parser.add_argument(
+#         "--descriptor_protein",
+#         type=str,
+#         default=None,
+#         choices=[
+#             None,
+#             "ankh-base",
+#             "ankh-large",
+#             "unirep",
+#             "protbert",
+#             "protbert_bfd",
+#             "esm1_t34",
+#             "esm1_t12",
+#             "esm1_t6",
+#             "esm1b",
+#             "esm_msa1",
+#             "esm_msa1b",
+#             "esm1v",
+#         ],
+#         help="Protein descriptor argument",
+#     )
+#     parser.add_argument(
+#         "--descriptor_chemical",
+#         type=str,
+#         default="ecfp2048",
+#         choices=[
+#             "ecfp1024",
+#             "ecfp2048",
+#             "mold2",
+#             "mordred",
+#             "cddd",
+#             "fingerprint",  # "moldesc"
+#         ],
+#         help="Chemical descriptor argument",
+#     )
+#     parser.add_argument(
+#         "--median_scaling",
+#         type=bool,
+#         default=False,
+#         help="Label Median scaling function argument",
+#     )
+#     # parser.add_argument(
+#     #     "--label-scaling-func",
+#     #     type=str,
+#     #     default=None,
+#     #     choices=[None, "median", "standard", "minmax", "robust"],
+#     #     help="Label scaling function argument",
+#     # )
+#     parser.add_argument(
+#         "--split_type",
+#         type=str,
+#         default="random",
+#         choices=["random", "scaffold", "time", "scaffold_cluster"],
+#         help="Split argument",
+#     )
+#     parser.add_argument(
+#         "--ext",
+#         type=str,
+#         default="pkl",
+#         choices=["pkl", "parquet", "csv", "feather"],
+#         help="File extension argument",
+#     )
+#     parser.add_argument(
+#         "--task_type",
+#         type=str,
+#         default="regression",
+#         choices=["regression", "classification"],
+#         help="Task type argument",
+#     )
+#     parser.add_argument(
+#         "--wandb-project-name",
+#         type=str,
+#         default="baseline-test",
+#         help="Wandb project name argument",
+#     )
+#     parser.add_argument(
+#         "--sweep-count",
+#         type=int,
+#         default=None,
+#         help="Sweep count argument",
+#     )
+#     # take chem layers as list input
+#     parser.add_argument(
+#         "--chem_layers",
+#         type=parse_list,
+#         default=None,
+#         help="Chem layers sizes",
+#     )
+#     parser.add_argument(
+#         "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
+#     )
+#     parser.add_argument(
+#         "--regressor_layers",
+#         type=parse_list,
+#         default=None,
+#         help="Regressor layers sizes",
+#     )
+#     parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
+#     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
+#     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
+#     parser.add_argument(
+#         "--early_stop", type=int, default=None, help="Early stopping patience"
+#     )
+#     parser.add_argument("--loss", type=str, default=None, help="Loss function")
+#     parser.add_argument(
+#         "--loss_reduction", type=str, default=None, help="Loss reduction method"
+#     )
+#     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
+#     parser.add_argument("--lr", type=float_or_none, default=None, help="Learning rate")
+#     parser.add_argument(
+#         "--weight_decay", type=float_or_none, default=None, help="Weight decay rate"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler", type=str, default=None, help="LR scheduler type"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
+#     )
+#     parser.add_argument(
+#         "--lr_scheduler_factor", type=float_or_none, default=None, help="LR scheduler factor",
+#     )
+#     parser.add_argument(
+#         "--max_norm", type=float_or_none, default=None, help="Max norm for gradient clipping" #, choices=[None, 10.0, 50.0]
+#     )
+#
+#     args = parser.parse_args()
+#     # Construct kwargs, excluding arguments that were not provided
+#     kwargs = {k: v for k, v in vars(args).items() if v is not None}
+#
+#     sweep_count = args.sweep_count
+#     if sweep_count is not None and sweep_count > 0:
+#         run_baseline_hyperparam(
+#             **kwargs,
+#         )
+#
+#     else:
+#         run_baseline_wrapper(
+#             **kwargs,
+#         )
+#
+#
+# if __name__ == "__main__":
+#     main()
+# #
+# data_name = "papyrus"
+# n_targets = -1
+# task_type = "regression"
+# activity = "xc50"
+# split = "random"
+# desc_prot = "ankh-base"
+# desc_chem = "ecfp2048"
+# median_scaling = False
+# ext = "pkl"
+# wandb_project_name = "baseline-test-272"
+# sweep_count = 0  # 250
+# aleatoric = True
+# # epochs=1
+#
+# run_baseline_wrapper(
+#     data_name=data_name,
+#     activity_type=activity,
+#     n_targets=n_targets,
+#     descriptor_protein=desc_prot,
+#     descriptor_chemical=desc_chem,
+#     median_scaling=median_scaling,
+#     split_type=split,
+#     aleatoric=aleatoric,
+#     ext=ext,
+#     task_type=task_type,
+#     wandb_project_name=wandb_project_name,
+#     logger=None,
+# )
 
-def main():
-    parser = argparse.ArgumentParser(description="Baseline Model Running")
-    parser.add_argument(
-        "--aleatoric",
-        type=bool,
-        default=True,
-        help="Aleatoric inference"
-    )
-    parser.add_argument(
-        "--data_name",
-        type=str,
-        default="papyrus",
-        choices=["papyrus", "tdc", "other"],
-        help="Data name argument",
-    )
-    parser.add_argument(
-        "--activity_type",
-        type=str,
-        default="xc50",
-        choices=["xc50", "kx"],
-        help="Activity argument",
-    )
-    parser.add_argument(
-        "--n_targets",
-        type=int,
-        default=-1,
-        help="Number of targets argument (default=-1 for all targets)",
-    )
-    parser.add_argument(
-        "--descriptor_protein",
-        type=str,
-        default=None,
-        choices=[
-            None,
-            "ankh-base",
-            "ankh-large",
-            "unirep",
-            "protbert",
-            "protbert_bfd",
-            "esm1_t34",
-            "esm1_t12",
-            "esm1_t6",
-            "esm1b",
-            "esm_msa1",
-            "esm_msa1b",
-            "esm1v",
-        ],
-        help="Protein descriptor argument",
-    )
-    parser.add_argument(
-        "--descriptor_chemical",
-        type=str,
-        default="ecfp2048",
-        choices=[
-            "ecfp1024",
-            "ecfp2048",
-            "mold2",
-            "mordred",
-            "cddd",
-            "fingerprint",  # "moldesc"
-        ],
-        help="Chemical descriptor argument",
-    )
-    parser.add_argument(
-        "--median_scaling",
-        type=bool,
-        default=False,
-        help="Label Median scaling function argument",
-    )
-    # parser.add_argument(
-    #     "--label-scaling-func",
-    #     type=str,
-    #     default=None,
-    #     choices=[None, "median", "standard", "minmax", "robust"],
-    #     help="Label scaling function argument",
-    # )
-    parser.add_argument(
-        "--split_type",
-        type=str,
-        default="random",
-        choices=["random", "scaffold", "time", "scaffold_cluster"],
-        help="Split argument",
-    )
-    parser.add_argument(
-        "--ext",
-        type=str,
-        default="pkl",
-        choices=["pkl", "parquet", "csv", "feather"],
-        help="File extension argument",
-    )
-    parser.add_argument(
-        "--task_type",
-        type=str,
-        default="regression",
-        choices=["regression", "classification"],
-        help="Task type argument",
-    )
-    parser.add_argument(
-        "--wandb-project-name",
-        type=str,
-        default="baseline-test",
-        help="Wandb project name argument",
-    )
-
-    # group = parser.add_mutually_exclusive_group()
-    # group.add_argument("--baseline", action="store_true", help="Run baseline")
-    # group.add_argument(
-    #     "--hyperparam", action="store_true", help="Run hyperparameter search"
-    # )
-    parser.add_argument(
-        "--sweep-count",
-        type=int,
-        default=None,
-        help="Sweep count argument",
-    )
-    # take chem layers as list input
-    parser.add_argument(
-        "--chem_layers",
-        type=parse_list,
-        default=None,
-        help="Chem layers sizes",
-    )  #  nargs="+",
-    parser.add_argument(
-        "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
-    )
-    parser.add_argument(
-        "--regressor_layers",
-        # nargs="+",
-        type=parse_list,
-        default=None,
-        help="Regressor layers sizes",
-    )
-    parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
-    parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
-    parser.add_argument(
-        "--early_stop", type=int, default=None, help="Early stopping patience"
-    )
-    parser.add_argument("--loss", type=str, default=None, help="Loss function")
-    parser.add_argument(
-        "--loss_reduction", type=str, default=None, help="Loss reduction method"
-    )
-    parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
-    parser.add_argument("--lr", type=float_or_none, default=None, help="Learning rate")
-    parser.add_argument(
-        "--weight_decay", type=float_or_none, default=None, help="Weight decay rate"
-    )
-    parser.add_argument(
-        "--lr_scheduler", type=str, default=None, help="LR scheduler type"
-    )
-    parser.add_argument(
-        "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
-    )
-    parser.add_argument(
-        "--lr_scheduler_factor", type=float_or_none, default=None, help="LR scheduler factor",
-    )
-    parser.add_argument(
-        "--max_norm", type=float_or_none, default=None, help="Max norm for gradient clipping" #, choices=[None, 10.0, 50.0]
-    )
-
-    args = parser.parse_args()
-    # Construct kwargs, excluding arguments that were not provided
-    kwargs = {k: v for k, v in vars(args).items() if v is not None}
-
-    sweep_count = args.sweep_count
-    if sweep_count is not None and sweep_count > 0:
-        run_baseline_hyperparam(
-            **kwargs,
-        )
-
-    else:
-        run_baseline_wrapper(
-            **kwargs,
-        )
-
-
-if __name__ == "__main__":
-    main()
-    # #
-    # data_name = "papyrus"
-    # n_targets = -1
-    # task_type = "regression"
-    # activity = "xc50"
-    # split = "random"
-    # desc_prot = "ankh-base"
-    # desc_chem = "ecfp2048"
-    # median_scaling = False
-    # ext = "pkl"
-    # wandb_project_name = "baseline-test-272"
-    # sweep_count = 0  # 250
-    # aleatoric = True
-    # # epochs=1
-    #
-    # run_baseline_wrapper(
-    #     data_name=data_name,
-    #     activity_type=activity,
-    #     n_targets=n_targets,
-    #     descriptor_protein=desc_prot,
-    #     descriptor_chemical=desc_chem,
-    #     median_scaling=median_scaling,
-    #     split_type=split,
-    #     aleatoric=aleatoric,
-    #     ext=ext,
-    #     task_type=task_type,
-    #     wandb_project_name=wandb_project_name,
-    #     logger=None,
-    # )
-
-    # sweep_count = 10
-    # run_baseline_hyperparam(
-    #     sweep_count=sweep_count,
-    #     data_name=data_name,
-    #     activity_type=activity,
-    #     n_targets=n_targets,
-    #     descriptor_protein=desc_prot,
-    #     descriptor_chemical=desc_chem,
-    #     split_type=split,
-    #     ext=ext,
-    #     task_type=task_type,
-    #     wandb_project_name=wandb_project_name,
-    # )
-    # print("Done")
+# sweep_count = 10
+# run_baseline_hyperparam(
+#     sweep_count=sweep_count,
+#     data_name=data_name,
+#     activity_type=activity,
+#     n_targets=n_targets,
+#     descriptor_protein=desc_prot,
+#     descriptor_chemical=desc_chem,
+#     split_type=split,
+#     ext=ext,
+#     task_type=task_type,
+#     wandb_project_name=wandb_project_name,
+# )
+# print("Done")
 
 
 # def _run_baseline(
