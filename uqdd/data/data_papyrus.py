@@ -17,7 +17,14 @@ from papyrus_scripts.preprocess import (
 )
 from papyrus_scripts.reader import read_papyrus, read_protein_set
 from uqdd import DATA_DIR, DATASET_DIR, DEVICE
-from uqdd.utils import create_logger, get_config, save_pickle, load_pickle, save_df, load_df
+from uqdd.utils import (
+    create_logger,
+    get_config,
+    save_pickle,
+    load_pickle,
+    save_df,
+    load_df,
+)
 from uqdd.utils_chem import standardize_df, get_chem_desc, merge_scaffolds
 from uqdd.utils_prot import get_embeddings
 from uqdd.data.utils_data import (
@@ -28,6 +35,10 @@ from uqdd.data.utils_data import (
     export_tasks,
     apply_median_scaling,
     target_filtering,
+    check_distribution,
+    fig_label_distribution_across_splits,
+    fig_label_distribution,
+    from_split_data_to_idx,
 )
 
 
@@ -93,7 +104,9 @@ class Papyrus:
         recalculate: bool = False,
         split_type: str = "random",
         split_proportions: List[float] = None,
+        stratify_by: Union[str, None] = None,
         max_k_clusters: int = 500,
+        optimal_k: int = None,
         min_datapoints: int = 50,
         min_actives: int = 10,
         active_threshold: float = 6.5,
@@ -121,6 +134,8 @@ class Papyrus:
             Type of split to use. Options are 'random', 'scaffold', 'scaffold_cluster', 'time' or 'all'
         split_proportions : list
             Proportions for the train, validation and test splits
+        stratify_by : str
+            Column to stratify the splits by (e.g. 'target_id', 'scaffold')
         max_k_clusters : int
             Maximum number of clusters to use for the scaffold cluster split
         min_datapoints : int
@@ -152,52 +167,71 @@ class Papyrus:
         split_types = self._get_split_types(split_type)
         t_tag = "all" if n_targets <= 0 else f"top{n_targets}"
         # TODO change the output path to include t_tag
-        export_path = Path(self.output_path) / t_tag #/ "mcs"
+        export_path = Path(self.output_path) / t_tag  # / "mcs"
         # figure_path = Path(self.output_path) / t_tag / "mcs_figures"
 
         if verbose:
             tar_tag = t_tag
-            self.logger.info(f"Dataset loaded with {len(df)} datapoints")
-            self.logger.info(f"Label column: {label_col}")
+            self.logger.debug(f"Dataset loaded with {len(df)} datapoints")
+            self.logger.debug(f"Label column: {label_col}")
             if "target_id" in df.columns:
 
                 unique_targets = df["target_id"].nunique()
                 tar_tag += f"_{unique_targets}"
-                self.logger.info(f"Unique Targets: {unique_targets}")
+                self.logger.debug(f"Unique Targets: {unique_targets}")
             if "SMILES" in df.columns:
                 unique_smiles = df["SMILES"].nunique()
-                self.logger.info(f"Unique SMILES: {unique_smiles}")
+                self.logger.debug(f"Unique SMILES: {unique_smiles}")
 
-            save_df(df, export_path / f"papyrus_filtered_{self.activity_key}_{tar_tag}.csv")
+            save_df(
+                df, export_path / f"papyrus_filtered_{self.activity_key}_{tar_tag}.csv"
+            )
 
             self.logger.info("Calculating scaffolds")
             df = merge_scaffolds(df, "SMILES")
-            save_df(df, export_path / f"papyrus_filtered_{self.activity_key}_{tar_tag}_with_scaffolds.csv")
-            self.logger.info(f"Unique scaffolds: {df['scaffold'].nunique()}")
-        #
-        # split_idx = self.split(
-        #     df,
-        #     split_types,
-        #     split_proportions,
-        #     max_k_clusters=max_k_clusters,
-        #     # fig_output_path=figure_path,
-        #     export_path=export_path,
-        #     return_indices=True,
-        #     recalculate=recalculate,
-        # )
-        split_idx = split_data(
+            save_df(
                 df,
-                split_type=split_type,
-                smiles_col="SMILES",
-                time_col="Year",
-                fractions=split_proportions,
-                max_k_clusters=max_k_clusters,
-                export_path=export_path,
-                return_indices=True,
-                recalculate=recalculate,
-                seed=42,
-                logger=self.logger
+                export_path
+                / f"papyrus_filtered_{self.activity_key}_{tar_tag}_with_scaffolds.csv",
             )
+            self.logger.debug(f"Unique scaffolds: {df['scaffold'].nunique()}")
+        #
+        split_idx = self.split(
+            df,
+            split_types,
+            split_proportions,
+            label_col,
+            stratify_by,
+            max_k_clusters=max_k_clusters,
+            optimal_k=optimal_k,
+            # fig_output_path=figure_path,
+            export_path=export_path,
+            recalculate=recalculate,
+        )
+
+        #
+        # data_splits = split_data(
+        #         df,
+        #         split_type=split_type,
+        #         smiles_col="SMILES",
+        #         time_col="Year",
+        #         stratify_col=stratify_by,
+        #         fractions=split_proportions,
+        #         max_k_clusters=max_k_clusters,
+        #         export_path=export_path,
+        #         return_indices=False,
+        #         recalculate=recalculate,
+        #         seed=42,
+        #         logger=self.logger
+        #     )
+        # # figures about the splits distribution
+        # check_distribution(data_splits, 'scaffold', fig_path)
+        # # will only work with PCM not with MT
+        # if n_targets <= 0:
+        #     fig_label_distribution(df, label_col, fig_path)
+        #     fig_label_distribution_across_splits(data_splits, label_col, fig_path)
+        #
+        # split_idx = from_split_data_to_idx(data_splits)
 
         if all_descriptors:
             args_combinations = (
@@ -291,8 +325,17 @@ class Papyrus:
     def _get_split_types(self, split_type: str = None):
         if split_type == "all":
             if self.MT:
-                return ["random", "scaffold", "scaffold_cluster"] # , "scaffold_cluster"
-            return ["random", "scaffold", "time", "scaffold_cluster"] # , "scaffold_cluster"
+                return [
+                    "random",
+                    "scaffold",
+                    "scaffold_cluster",
+                ]  # , "scaffold_cluster"
+            return [
+                "random",
+                "scaffold",
+                "time",
+                "scaffold_cluster",
+            ]  # , "scaffold_cluster"
         return [split_type]
 
     @staticmethod
@@ -370,54 +413,86 @@ class Papyrus:
 
         return df, label_col
 
-    # def split(
-    #     self,
-    #     df,
-    #     split_type,
-    #     split_proportions,
-    #     max_k_clusters=500,
-    #     # fig_output_path=None,
-    #     export_path=None,
-    #     return_indices=False,
-    #     recalculate=False,
-    # ):
-    #
-    #
-    #     # calculate the splits or load them if they exist
-    #     split_path = (
-    #         self.output_path
-    #         / f"split_data_dict{'_indices' if return_indices else ''}.pkl"
-    #     )
-    #     if split_path.is_file() and not recalculate:
-    #         self.logger.info("Loading previously calculated splits")
-    #         split_data_dict = load_pickle(split_path)
-    #     else:
-    #         self.logger.info("Calculating the splits")
-    #         if split_proportions is None:
-    #             split_proportions = [0.7, 0.15, 0.15]
-    #         split_data_dict = split_data(
-    #             df,
-    #             split_type=split_type,
-    #             smiles_col="SMILES",
-    #             time_col="Year",
-    #             fractions=split_proportions,
-    #             max_k_clusters=max_k_clusters,
-    #             # fig_output_path=fig_output_path,
-    #             export_path=export_path,
-    #             return_indices=return_indices,
-    #             seed=42,
-    #         )
-    #         # save the splits
-    #         self.logger.info(f"Exporting the splits to {split_path}")
-    #         save_pickle(split_data_dict, split_path)
-    #
-    #     return split_data_dict
+    def split(
+        self,
+        df,
+        split_type,
+        split_proportions,
+        label_col,
+        stratify_by=None,
+        max_k_clusters=500,
+        optimal_k=None,
+        export_path=None,
+        recalculate=False,
+    ):
+        if export_path is None:
+            export_path = self.output_path
+        fig_path = export_path / "data_figures"
+        fig_path.mkdir(parents=True, exist_ok=True)
+        data_splits = split_data(
+            df,
+            split_type=split_type,
+            smiles_col="SMILES",
+            time_col="Year",
+            stratify_col=stratify_by,
+            fractions=split_proportions,
+            max_k_clusters=max_k_clusters,
+            optimal_k=optimal_k,
+            export_path=export_path,
+            return_indices=False,
+            recalculate=recalculate,
+            seed=42,
+            logger=self.logger,
+        )
+        # figures about the splits distribution
+        # check_distribution(data_splits, 'scaffold', fig_path)
+        # will only work with PCM not with MT
+        if not self.MT:
+            fig_label_distribution(df, label_col, fig_path)
+            fig_label_distribution_across_splits(data_splits, label_col, fig_path)
+
+        split_idx = from_split_data_to_idx(data_splits)
+
+        return split_idx
+        # # calculate the splits or load them if they exist
+        # split_path = (
+        #     self.output_path
+        #     / f"split_data_dict{'_indices' if return_indices else ''}.pkl"
+        # )
+        # if split_path.is_file() and not recalculate:
+        #     self.logger.info("Loading previously calculated splits")
+        #     split_data_dict = load_pickle(split_path)
+        # else:
+        #     self.logger.info("Calculating the splits")
+        #     if split_proportions is None:
+        #         split_proportions = [0.7, 0.15, 0.15]
+        #     split_data_dict = split_data(
+        #         df,
+        #         split_type=split_type,
+        #         smiles_col="SMILES",
+        #         time_col="Year",
+        #         fractions=split_proportions,
+        #         max_k_clusters=max_k_clusters,
+        #         # fig_output_path=fig_output_path,
+        #         export_path=export_path,
+        #         return_indices=return_indices,
+        #         seed=42,
+        #     )
+        #     # save the splits
+        #     self.logger.info(f"Exporting the splits to {split_path}")
+        #     save_pickle(split_data_dict, split_path)
+        #
+        # return split_data_dict
 
     @staticmethod
     def get_cols_to_include(
         desc_prot: str, desc_chem: str, n_targets: int, label_col: list
     ):
-        cols_to_include = ["SMILES", "connectivity", desc_chem]  # * used to unpack the list ['ecfp']
+        cols_to_include = [
+            "SMILES",
+            "connectivity",
+            desc_chem,
+        ]  # * used to unpack the list ['ecfp']
         cols_to_include = (
             cols_to_include + ["target_id", desc_prot, "Year"]
             if n_targets <= 0 and desc_prot
@@ -683,13 +758,15 @@ class PapyrusDataset(Dataset):
         self.labels = torch.tensor(
             data[self.label_col].values, dtype=torch.float32, device=device
         )
-        np_desc_chem = np.stack(data[desc_chem].apply(pd.to_numeric, errors='coerce').values).astype(np.float32)
-        self.chem_desc = torch.tensor(
-            np_desc_chem, dtype=torch.float32, device=device
-        )
+        np_desc_chem = np.stack(
+            data[desc_chem].apply(pd.to_numeric, errors="coerce").values
+        ).astype(np.float32)
+        self.chem_desc = torch.tensor(np_desc_chem, dtype=torch.float32, device=device)
 
         if desc_prot is not None:
-            np_desc_prot = np.stack(data[desc_prot].apply(pd.to_numeric, errors='coerce').values).astype(np.float32)
+            np_desc_prot = np.stack(
+                data[desc_prot].apply(pd.to_numeric, errors="coerce").values
+            ).astype(np.float32)
             self.prot_desc = torch.tensor(
                 np_desc_prot, dtype=torch.float32, device=device
             )
@@ -734,18 +811,18 @@ def get_datasets(
     dir_path = dir_path / "all" if n_targets <= 0 else dir_path / f"top{n_targets}"
 
     if n_targets > 0:
-        logger.info(
+        logger.debug(
             "Initializing dataset for multitask learning; only chemical descriptors will be used."
         )
         filename_prefix = f"{split_type}_{desc_chem}"
     else:
         if desc_prot:
-            logger.info(
+            logger.debug(
                 "Initializing pcm dataset for single-task learning; both protein and chemical descriptors will be used."
             )
             filename_prefix = f"{split_type}_{desc_prot}_{desc_chem}"
         else:
-            logger.info(
+            logger.debug(
                 "Initializing dataset for single-task learning; only chemical descriptors will be used."
             )
             filename_prefix = f"{split_type}_{desc_chem}"
@@ -755,14 +832,16 @@ def get_datasets(
     for subset in ["train", "val", "test"]:
         file_path = dir_path / f"{filename_prefix}_{subset}.{ext}"
         if not file_path.is_file():
-            logger.warning(f"File {subset} not found: {file_path} - "
-                           f"calculating it now with default settings - "
-                           f"for non-default settings, please use Papyrus class first.")
+            logger.warning(
+                f"File {subset} not found: {file_path} - "
+                f"calculating it now with default settings - "
+                f"for non-default settings, please use Papyrus class first."
+            )
             Papyrus(activity_type=activity_type)(
                 n_targets=n_targets,
                 descriptor_protein=desc_prot,
                 descriptor_chemical=desc_chem,
-                split_type=split_type
+                split_type=split_type,
             )
             if not file_path.is_file():
                 raise FileNotFoundError(
@@ -791,13 +870,13 @@ def get_datasets(
             median_scaling=median_scaling,
             median_point=median_point,
             logger=logger,
-            device=device
+            device=device,
         )
         median_point = dataset.median_point
         datasets[subset] = dataset
     dfs = pd.concat([datasets[subset].data for subset in ["train", "val", "test"]])
-    logger.info(f"Dataset loaded with {len(dfs)} datapoints")
-    logger.info(
+    logger.debug(f"Dataset loaded with {len(dfs)} datapoints")
+    logger.debug(
         f"Train: {len(datasets['train'])}, Val: {len(datasets['val'])}, Test: {len(datasets['test'])}"
     )
     # logger.info(f"Total unique Targets: {dfs['target_id'].nunique()}")
@@ -850,6 +929,7 @@ def main():
     parser.add_argument(
         "--max-k-clusters", type=int, default=10000, help="Max k clusters"
     )
+    parser.add_argument("--optimal-k", type=int, default=None, help="Optimal k")
     parser.add_argument("--min-datapoints", type=int, default=50, help="Min datapoints")
     parser.add_argument("--min-actives", type=int, default=10, help="Min actives")
     parser.add_argument(
@@ -860,6 +940,9 @@ def main():
         type=bool,
         default=False,
         help="Consider only normal activity values",
+    )
+    parser.add_argument(
+        "--stratify-by", type=str, default="cluster", help="Stratify by column"
     )
 
     args = parser.parse_args()
@@ -883,7 +966,9 @@ def main():
         recalculate=args.recalculate,
         split_type=args.split_type,
         split_proportions=split_proportions,
+        stratify_by=args.stratify_by,
         max_k_clusters=args.max_k_clusters,
+        optimal_k=args.optimal_k,
         min_datapoints=args.min_datapoints,
         min_actives=args.min_actives,
         active_threshold=args.active_threshold,
@@ -895,20 +980,23 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # Example of how to use the Papyrus class
-    # activity_type = "xc50"
+    # # Example of how to use the Papyrus class
+    # activity_type = "kx"
     # std_smiles = True
     # verbose_files = False
     #
     # # call args
-    # n_targets = -1
-    # desc_prot = "ankh-large"  # "ankh-base"  # For testing - it should become none
-    # desc_chem = "ecfp2048"  # "mordred"
-    # split_type = "scaffold_cluster"
-    # all_descs = False
+    # n_targets = 20
+    # # desc_prot = "ankh-large"  # "ankh-base"  # For testing - it should become none
+    # # desc_chem = "ecfp2048"  # "mordred"
+    # split_type = "all"
+    # stratify_by = "cluster" #"target_id" # "cluster" # "scaffold"
+    # all_descs = True
     # recalculate = True
     # split_proportions = [0.7, 0.15, 0.15]
     # file_ext = "pkl"
+    # max_k = 1000000
+    # # optimal_k = 11974
     #
     # papyrus = Papyrus(
     #     activity_type=activity_type,
@@ -918,13 +1006,15 @@ if __name__ == "__main__":
     #
     # papyrus(
     #     n_targets=n_targets,
-    #     descriptor_protein=desc_prot,
-    #     descriptor_chemical=desc_chem,
+    #     # descriptor_protein=desc_prot,
+    #     # descriptor_chemical=desc_chem,
     #     all_descriptors=all_descs,
     #     recalculate=recalculate,
     #     split_type=split_type,
     #     split_proportions=split_proportions,
-    #     max_k_clusters=50,
+    #     stratify_by=stratify_by,
+    #     max_k_clusters=max_k,
+    #     # optimal_k=optimal_k,
     #     min_datapoints=50,
     #     min_actives=10,
     #     active_threshold=6.5,
