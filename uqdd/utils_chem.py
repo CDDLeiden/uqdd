@@ -1,5 +1,6 @@
 import copy
 import logging
+from multiprocessing import shared_memory
 from typing import Union, List, Tuple, Any, Optional
 from pathlib import Path
 from PIL import Image
@@ -19,7 +20,14 @@ from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculat
 from rdkit.Chem.rdchem import Mol as RdkitMol
 
 from uqdd import DATA_DIR
-from uqdd.utils import check_nan_duplicated, custom_agg, load_npy_file, save_npy_file, save_pickle, load_pickle
+from uqdd.utils import (
+    check_nan_duplicated,
+    custom_agg,
+    load_npy_file,
+    save_npy_file,
+    save_pickle,
+    load_pickle,
+)
 
 from papyrus_scripts.reader import read_molecular_descriptors
 from papyrus_scripts.preprocess import consume_chunks
@@ -28,6 +36,7 @@ from papyrus_scripts.preprocess import consume_chunks
 from scipy.cluster.hierarchy import cophenet, cut_tree
 from scipy.spatial.distance import pdist
 from fastcluster import linkage
+
 # SKlearn metrics
 from sklearn.metrics import silhouette_score
 
@@ -39,7 +48,7 @@ import math
 
 # Disable RDKit warnings
 RDLogger.DisableLog("rdApp.info")
-print(f"rdkit {rdkit.__version__}")
+# print(f"rdkit {rdkit.__version__}")
 
 N_WORKERS = 20
 BATCH_SIZE = 10000
@@ -598,7 +607,9 @@ def standardize_df(
             f"is: {df_dup_before.shape[0]} duplicated rows"
         )
 
-    df_filtered = parallel_standardize(df_filtered, smiles_col, logger, suppress_exception)
+    df_filtered = parallel_standardize(
+        df_filtered, smiles_col, logger, suppress_exception
+    )
     # standardizing the SMILES in parallel
     # tqdm.pandas(desc="Standardizing SMILES")
     # unique_smiles = df_filtered[smiles_col].unique()
@@ -1363,17 +1374,76 @@ def calculate_cophenet(X, Z, save_path=None):
     return c
 
 
-def calculate_silhouette(k, X, Z):
+def calculate_silhouette(k, shm_name, shape, Z):
+    # Access the shared memory block
+    existing_shm = shared_memory.SharedMemory(name=shm_name)
+    X_shared = np.ndarray(shape, dtype=np.float32, buffer=existing_shm.buf)
+
+    cluster_labels = cut_tree(Z, n_clusters=k).flatten()
+    silhouette_avg = silhouette_score(X_shared, cluster_labels, metric="precomputed")
+
+    existing_shm.close()
+    return k, silhouette_avg
+
+
+def calculate_silhouette_helper(args):
+    k, shm_name, shape, Z = args
+    return calculate_silhouette(k, shm_name, shape, Z)
+
+
+def sil_K(X, Z, max_k=500):
+    # Create shared memory block for X
+    X = np.array(X, dtype=np.float32)
+    shm = shared_memory.SharedMemory(create=True, size=X.nbytes)
+    X_shared = np.ndarray(X.shape, dtype=np.float32, buffer=shm.buf)  # X.dtype
+    np.copyto(X_shared, X)
+    # Prepare arguments for the helper function
+    args_list = [(k, shm.name, X.shape, Z) for k in range(2, max_k)]
+
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        # results = pool.starmap(calculate_silhouette, [(k, shm.name, X.shape, Z) for k in range(2, max_k)])
+        # Initialize the tqdm progress bar
+        results = []
+        for result in tqdm(
+            pool.imap_unordered(calculate_silhouette_helper, args_list),
+            total=max_k - 2,
+            desc="Calculating silhouette scores",
+        ):
+            results.append(result)
+        # for result in tqdm(pool.imap_unordered(lambda k: calculate_silhouette(k, shm.name, X.shape, Z), range(2, max_k)), total=max_k-2, desc="Calculating silhouette scores"):
+        #     results.append(result)
+
+    # Clean up shared memory
+    shm.close()
+    shm.unlink()
+    results.sort(key=lambda x: x[0])  # Ensure the results are sorted by k
+    n_clu, sil = zip(*results)
+    optimal_clu = n_clu[sil.index(max(sil))]
+    print("Optimal number of clusters: ", optimal_clu)
+
+    return list(n_clu), list(sil), optimal_clu
+    # results = []
+    # k_ranges = [range(i, min(i + chunk_size, max_k)) for i in range(2, max_k, chunk_size)]
+    #
+    # for k_range in k_ranges:
+    #     with mp.Pool(processes=mp.cpu_count()) as pool:
+    #         chunk_results = pool.starmap(calculate_silhouette, [(k, shm.name, X.shape, Z) for k in k_range])
+    #         results.extend(chunk_results)
+
+
+def _calculate_silhouette(k, X, Z):
     cluster_labels = cut_tree(Z, n_clusters=k).flatten()
     silhouette_avg = silhouette_score(X, cluster_labels, metric="precomputed")
     return k, silhouette_avg
 
 
-def sil_K(X, Z, max_k=500):
+def _sil_K(X, Z, max_k=500):
     # Chunking
     results = []
     chunk_size = 50
-    k_ranges = [range(i, min(i + chunk_size, max_k)) for i in range(2, max_k, chunk_size)]
+    k_ranges = [
+        range(i, min(i + chunk_size, max_k)) for i in range(2, max_k, chunk_size)
+    ]
     # def process_k_range(k):
     #     return calculate_silhouette(k, X, Z)
     #
@@ -1389,9 +1459,11 @@ def sil_K(X, Z, max_k=500):
     #     )
     # tqdm of k_ranges
     for k_range in tqdm(k_ranges, desc="Calculating Silhouette Scores", unit="chunk"):
-    # for k_range in k_ranges:
-        with mp.Pool(processes=N_WORKERS) as pool: # mp.cpu_count()
-            chunk_results = pool.starmap(calculate_silhouette, [(k, X, Z) for k in k_range])
+        # for k_range in k_ranges:
+        with mp.Pool(processes=N_WORKERS) as pool:  # mp.cpu_count()
+            chunk_results = pool.starmap(
+                calculate_silhouette, [(k, X, Z) for k in k_range]
+            )
             results.extend(chunk_results)
     # with (mp.Manager() as manager):
     #     shared_X = manager.list(X)
@@ -1453,14 +1525,14 @@ def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None
     # Initialize the plot
     fig = plt.figure(figsize=(12, 5), dpi=600)
     plt.rc("font", family="serif")
-    plt.plot(cluster_counts, silhouette_scores) # , label="MCS"
+    plt.plot(cluster_counts, silhouette_scores)  # , label="MCS"
     # plt.scatter(cluster_counts, silhouette_scores, label="MCS")
     # # Plot each series of cluster counts vs. silhouette scores
     # for i in range(len(cluster_counts)):
     #     plt.scatter(cluster_counts[i], silhouette_scores[i], label=labels[i])
 
     # Adding plot details
-    plt.legend(loc="lower right", shadow=True, fontsize=16)
+    # plt.legend(loc="lower right", shadow=True, fontsize=16)
     plt.xlabel("Number of Clusters", fontsize=16)
     plt.ylabel("Average Silhouette Score", fontsize=16)
 
@@ -1477,7 +1549,7 @@ def plot_silhouette_analysis(cluster_counts, silhouette_scores, output_path=None
 
 
 def plot_cluster_heatmap(data_matrix, output_path=None):
-    if hasattr(data_matrix, 'index'):
+    if hasattr(data_matrix, "index"):
         yticklabels = data_matrix.index
     else:
         # For numpy arrays, create numeric labels for each row
@@ -1516,10 +1588,16 @@ def clustering(
     df,
     smiles_col: str = "scaffold",
     max_k=500,
+    optimal_k=None,
     withH=False,
     # fig_output_path=None,
     export_mcs_path=None,
 ):
+    if export_mcs_path:
+        clustered_df_path = Path(export_mcs_path) / "clustered_df.pkl"
+        if clustered_df_path.exists():
+            print(f"Clustered DataFrame already exists at {clustered_df_path}")
+            return load_pickle(clustered_df_path)
     # pre cleaning
     df_clean = df.copy()[[smiles_col]]
     # dropp duplicates to avoid self comparison and reset index
@@ -1545,24 +1623,39 @@ def clustering(
     #     Path(export_mcs_path).mkdir(parents=True, exist_ok=True)
     #     df_mcs.to_csv(Path(export_mcs_path) / "mcs_matrix.csv", index=True)
     # df_pair.to_csv(Path(export_mcs_path) / "scaffold_sim_pair.csv", index=True)
-    mcs_x, mcs_z = form_linkage(mcs_np, save_path=export_mcs_path, calculate_cophenetic_coeff=True)
-    # max_k = min(max_k, df_clean[smiles_col].nunique())
-    max_k = df_clean[smiles_col].nunique()
+    mcs_x, mcs_z = form_linkage(
+        mcs_np, save_path=export_mcs_path, calculate_cophenetic_coeff=True
+    )
+    max_k = min(max_k, df_clean[smiles_col].nunique())
+    # max_k = df_clean[smiles_col].nunique ()
     print(f"Max number of clusters: {max_k}")
-    mcs_k, mcs_sil, optimal_clu = sil_K(mcs_x, mcs_z, max_k=max_k) # , max_k=max_k
-    if export_mcs_path:
-        fig_output_path = Path(export_mcs_path) / "mcs_figures"
-        Path(fig_output_path).mkdir(parents=True, exist_ok=True)
-        plot_silhouette_analysis(mcs_k, mcs_sil, output_path=fig_output_path)
-        # plot_cluster_heatmap(mcs_np, output_path=fig_output_path) # TAKES SO MUCH TIME
+    if optimal_k is None:
+        mcs_k, mcs_sil, optimal_k = sil_K(mcs_x, mcs_z, max_k=max_k)  # , max_k=max_k
+        if export_mcs_path:
+            fig_output_path = Path(export_mcs_path) / "mcs_figures"
+            Path(fig_output_path).mkdir(parents=True, exist_ok=True)
+            plot_silhouette_analysis(mcs_k, mcs_sil, output_path=fig_output_path)
 
+            optimal_k_path = Path(export_mcs_path) / f"mcs_optimal_k.pkl"
+            save_pickle(optimal_k, optimal_k_path)
+
+            # saving the silhouette scores
+            sil_scores_path = Path(export_mcs_path) / f"mcs_sil_scores.pkl"
+            save_pickle(zip(mcs_k, mcs_sil), sil_scores_path)
+
+        # plot_cluster_heatmap(mcs_np, output_path=fig_output_path) # TAKES SO MUCH TIME
+    # optimal_clu = 11974
     # df_clean["cluster"] = fcluster(mcs_z, optimal_clu, criterion="maxclust")
-    df_clean["cluster"] = cut_tree(mcs_z, n_clusters=optimal_clu).flatten()
+    print(f"Optimal number of clusters: {optimal_k}")
+    df_clean["cluster"] = cut_tree(mcs_z, n_clusters=optimal_k).flatten()
 
     # now we map the cluster to the original dataframe
     df = pd.merge(df, df_clean, on=smiles_col, how="left", validate="many_to_many")
-    df['cluster'] = df['cluster'].astype('Int64')
+    df["cluster"] = df["cluster"].astype("Int64")
+    if export_mcs_path:
+        save_pickle(df, clustered_df_path)
     return df
+
 
 #
 # def (df):
