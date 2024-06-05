@@ -11,32 +11,30 @@ import torch.multiprocessing as mp
 
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, DATASET_DIR
 from uqdd.models.baseline import BaselineDNN
-from uqdd.utils import create_logger, parse_list, save_pickle
+from uqdd.utils import create_logger, parse_list, save_pickle, split_list_by_sizes
 
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
     predict,
-    recalibrate_model, assign_wandb_tags, get_dataloadar,
+    recalibrate_model,
+    assign_wandb_tags,
+    get_dataloadar,
+    post_training_save_model,
 )
 
 from uqdd.models.utils_models import (
     get_model_config,
-    get_sweep_config, set_seed,
+    get_sweep_config,
+    set_seed,
 )
 
-mp.set_start_method('spawn', force=True)
+mp.set_start_method("spawn", force=True)
 # torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
 
 class EnsembleDNN(nn.Module):
-    def __init__(
-            self,
-            config=None,
-            model_class=BaselineDNN,
-            model_list=None,
-            **kwargs
-    ):
+    def __init__(self, config=None, model_class=BaselineDNN, model_list=None, **kwargs):
         super(EnsembleDNN, self).__init__()
         if config is None:
             config = get_model_config(model_name="ensemble", **kwargs)
@@ -68,8 +66,12 @@ class EnsembleDNN(nn.Module):
             output, var_ = model(inputs)
             outputs.append(output)
             vars_.append(var_)
-        outputs = torch.stack(outputs, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
-        vars_ = torch.stack(vars_, dim=2)  # Shape: [batch_size, output_dim, ensemble_size]
+        outputs = torch.stack(
+            outputs, dim=2
+        )  # Shape: [batch_size, output_dim, ensemble_size]
+        vars_ = torch.stack(
+            vars_, dim=2
+        )  # Shape: [batch_size, output_dim, ensemble_size]
         return outputs, vars_
 
 
@@ -93,11 +95,7 @@ def log_wandb_ensemble(results_tensor_avg, config):
     n_targets = config.get("n_targets", -1)
     if n_targets > 1:
         for task in n_targets:
-            wandb_keys += [
-                f"val/rmse/{task}",
-                f"val/r2/{task}",
-                f"val/evs/{task}"
-            ]
+            wandb_keys += [f"val/rmse/{task}", f"val/r2/{task}", f"val/evs/{task}"]
 
     # iterate over the metrics and log them to wandb
     num_epochs, num_metrics = results_tensor_avg.shape
@@ -106,9 +104,50 @@ def log_wandb_ensemble(results_tensor_avg, config):
         wandb.log(
             # all data except epoch
             data=dict(zip(wandb_keys[1:], results_tensor_avg[epoch, 1:])),
-            step=int(results_tensor_avg[epoch, 0]),
+            step=epoch,  # int(results_tensor_avg[epoch, 0]),
         )
     # run.finish()
+
+
+def fill_to_max_epochs(array, max_epochs):
+    num_metrics = array.shape[1]
+    filled_array = np.full((max_epochs, num_metrics), np.nan)
+    filled_array[: array.shape[0], : array.shape[1]] = array
+    return filled_array
+
+
+def process_results_arrs(result_arrs, config, logger):
+    try:
+        # get the maximum number of epochs
+        max_epochs = max([results_arr.shape[0] for results_arr in result_arrs])
+        # fill the results to max epochs
+        result_arrs = [
+            fill_to_max_epochs(results_arr, max_epochs) for results_arr in result_arrs
+        ]
+        # now we stack result tensors on dim 2
+        result_arrs = np.stack(result_arrs, axis=2)
+        logger.debug(
+            f"{result_arrs.shape=}"
+        )  # this should equal to (num_epochs, metrics_collected, ensemble_size)
+
+        # Take average across model metrics
+        # results_tensor_avg = result_arrs.nanmean(2)
+        results_tensor_avg = np.nanmean(result_arrs, 2)
+        print(f"{results_tensor_avg.shape=}")
+        # HERE we should report to wandb
+        log_wandb_ensemble(results_tensor_avg, config)
+
+    except Exception as e:
+        logger.exception(f"Error in stacking results: {e}")
+
+    finally:
+        # Here we want to save a pkl file with the results tensor
+        save_pickle(
+            result_arrs,
+            DATASET_DIR / config.get("data_specific_path") / "ensemble_results.pkl",
+        )
+
+    return result_arrs
 
 
 # def gpu_manager(gpu_id, available_gpus, lock):
@@ -118,8 +157,6 @@ def log_wandb_ensemble(results_tensor_avg, config):
 #             gpu_id += 1
 #             gpu = available_gpus[gpu_id % len(available_gpus)]
 #         return gpu
-
-
 # def gpu_manager(available_gpus, gpu_status, lock):
 #     with lock:
 #         for idx, gpu in enumerate(available_gpus):
@@ -133,109 +170,159 @@ def log_wandb_ensemble(results_tensor_avg, config):
 #     with lock:
 #         gpu_status[gpu_idx] = False
 
+# def train_worker(rank, config, seed, results, device, logger, lock):
+# # def train_worker(rank, config, seed, results, available_gpus, lock, logger):
+#     # seed += rank
+#     # device = gpu_manager(rank, available_gpus, lock)
+#     with lock:
+#         torch.cuda.set_device(device)
+#
+#         best_model, config_, results_arr = train_model_e2e(
+#             config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
+#         )
+#         # print(rank)
+#         results[rank] = (best_model.cpu(), config_, results_arr)
+#         # clear memory cache on GPU
+#         torch.cuda.empty_cache()
+#
+#
+# def train_on_device(args):
+#     # rank, config, results, available_gpus, lock, logger = args
+#     # seed = config.get("seed", 42)
+#     # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
+#     # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
+#     rank, config, results, device, logger, seed, lock, max_retries = args
+#     # seed = config.get("seed", 42)
+#     # device = available_gpus[rank % num_gpus]
+#     # print(f"{device=}")
+#     retries = 0
+#     while retries < max_retries:
+#         try:
+#             train_worker(rank, config, seed, results, device, logger, lock)
+#             break
+#         except Exception as e:
+#             logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
+#             time.sleep(5)
+#             retries += 1
+#     # try:
+#     #     train_worker(rank, config, seed + rank, results, device, logger, lock)
+#     # except Exception as e:
+#     #     logger.exception(f"Process {rank} failed with error: {e}. Retrying in 5 seconds...")
+#     #     time.sleep(5)
+#     #     train_on_device(args)
+#
+#
+# def train_on_device_(args):
+#     # rank, config, results, available_gpus, lock, logger = args
+#     # seed = config.get("seed", 42)
+#     # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
+#     # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
+#     seq, config, results, device, logger, seed, max_retries = args
+#
+#     torch.cuda.set_device(device)
+#     for i, rank in enumerate(range(seq)):
+#         retries = 0
+#         while retries < max_retries:
+#             try:
+#                 best_model, config_, results_arr = train_model_e2e(
+#                     config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
+#                 )
+#                 # print(rank)
+#                 results[rank] = (best_model.cpu(), config_, results_arr)
+#     # clear memory cache on GPU
+#     torch.cuda.empty_cache()
+#
+#     retries = 0
+#     while retries < max_retries:
+#         try:
+#             train_worker(rank, config, seed, results, device, logger, lock)
+#             break
+#         except Exception as e:
+#             logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
+#             time.sleep(5)
+#             retries += 1
 
-def train_worker(rank, config, seed, results, device, logger, lock):
-# def train_worker(rank, config, seed, results, available_gpus, lock, logger):
-    # seed += rank
-    # device = gpu_manager(rank, available_gpus, lock)
-    with lock:
-        torch.cuda.set_device(device)
 
-        best_model, config_, results_arr = train_model_e2e(
-            config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
-        )
-        # print(rank)
-        results[rank] = (best_model.cpu(), config_, results_arr)
-        # clear memory cache on GPU
-        torch.cuda.empty_cache()
-
-
-def train_on_device(args):
-    # rank, config, results, available_gpus, lock, logger = args
-    # seed = config.get("seed", 42)
-    # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
-    # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
-    rank, config, results, device, logger, seed, lock, max_retries = args
-    # seed = config.get("seed", 42)
-    # device = available_gpus[rank % num_gpus]
-    # print(f"{device=}")
-    retries = 0
-    while retries < max_retries:
-        try:
-            train_worker(rank, config, seed, results, device, logger, lock)
-            break
-        except Exception as e:
-            logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
-            time.sleep(5)
-            retries += 1
-    # try:
-    #     train_worker(rank, config, seed + rank, results, device, logger, lock)
-    # except Exception as e:
-    #     logger.exception(f"Process {rank} failed with error: {e}. Retrying in 5 seconds...")
-    #     time.sleep(5)
-    #     train_on_device(args)
-
-
-def parallel_train_ensemble(ensemble_size, config, logger):
-    best_models = []
-    result_arrs = []
-    if torch.cuda.is_available():
-        logger.info("Parallel training on several GPUs")
-        # Get the available GPUs
-        available_devices = list(range(torch.cuda.device_count()))
-        num_processes = len(available_devices)
-        logger.info(f"Number of Available GPUs: {num_processes} GPUs")
-
-    else:
-        logger.info("Parallel training on several CPUs")
-        num_processes = mp.cpu_count()
-        available_devices = list(range(num_processes))
-        logger.info(f"Number of Available CPUs: {num_processes} CPUs")
-
-    manager = Manager()
-    results = manager.dict()
-    args_queue = Queue()
-    lock = manager.Lock()
-    for i in range(num_processes):
-        args_queue.put(i)
-
-    args = []
-    seed = config.get("seed", 42)
-    max_retries = 3
-    for rank in range(ensemble_size):
-        print(seed)
-        device = args_queue.get()
-        # device = available_devices[rank % num_processes]
-        args.append((rank, config, results, device, logger, seed, lock, max_retries))
-        # args_queue.put(device)
-        seed += 1
-        config["seed"] = seed
-
-    with Pool(processes=num_processes) as pool:
-        pool.map(train_on_device, args)
-
-    for rank in range(ensemble_size):
-        # best_model, dataloaders, config_, results_arr = results[rank]
-        best_model, config_, results_arr = results[rank]
-        best_models.append(best_model)
-        result_arrs.append(results_arr)
-    if len(best_models) < ensemble_size:
-        # get how many are left
-        num_models_left = ensemble_size - len(best_models)
-        b_models_left, res_arrs_left, config_ = parallel_train_ensemble(num_models_left, config, logger)
-        best_models.extend(b_models_left)
-        result_arrs.extend(res_arrs_left)
-
-    return best_models, result_arrs, config_
+# def parallel_train_ensemble(ensemble_size, config, logger):
+#     best_models = []
+#     result_arrs = []
+#     if torch.cuda.is_available():
+#         logger.info("Parallel training on several GPUs")
+#         # Get the available GPUs
+#         available_devices = list(range(torch.cuda.device_count()))
+#         num_processes = len(available_devices)
+#         logger.info(f"Number of Available GPUs: {num_processes} GPUs")
+#
+#     else:
+#         logger.info("Parallel training on several CPUs")
+#         num_processes = mp.cpu_count()
+#         # available_devices = list(range(num_processes))
+#         available_devices = num_processes * ['cpu']
+#         logger.info(f"Number of Available CPUs: {num_processes} CPUs")
+#
+#     # how many models to run on each gpu
+#     seq_models = [ensemble_size // num_processes] * num_processes
+#
+#     for i in range(ensemble_size % num_processes):
+#         seq_models[i] += 1
+#
+#     manager = Manager()
+#     results = manager.dict()
+#     # args_queue = Queue()
+#     # lock = manager.Lock()
+#     # for i in range(num_processes):
+#     #     args_queue.put(i)
+#     args = []
+#     seed = config.get("seed", 42)
+#
+#     seedings = list(range(seed, seed + ensemble_size))
+#     rankings = list(range(ensemble_size))
+#     rank_seed = list(zip(rankings, seedings))
+#     model_per_device = split_list_by_sizes(rank_seed, seq_models)
+#
+#     max_retries = 3
+#     for i, s in enumerate(seq_models):
+#         device = available_devices[i]
+#         args.append((s, config, results, device, logger, seed, max_retries))
+#         seed += s
+#         config["seed"] = seed
+#
+#     # # chunking
+#     # chunk_size = ensemble_size // num_processes * [num_processes]
+#     # chunk_size.append(ensemble_size % num_processes)
+#     # for rank in range(ensemble_size):
+#     #     print(seed)
+#     #     device = args_queue.get()
+#     #     # device = available_devices[rank % num_processes]
+#     #     args.append((rank, config, results, device, logger, seed, lock, max_retries))
+#     #     # args_queue.put(device)
+#     #     seed += 1
+#     #     config["seed"] = seed
+#
+#     with Pool(processes=num_processes) as pool:
+#         pool.map(train_on_device, args)
+#         pool.map(train_on_device_, args)
+#
+#     for rank in range(ensemble_size):
+#         # best_model, dataloaders, config_, results_arr = results[rank]
+#         best_model, config_, results_arr = results[rank]
+#         best_models.append(best_model)
+#         result_arrs.append(results_arr)
+#     if len(best_models) < ensemble_size:
+#         # get how many are left
+#         num_models_left = ensemble_size - len(best_models)
+#         b_models_left, res_arrs_left, config_ = parallel_train_ensemble(num_models_left, config, logger)
+#         best_models.extend(b_models_left)
+#         result_arrs.extend(res_arrs_left)
+#
+#     return best_models, result_arrs, config_
 
 
 def run_ensemble(config=None):
     ensemble_size = config.get("ensemble_size", 100)
-    parallelize = config.get("parallelize", False)
+    # parallelize = config.get("parallelize", False)
     logger = LOGGER
-    # logger_print = logger.info if logger else print
     best_models = []
-    # seed = config.get("seed", 42)
     result_arrs = []
 
     # Here we should init the wandb to track the resources
@@ -245,36 +332,47 @@ def run_ensemble(config=None):
         dir=WANDB_DIR,
         mode=WANDB_MODE,
         project=config.get("wandb_project_name", "ensemble_test"),
+        reinit=True,
     )
 
     assign_wandb_tags(run, config)
 
-    if not parallelize:
-        for _ in range(ensemble_size):
-            # best_model, dataloaders, config_, logger, results_arr = train_model_e2e(
-            best_model, config_, results_arr = train_model_e2e(
-                config, model=BaselineDNN, model_type="ensemble", logger=logger, tracker="tensor"
-            )
-            best_models.append(best_model)
-            config["seed"] += 1
+    # if not parallelize:
+    for _ in range(ensemble_size):
+        # best_model, dataloaders, config_, logger, results_arr = train_model_e2e(
+        # For debugging of different sizes results
+        config["epochs"] += 1
+        best_model, config_, results_arr = train_model_e2e(
+            config,
+            model=BaselineDNN,
+            model_type="ensemble",
+            logger=logger,
+            tracker="tensor",
+            write_model=False,
+        )
+        best_models.append(best_model)
+        config["seed"] += 1
 
-            result_arrs.append(results_arr)
-    else:
-        best_models, result_arrs, config_ = parallel_train_ensemble(ensemble_size, config, logger)
+        result_arrs.append(results_arr)
 
-    # now we stack result tensors on dim 2
-    result_arrs = np.stack(result_arrs, axis=2)
-    logger.debug(f"{result_arrs.shape=}")  # this should equal to (num_epochs, metrics_collected, ensemble_size)
-    # Here we want to save a pkl file with the results tensor
-    save_pickle(result_arrs, DATASET_DIR / config_.get("data_specific_path") / "ensemble_results.pkl")
-    # Take average across model metrics
-    results_tensor_avg = result_arrs.mean(2)
-    print(f"{results_tensor_avg.shape=}")
-    # HERE we should report to wandb
-    log_wandb_ensemble(results_tensor_avg, config_)
+    # else:
+    #     best_models, result_arrs, config_ = parallel_train_ensemble(ensemble_size, config, logger)
+    process_results_arrs(result_arrs, config_, logger)
 
     logger.debug(f"{len(best_models)=}")
     ensemble_model = EnsembleDNN(config_, model_list=best_models).to(DEVICE)
+
+    # we should save the best_models here
+    config_["model_name"] = post_training_save_model(
+        ensemble_model,
+        config_,
+        model_type="ensemble",
+        tracker="wandb",
+        run=run,
+        logger=logger,
+        write_model=True,
+    )
+
     dataloaders = get_dataloadar(config, device=DEVICE, logger=LOGGER)
 
     preds, labels, alea_vars = predict(
@@ -283,30 +381,91 @@ def run_ensemble(config=None):
 
     # Then comes the predict metrics part
     metrics, plots, uct_logger = evaluate_predictions(
-        config_,
-        preds,
-        labels,
-        alea_vars,
-        "ensemble",
-        logger
+        config_, preds, labels, alea_vars, "ensemble", logger, wandb_push=False
     )
 
     # RECALIBRATION # Get Calibration / Validation Set
     preds_val, labels_val, alea_vars_val = predict(
         ensemble_model, dataloaders["val"], device=DEVICE
     )
-    recal_model = recalibrate_model(preds_val, labels_val, preds, labels, config_, uct_logger=uct_logger)
+    iso_recal_model, std_recal = recalibrate_model(
+        preds_val, labels_val, preds, labels, config_, uct_logger=uct_logger
+    )
 
+    uct_logger.wandb_log()
     wandb.finish()
 
-    return ensemble_model, recal_model, metrics, plots
+    return ensemble_model, iso_recal_model, std_recal, metrics, plots
 
-    # if rank != ens_size - 1:
-    #     print("I AM HERE")
-    #     wandb.finish()
-    #     torch.cuda.empty_cache()
-    #     time.sleep(10)
-    #     print("I AM AWAKE")
+
+def run_ensemble_wrapper(**kwargs):
+    global LOGGER
+    LOGGER = create_logger(name="ensemble", file_level="debug", stream_level="info")
+    config = get_model_config(model_name="ensemble", **kwargs)
+    return run_ensemble(config)
+
+    # best_model, recal_model, metrics, plots = run_ensemble(config)
+    # return best_model, recal_model, metrics, plots
+
+
+def run_ensemble_hyperparm(**kwargs):
+    global LOGGER
+    LOGGER = create_logger(
+        name="ensemble-sweep", file_level="debug", stream_level="info"
+    )
+
+    sweep_count = kwargs.pop("sweep_count")
+    wandb_project_name = kwargs.pop("wandb_project_name")
+
+    config = get_sweep_config("ensemble", **kwargs)
+    config["project"] = wandb_project_name
+    sweep_id = wandb.sweep(
+        config,
+        project=wandb_project_name,
+    )
+    print(f"Running sweep with SWEEP_ID: {sweep_id}")
+    wandb.agent(sweep_id, function=run_ensemble, count=sweep_count)
+
+
+#
+# if __name__ == "__main__":
+#     ensemble_model, iso_recal_model, std_recal, metrics, plots = run_ensemble_wrapper(
+#         data_name="papyrus",
+#         activity_type="xc50",
+#         n_targets=-1,
+#         descriptor_protein="ankh-large",
+#         descriptor_chemical="ecfp2048",
+#         median_scaling=False,
+#         split_type="random",
+#         ext="pkl",
+#         task_type="regression",
+#         wandb_project_name="ensemble-test",
+#         ensemble_size=5,
+#         epochs=5,
+#         seed=440,
+#     )
+#     #
+#     print("Done!")
+# TEST
+# run_ensemble(
+#     data_name="papyrus",
+#     activity_type="xc50",
+#     n_targets=-1,
+#     descriptor_protein="ankh-base",
+#     descriptor_chemical="ecfp2048",
+#     median_scaling=False,
+#     split_type="random",
+#     ext="pkl",
+#     task_type="regression",
+#     wandb_project_name=f"{TODAY}-ensemble-test",
+#     ensemble_size=5,
+# )
+# if rank != ens_size - 1:
+#     print("I AM HERE")
+#     wandb.finish()
+#     torch.cuda.empty_cache()
+#     time.sleep(10)
+#     print("I AM AWAKE")
 # if torch.cuda.is_available():
 #     logger.info("Parallel training on several GPUs")
 #     # Get the available GPUs
@@ -362,20 +521,20 @@ def run_ensemble(config=None):
 #     with Pool(processes=num_gpus) as pool:
 #         pool.map(train_on_device, args)
 #        #
-        # # Spawn processes for parallel training
-        # processes = []
-        # for rank in range(ensemble_size):
-        #     device = available_gpus[rank % ]
-        #     print(f"Rank: {rank}, Device: {device}")
-        #     p = mp.Process(target=train_worker, args=(rank, config, seed, results, device), )
-        #     p.start()
-        #     processes.append(p)
-        #
-        # # Ensure all processes have finished
-        # for p in processes:
-        #     p.join()
+# # Spawn processes for parallel training
+# processes = []
+# for rank in range(ensemble_size):
+#     device = available_gpus[rank % ]
+#     print(f"Rank: {rank}, Device: {device}")
+#     p = mp.Process(target=train_worker, args=(rank, config, seed, results, device), )
+#     p.start()
+#     processes.append(p)
+#
+# # Ensure all processes have finished
+# for p in processes:
+#     p.join()
 
-        # Collect results from shared memory
+# Collect results from shared memory
 # # Spawn processes for parallel training
 # processes = []
 # for rank in range(ensemble_size):
@@ -427,35 +586,6 @@ def run_ensemble(config=None):
 #     return best_model, recal_model, metrics, plots
 
 
-def run_ensemble_wrapper(**kwargs):
-    global LOGGER
-    LOGGER = create_logger(name="ensemble", file_level="debug", stream_level="info")
-    config = get_model_config(model_name="ensemble", **kwargs)
-    return run_ensemble(config)
-
-    # best_model, recal_model, metrics, plots = run_ensemble(config)
-    # return best_model, recal_model, metrics, plots
-
-
-def run_ensemble_hyperparm(**kwargs):
-    global LOGGER
-    LOGGER = create_logger(
-        name="ensemble-sweep", file_level="debug", stream_level="info"
-    )
-
-    sweep_count = kwargs.pop("sweep_count")
-    wandb_project_name = kwargs.pop("wandb_project_name")
-
-    config = get_sweep_config("ensemble", **kwargs)
-    config["project"] = wandb_project_name
-    sweep_id = wandb.sweep(
-        config,
-        project=wandb_project_name,
-    )
-    print(f"Running sweep with SWEEP_ID: {sweep_id}")
-    wandb.agent(sweep_id, function=run_ensemble, count=sweep_count)
-
-#
 # def main():
 #     parser = argparse.ArgumentParser(description="Run Ensemble Model")
 #     parser.add_argument(
@@ -627,40 +757,7 @@ def run_ensemble_hyperparm(**kwargs):
 #         )
 #
 #
-# if __name__ == "__main__":
-#     main()
-#     #
-    # best_model, recal_model, metrics, plots = run_ensemble_wrapper(
-    #     data_name="papyrus",
-    #     activity_type="xc50",
-    #     n_targets=-1,
-    #     descriptor_protein="ankh-base",
-    #     descriptor_chemical="ecfp2048",
-    #     median_scaling=False,
-    #     split_type="random",
-    #     ext="pkl",
-    #     task_type="regression",
-    #     wandb_project_name="ensemble-test",
-    #     ensemble_size=20,
-    #     parallelize=True,
-    #     seed=440
-    # )
-    # #
-    # print("Done!")
-    # TEST
-    # run_ensemble(
-    #     data_name="papyrus",
-    #     activity_type="xc50",
-    #     n_targets=-1,
-    #     descriptor_protein="ankh-base",
-    #     descriptor_chemical="ecfp2048",
-    #     median_scaling=False,
-    #     split_type="random",
-    #     ext="pkl",
-    #     task_type="regression",
-    #     wandb_project_name=f"{TODAY}-ensemble-test",
-    #     ensemble_size=5,
-    # )
+
 
 # def build_ensemble(config=wandb.config):
 #     ensemble_models = []

@@ -9,7 +9,7 @@
 #desc_chem=${6:-"ecfp2048"}
 #split_type=${7:-"random"}
 #n_targets=${8:--1}
-ens_size=30
+ens_size=100
 data="papyrus"
 activity="xc50"
 desc_prot="ankh-large"
@@ -18,15 +18,16 @@ split_type="random"
 n_targets=-1
 ext="pkl"
 task_type="regression"
-wandb_project="ensemble-test"
-parallelize=true
+
 #export CUDA_VISIBLE_DEVICES=$gpu_device
 
 # Capture start time
 start_time=$SECONDS
 today=$(date +%Y-%m-%d)
+wandb_project="${today}-all-models"
 # Report start time
 echo "Script started at: $(date)"
+python model_parser.py --model ensemble --seed 44 --parallelize $parallelize --ensemble_size $ens_size --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "ensemble_test" # "$wandb_project" #2>&1 | tee ../logs/"${logname}"
 
 # Predefine the args here
 #ens_size=100
@@ -42,7 +43,6 @@ echo "Script started at: $(date)"
 
 #python ensemble.py --parallelize $parallelize --ensemble_size $ens_size --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "$wandb_project" #2>&1 | tee ../logs/"${logname}"
 
-python model_parser.py --model ensemble --seed 44 --parallelize $parallelize --ensemble_size $ens_size --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name "ensemble_test" # "$wandb_project" #2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"

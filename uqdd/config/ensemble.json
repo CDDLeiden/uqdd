@@ -8,7 +8,7 @@
     "regressor_layers": [128,64],
     "dropout": 0.1,
     "batch_size": 256,
-    "epochs": 5,
+    "epochs": 3000,
     "early_stop": 100,
     "loss_reduction": "mean",
     "optimizer": "adagrad",
