@@ -5,7 +5,7 @@ import torch
 # Define the global device setting
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(DEVICE))
-print(torch.version.cuda) if DEVICE == "cuda" else None
+# print(torch.version.cuda) if DEVICE == "cuda" else None
 
 # Define the base directory as the parent of this file
 BASE_DIR = Path(__file__).parent
@@ -62,7 +62,7 @@ __copyright__ = (
 __license__ = (
     "All rights reserved, Johnson & Johnson & Johannes-Kepler Universität Linz"
 )
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
