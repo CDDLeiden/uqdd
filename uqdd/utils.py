@@ -33,8 +33,10 @@ def create_logger(name="logger", file_level="debug", stream_level="info"):
     }
     file_level = levels.get(file_level.lower(), logging.DEBUG)
     stream_level = levels.get(stream_level.lower(), logging.INFO)
-
+    # Set root logger to the lowest level between file_level and stream_level
+    logging.getLogger().setLevel(stream_level)
     log = logging.getLogger(name)
+    # log.setLevel(min(file_level, stream_level))
     # # Set logger's level to the lower between file_level and stream_level
     # log.setLevel(min(file_level, stream_level))
 
@@ -443,4 +445,20 @@ def load_df(input_path, **kwargs):
         return pd.read_pickle(input_path, **kwargs)
     else:
         raise ValueError(f"Unsupported file extension for loading: {ext} provided")
+
+
+def split_list_by_sizes(input_list, sizes):
+    # Verify that the input list and sizes list are valid
+    if len(input_list) != sum(sizes):
+        raise ValueError("The sum of sizes must be equal to the length of the input list.")
+
+    result = []
+    start_index = 0
+
+    for size in sizes:
+        end_index = start_index + size
+        result.append(input_list[start_index:end_index])
+        start_index = end_index
+
+    return result
 
