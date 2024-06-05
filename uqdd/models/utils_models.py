@@ -46,7 +46,15 @@ def compute_pnorm(model: nn.Module) -> float:
 
 def compute_gnorm(model: nn.Module) -> float:
     """Computes the norm of the gradients of a model."""
-    return math.sqrt(sum([p.grad.norm().item() ** 2 for p in model.parameters() if p.grad is not None]))
+    return math.sqrt(
+        sum(
+            [
+                p.grad.norm().item() ** 2
+                for p in model.parameters()
+                if p.grad is not None
+            ]
+        )
+    )
 
 
 def get_desc_len_from_dataset(dataset):  # , desc_prot=True):
@@ -82,7 +90,7 @@ def get_desc_len(*descriptors: str, logger=None):
     for d in descriptors:
         l = desc_config.get(d, 0)
         if logger:
-            logger.info(f"{d} descriptor length: {l}")
+            logger.debug(f"{d} descriptor length: {l}")
         lengths.append(l)
     return tuple(lengths)
 
@@ -200,7 +208,7 @@ def build_datasets(
             task_type=task_type,
             ext=ext,
             logger=logger,
-            device=device
+            device=device,
         )
     elif data_name == "tdc":
         from uqdd.data.data_tdc import get_datasets
@@ -231,7 +239,7 @@ def build_loader(datasets, batch_size, shuffle=False):
                 # num_workers=4,
                 # pin_memory=True,
             )
-        logging.info("Data loaders created")
+        logging.debug("Data loaders created")
     except Exception as e:
         raise RuntimeError(f"Error loading data {e}")
 
@@ -246,7 +254,7 @@ def _build_loader(datasets, batch_size, ecfp_size=1024):
         train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
-        logging.info("Data loaders created")
+        logging.debug("Data loaders created")
     except Exception as e:
         raise RuntimeError(f"Error loading data {e}")
 
@@ -261,9 +269,13 @@ def build_optimizer(model, optimizer, lr, weight_decay):
     elif optimizer.lower() == "adagrad":
         optimizer = optim.Adagrad(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer.lower() == "sgd":
-        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9)
+        optimizer = optim.SGD(
+            model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9
+        )
     elif optimizer.lower() == "rmsprop":
-        optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9)
+        optimizer = optim.RMSprop(
+            model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9
+        )
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
 
@@ -478,28 +490,23 @@ def save_model(
     onnx=True,
     tracker="wandb",
 ):
-    # n_targets=-1,
-    # data_name="papyrus",
-    # activity_type="xc50",
-    # split_type="random",
-    # desc_prot=None,
-    # desc_chem=None,
     try:
         if model is None:
             raise ValueError(f"No model to save - {model=}")
 
         model_dir = MODELS_DIR / "saved_models" / data_specific_path
-        # model_dir = (
-        #     MODELS_DIR
-        #     / "saved_models"
-        #     / data_name
-        #     / activity_type
-        #     / get_topx(n_targets)
-        # )
+
         model_dir.mkdir(parents=True, exist_ok=True)
         # model_name = f"{TODAY}-{model_type}_{split_type}_{desc_prot}_{desc_chem}-{wandb.run.name}"
 
-        pt_path = model_dir / f"-{model_name}.pt"
+        pt_path = model_dir / f"{model_name}.pt"
+        # check if path exists
+        i = 1
+        while pt_path.exists():
+            model_name += f"_{i}"
+            pt_path = model_dir / f"{model_name}.pt"
+            i += 1
+
         torch.save(model.state_dict(), pt_path)
         wandb_model_path = pt_path
 
