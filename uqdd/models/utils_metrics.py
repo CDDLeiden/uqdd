@@ -8,13 +8,15 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import torch
 import uncertainty_toolbox as uct
+from sklearn.isotonic import IsotonicRegression
 from uncertainty_toolbox import viz as uct_viz
-from uncertainty_toolbox.metrics import get_all_metrics
+from uncertainty_toolbox.metrics import get_all_metrics, METRIC_NAMES
 from tdc import Evaluator
 import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 
 from uqdd import FIGS_DIR, TODAY, DATA_DIR
+
 # from uqdd.data.utils_data import save_pickle, save_df
 from uqdd.utils import create_logger, save_df, save_pickle
 from uqdd.utils_chem import smi_to_pil_image
@@ -125,8 +127,8 @@ def calc_regr_metrics(targets, outputs, metrics_per_task=False):
     if metrics_per_task:
         # Calculate metrics per task
         rmse = np.full(targets.shape[1], np.nan)  # Initialize with NaNs
-        r2 = np.full(targets.shape[1], np.nan)    # Initialize with NaNs
-        evs = np.full(targets.shape[1], np.nan)   # Initialize with NaNs
+        r2 = np.full(targets.shape[1], np.nan)  # Initialize with NaNs
+        evs = np.full(targets.shape[1], np.nan)  # Initialize with NaNs
 
         for i in range(targets.shape[1]):
             task_t = targets[:, i]
@@ -151,7 +153,10 @@ def calc_regr_metrics(targets, outputs, metrics_per_task=False):
     else:
         # Calculate metrics for all tasks
         nan_mask = ~torch.isnan(targets)
-        targets, outputs = targets[nan_mask].numpy().flatten(), outputs[nan_mask].numpy().flatten()
+        targets, outputs = (
+            targets[nan_mask].numpy().flatten(),
+            outputs[nan_mask].numpy().flatten(),
+        )
         rmse = mean_squared_error(targets, outputs, squared=False)
         r2 = r2_score(targets, outputs)
         evs = explained_variance_score(targets, outputs)
@@ -243,7 +248,7 @@ def process_preds(
     targets: torch.Tensor,
     alea_vars: torch.Tensor = None,
     epi_vars: torch.Tensor = None,
-    task_idx: Union[int, None] = None
+    task_idx: Union[int, None] = None,
 ):
     """
     Process predictions to extract mean, standard deviation, and align with targets,
@@ -274,18 +279,18 @@ def process_preds(
         # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
     else:
         if epi_vars is None:
-            vars_ = alea_vars.mean(dim=-1) #.squeeze()
+            vars_ = alea_vars.mean(dim=-1)  # .squeeze()
         else:
             vars_ = alea_vars
 
     if epi_vars is None:
-        epi_vars = predictions.var(dim=-1) #.squeeze()  # (dim=2)
-        predictions = predictions.mean(dim=-1) #.squeeze()
+        epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
+        predictions = predictions.mean(dim=-1)  # .squeeze()
     # Get the predictions mean and std
-    y_pred = predictions # predictions.mean(dim=-1).squeeze()  # (dim=2)
+    y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
     y_std = epi_vars.sqrt()
     # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
-    y_true = targets #.squeeze()
+    y_true = targets  # .squeeze()
     # if vars_ is not None:
     #     vars_ = vars_.mean(dim=-1).squeeze()
     # else:  # Empty Tensor
@@ -296,7 +301,7 @@ def process_preds(
             y_pred[:, task_idx],
             y_std[:, task_idx],
             y_true[:, task_idx],
-            vars_[:, task_idx]
+            vars_[:, task_idx],
         )
 
     nan_mask = ~torch.isnan(y_true)
@@ -307,7 +312,9 @@ def process_preds(
         vars_[nan_mask],
     )
     # Calculate the error
-    y_err = (y_pred - y_true).abs()  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
+    y_err = (
+        y_pred - y_true
+    ).abs()  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
     # Convert to numpy arrays
     y_pred, y_std, y_true, y_err, vars_ = map(
         lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)
@@ -362,7 +369,13 @@ def create_df_preds(
         The DataFrame containing the prediction data.
     """
     df = pd.DataFrame(
-        {"y_true": y_true, "y_pred": y_pred, "y_std": y_std, "y_err": y_err, "y_alea": y_alea}
+        {
+            "y_true": y_true,
+            "y_pred": y_pred,
+            "y_std": y_std,
+            "y_err": y_err,
+            "y_alea": y_alea,
+        }
     )
 
     if export and data_specific_path and model_name:
@@ -509,6 +522,8 @@ def make_uct_plots(
     plot_save_str: str = "uct_plot",
     savefig: bool = True,
     save_dir: Path = "path/to/figures",
+    exp_props: Union[np.ndarray, None] = None,
+    obs_props: Union[np.ndarray, None] = None,
 ) -> Dict[str, plt.Figure]:
     if not all(isinstance(arr, np.ndarray) for arr in [y_pred, y_std, y_true]):
         raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
@@ -537,7 +552,10 @@ def make_uct_plots(
         (
             "calibration",
             uct_viz.plot_calibration,
-            {},
+            {
+                "exp_props": exp_props,
+                "obs_props": obs_props,
+            },
         ),
         (
             "adversarial_group_calibration",
@@ -562,7 +580,10 @@ def make_uct_plots(
             ax=ax,
             **kwargs,
         )
-        ax.set_title(f"{plot_name.replace('_', ' ').title()} - {task_name}")
+        pname = plot_name.replace("_", " ").capitalize()
+        t_name = task_name.replace("_", " ")
+        ax.set_title(f"{pname} - {t_name}")
+        # ax.set_title(f"{plot_name} - {task_name}".replace("_", " ").title())
         plt.tight_layout()
         plots[plot_name] = fig
 
@@ -577,13 +598,48 @@ def make_uct_plots(
     return plots
 
 
+def get_calib_with_recal(
+    recal_model: IsotonicRegression,
+    y_pred: np.ndarray,
+    y_std: np.ndarray,
+    y_true: np.ndarray,
+    num_bins: int,
+    verbose: bool = True,
+):
+    if verbose:
+        print(" (2/n) Calculating average calibration metrics")
+
+    cali_metrics = {}
+    cali_metrics["rms_cal"] = uct.root_mean_squared_calibration_error(
+        y_pred, y_std, y_true, num_bins=num_bins, recal_model=recal_model
+    )
+    cali_metrics["ma_cal"] = uct.mean_absolute_calibration_error(
+        y_pred, y_std, y_true, num_bins=num_bins, recal_model=recal_model
+    )
+    cali_metrics["miscal_area"] = uct.miscalibration_area(
+        y_pred, y_std, y_true, num_bins=num_bins, recal_model=recal_model
+    )
+    if verbose:
+        print(
+            " Average Calibration Metrics including recalibration model".center(60, "=")
+        )
+        for cali_metric, cali_val in cali_metrics.items():
+            print("  {:<37} {:.3f}".format(METRIC_NAMES[cali_metric], cali_val))
+    return cali_metrics
+
+
 def calculate_uct_metrics(
     y_pred,
     y_std,
     y_true,
+    n_subset=None,
     Nbins=100,
     task_name=None,
     figpath=FIGS_DIR,
+    exp_props: Union[np.ndarray, None] = None,
+    obs_props: Union[np.ndarray, None] = None,
+    recal_model=None,
+    # verbose=True,
 ):
     """
     Calculate metrics for the predictions.
@@ -596,10 +652,20 @@ def calculate_uct_metrics(
         Standard deviation of predicted values.
     y_true : ndarray
         True values.
+    n_subset : int
+        Number of samples to plot.
+    Nbins : int
+        Number of bins for calibration.
     task_name : str
         Name of the task.
     figpath : Path or str
         Path to save the figures. Default is FIGS_DIR.
+    exp_props : ndarray or None
+        Expected proportions for calibration plot.
+    obs_props : ndarray or None
+        Observed proportions for calibration plot.
+    recal_model : IsotonicRegression or None
+        Isotonic regression model for recalibration.
 
     Returns
     -------
@@ -608,6 +674,7 @@ def calculate_uct_metrics(
     plots : dict
         Dictionary containing the generated plots.
     """
+
     metrics = get_all_metrics(
         y_pred=y_pred,
         y_std=y_std,
@@ -617,6 +684,28 @@ def calculate_uct_metrics(
         scaled=True,
         verbose=True,
     )
+    if recal_model is not None:
+        # updating this one to include recalibration
+        metrics["avg_calibration"] = get_calib_with_recal(
+            recal_model, y_pred, y_std, y_true, Nbins, verbose=True
+        )
+
+    # else:
+    #     # Accuracy
+    #     accuracy_metrics = uct.get_all_accuracy_metrics(y_pred, y_true, verbose)
+    #
+    #     # Adversarial Group Calibration
+    #     adv_group_cali_metrics = get_all_adversarial_group_calibration(
+    #         y_pred, y_std, y_true, num_bins, verbose
+    #     )
+    #
+    #     # Sharpness
+    #     sharpness_metrics = get_all_sharpness_metrics(y_std, verbose)
+    #
+    #     # Proper Scoring Rules
+    #     scoring_rule_metrics = get_all_scoring_rule_metrics(
+    #         y_pred, y_std, y_true, resolution, scaled, verbose
+    #     )
 
     metrics_filepath = Path(figpath) / f"{task_name}_metrics.pkl"
     save_pickle(metrics, metrics_filepath)
@@ -626,12 +715,14 @@ def calculate_uct_metrics(
         y_std,
         y_true,
         task_name=task_name,
-        n_subset=min(200, len(y_true)),
+        n_subset=n_subset,  # min(200, len(y_true)),
         ylims=None,
         num_stds_confidence_bound=2.0,
         plot_save_str=f"{task_name}_uct",
         savefig=True,
         save_dir=Path(figpath),
+        exp_props=exp_props,
+        obs_props=obs_props,
     )
     return metrics, plots
 
@@ -693,7 +784,6 @@ def make_uq_plots(
         fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.png")
         fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.svg")
 
-
     # Generate Z-score plot and calibration curve
     fig2, _ = plot_Z_scores(ordered_df.errors, ordered_df.uq)
     if figpath is not None:
@@ -722,23 +812,23 @@ def calculate_uqtools_metrics(
     # calculate rho_rank and rho_rank_sim # TODO spearmanr is already implemented in scipy
     # rho_rank, _ = spearman_rank_corr(np.abs(errors), uncertainties)
     rho_rank, _ = spearmanr(np.abs(errors), uncertainties)
-    logger.info(f"rho_rank = {rho_rank:.2f}")
+    logger.debug(f"rho_rank = {rho_rank:.2f}")
     exp_rhos_temp = []
     for i in range(1000):
         exp_rho, _ = expected_rho(uncertainties)
         exp_rhos_temp.append(exp_rho)
     rho_rank_sim = np.mean(exp_rhos_temp)
     rho_rank_sim_std = np.std(exp_rhos_temp)
-    logger.info(f"rho_rank_sim = {rho_rank_sim:.2f} +/- {rho_rank_sim_std:.2f}")
+    logger.debug(f"rho_rank_sim = {rho_rank_sim:.2f} +/- {rho_rank_sim_std:.2f}")
 
     # Calculate the miscalibration area
     gaus_pred, errors_observed = calibration_curve(ordered_df.abs_z)
     mis_cal = calibration_area(errors_observed, gaus_pred)
-    logger.info(f"miscalibration area = {mis_cal:.2f}")
+    logger.debug(f"miscalibration area = {mis_cal:.2f}")
 
     # Calculate NLL and simulated NLL
     _NLL = NLL(uncertainties, errors)
-    logger.info(f"NLL = {_NLL:.2f}")
+    logger.debug(f"NLL = {_NLL:.2f}")
     exp_NLL = []
     rng = np.random.default_rng()
     for i in range(1000):
@@ -752,7 +842,7 @@ def calculate_uqtools_metrics(
         exp_NLL.append(NLL_sim)
     NLL_sim = np.mean(exp_NLL)
     NLL_sim_std = np.std(exp_NLL)
-    logger.info(f"NLL_sim = {NLL_sim:.2f} +/- {NLL_sim_std:.2f}")
+    logger.debug(f"NLL_sim = {NLL_sim:.2f} +/- {NLL_sim_std:.2f}")
 
     plots = make_uq_plots(
         ordered_df,
@@ -770,10 +860,10 @@ def calculate_uqtools_metrics(
     Z = errors / uncertainties
     Z_var = np.var(Z)
     interval_var = bootstrap((Z,), np.var)
-    logger.info(f"var(Z) = {Z_var:.2f} CI = {interval_var.confidence_interval}")
+    logger.debug(f"var(Z) = {Z_var:.2f} CI = {interval_var.confidence_interval}")
     Z_mean = np.mean(Z)
     interval_mean = bootstrap((Z,), np.mean)
-    logger.info(f"mean(Z) = {Z_mean:.2f} CI = {interval_mean.confidence_interval}")
+    logger.debug(f"mean(Z) = {Z_mean:.2f} CI = {interval_mean.confidence_interval}")
 
     metrics = {
         "rho_rank": rho_rank,
@@ -1038,15 +1128,15 @@ def get_slope_metric(
 
     # Obtain the coefficient of determination by calling the model with the score() function, then print the coefficient:
     r_sq = model.score(x, y)
-    logger.info("R squared:", r_sq)
+    logger.debug(f"R squared:{r_sq}")
 
     # Print the Intercept:
     intercept = model.intercept_
-    logger.info("intercept:", intercept)
+    logger.debug(f"intercept:{intercept}")
 
     # Print the Slope:
     slope = model.coef_[0]
-    logger.info("slope:", slope)
+    logger.debug(f"slope:{slope}")
 
     # Predict a Response and print it:
     y_pred = model.predict(x)
@@ -1135,9 +1225,9 @@ class MetricsTable:
         self.add_plots_to_table = add_plots_to_table
         cols = []
         if self.model_type:
-            cols += ["Model type"]
-        if self.mt:
-            cols += ["Task"]
+            cols += ["Model type", "Task"]
+        # if self.mt:
+        # cols += []
         cols += ["Activity", "Split", "desc_prot", "desc_chem"]
         if self.task_type == "regression":
             cols.extend(
@@ -1206,14 +1296,10 @@ class MetricsTable:
                 ]
             )
         if self.aleatoric:
-            cols.extend(
-                [
-                    "aleatoric_uct_mean",
-                    "epistemic_uct_mean",
-                    "total_uct_mean"
-                ]
-            )
+            cols.extend(["aleatoric_uct_mean", "epistemic_uct_mean", "total_uct_mean"])
         self.table = wandb.Table(columns=cols)
+        # TODO save this to a one table specific to the data_specific_path
+        self.df_path = FIGS_DIR / self.data_specific_path / f"{self.model_name}.csv"
 
     def __call__(
         self,
@@ -1222,7 +1308,12 @@ class MetricsTable:
         y_true,
         y_err,
         y_alea=None,
-        task_name=None
+        n_subset=None,
+        task_name=None,
+        figpath=None,
+        exp_props=None,
+        obs_props=None,
+        recal_model=None,
     ):
         """
         Calculate metrics and add them to the table.
@@ -1235,9 +1326,22 @@ class MetricsTable:
             Standard deviation of predicted values.
         y_true : ndarray
             True values.
+        y_err : ndarray
+            Errors.
+        y_alea : ndarray, optional
+            Aleatoric uncertainty. The default is None.
+        n_subset : int, optional
+            Number of samples to use for the plots. The default is None.
         task_name : str, optional
             Name of the task. The default is None.
-
+        figpath : str, optional
+            Path to save the figures. The default is None.
+        exp_props : ndarray, optional
+            Expected proportions for the recalibration plot. The default is None.
+        obs_props : ndarray, optional
+            Observed proportions for the recalibration plot. The default is None.
+        recal_model : IsotonicRegression, optional
+            Recalibration model. The default is None.
         Returns
         -------
         metrics : dict
@@ -1250,15 +1354,20 @@ class MetricsTable:
             y_true=y_true,
             y_err=y_err,
             y_alea=y_alea,
+            n_subset=n_subset,
             task_name=task_name,
             data_specific_path=self.data_specific_path,
+            figpath=figpath,
+            exp_props=exp_props,
+            obs_props=obs_props,
+            recal_model=recal_model,
         )
-        # if vars_ is not None:
 
         # self.export_plots(imgs, task_name)
         self.add_data(task_name=task_name, metrics=metrics, plots=plots)
 
         return metrics, plots
+
     # @staticmethod
     # def not_nan_filter(y_pred, y_std, y_true, y_err, y_alea=None):
     #     valid_mask = ~torch.isnan(y_true) # watch out the shapes Shape []
@@ -1272,9 +1381,31 @@ class MetricsTable:
     #     return y_pred, y_std, y_true, y_err, y_alea
 
     def calculate_metrics(
-        self, y_pred, y_std, y_true, y_err, y_alea, data_specific_path, task_name=None  # model_name=None,
+        self,
+        y_pred,
+        y_std,
+        y_true,
+        y_err,
+        y_alea,
+        data_specific_path=None,
+        n_subset=None,
+        task_name=None,  # model_name=None,
+        figpath=None,
+        exp_props=None,
+        obs_props=None,
+        recal_model=None,
     ):
-        figures_path = FIGS_DIR / data_specific_path / self.model_name
+        figures_path = (
+            FIGS_DIR / data_specific_path / self.model_name
+            if not figpath and data_specific_path
+            else figpath
+        )
+        # figures_path = FIGS_DIR / data_specific_path / self.model_name
+        # figures_path = (
+        #     figures_path / task_name
+        #     if task_name is not None and recalibrate
+        #     else figures_path
+        # )
         figures_path.mkdir(parents=True, exist_ok=True)
         # TODO Deal with NANs
         if self.task_type == "regression":
@@ -1282,15 +1413,19 @@ class MetricsTable:
                 y_pred=y_pred,
                 y_std=y_std,
                 y_true=y_true,
-                Nbins=100,
+                n_subset=n_subset,
+                Nbins=100,  # 100
                 task_name=task_name,
                 figpath=figures_path,
+                exp_props=exp_props,
+                obs_props=obs_props,
+                recal_model=recal_model,
             )
             # calculate other uqtools metrics
             uqmetrics, uqplots = calculate_uqtools_metrics(
                 y_std,
                 y_err,
-                Nbins=100,
+                Nbins=100,  # 100
                 include_bootstrap=True,
                 task_name=task_name,
                 figpath=figures_path,
@@ -1310,12 +1445,20 @@ class MetricsTable:
             # TODO classification plots
             plots = {}
 
+        # self.aleatoric = False if y_alea is None else True
         if self.aleatoric:
-            y_alea_mean = y_alea.mean()
-            y_std_mean = y_std.mean()
-            metrics["aleatoric_uct_mean"] = y_alea_mean
-            metrics["epistemic_uct_mean"] = y_std_mean
-            metrics["total_uct_mean"] = y_alea_mean + y_std_mean
+            if y_alea is None:
+                (
+                    metrics["aleatoric_uct_mean"],
+                    metrics["epistemic_uct_mean"],
+                    metrics["total_uct_mean"],
+                ) = (None, None, None)
+            else:
+                y_alea_mean = y_alea.mean()
+                y_std_mean = y_std.mean()
+                metrics["aleatoric_uct_mean"] = y_alea_mean
+                metrics["epistemic_uct_mean"] = y_std_mean
+                metrics["total_uct_mean"] = y_alea_mean + y_std_mean
 
         plots = {k: wandb.Image(v) for k, v in plots.items()}
 
@@ -1341,8 +1484,8 @@ class MetricsTable:
         None
         """
         vals = [self.model_type] if self.model_type is not None else []
-        if self.mt:
-            vals.append(task_name)
+        # if self.mt:
+        vals.append(task_name)
         vals.extend(
             [
                 self.activity,
@@ -1423,7 +1566,7 @@ class MetricsTable:
                 [
                     metrics["aleatoric_uct_mean"],
                     metrics["epistemic_uct_mean"],
-                    metrics["total_uct_mean"]
+                    metrics["total_uct_mean"],
                 ]
             )
 
@@ -1434,136 +1577,305 @@ class MetricsTable:
         """
         Export the UCT metrics table to wandb.
         """
-        wandb.log({f"Uncertainty Metrics Table": self.table}) #  - {self.model_type}
+        df = self.table.get_dataframe()
+        save_df(df, self.df_path)
+        wandb.log(
+            {
+                f"Uncertainty Metrics Table - {self.model_type} - {wandb.run.name}": self.table
+            }
+        )  #  - {self.model_type}
+        # wandb.run.log_artifact({f"Uncertainty Metrics Table": self.table})  #  - {self.model_type}
+
+
+def isotonic_recalibrator(
+    y_true_recal, y_pred_recal, y_std_recal, y_true_test, y_pred_test, y_std_test
+):
+    y_pred_recal = y_pred_recal.flatten()
+    y_std_recal = y_std_recal.flatten()
+    exp_props, obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
+        y_pred_recal,
+        y_std_recal,
+        y_true_recal,
+    )
+    # Train a recalibration model.
+    recal_model = uct.recalibration.iso_recal(exp_props, obs_props)
+    # Get the expected props and observed props using the new recalibrated model
+    te_recal_exp_props, te_recal_obs_props = (
+        uct.metrics_calibration.get_proportion_lists_vectorized(
+            y_pred_test, y_std_test, y_true_test, recal_model=recal_model
+        )
+    )
+
+    return recal_model, te_recal_exp_props, te_recal_obs_props
+
+
+def std_recalibrator(y_true_recal, y_pred_recal, y_std_recal, y_std_test):
+    std_recal = uct.recalibration.get_std_recalibrator(
+        y_pred_recal, y_std_recal, y_true_recal
+    )
+
+    y_std_recal_recalibrated = std_recal(y_std_recal)
+    y_std_test_recalibrated = std_recal(y_std_test)
+
+    return std_recal, y_std_recal_recalibrated, y_std_test_recalibrated
+
+
+def recalibration_metrics_and_plots(
+    y_pred_test,
+    y_std_test,
+    y_true_test,
+    y_err_test,
+    uct_logger=None,
+    exp_props=None,
+    obs_props=None,
+    recal_model=None,
+    n_subset=None,
+    task_name="before_calibration",
+    figpath=None,
+):
+    if uct_logger is not None:
+        metrics, plots = uct_logger(
+            y_pred=y_pred_test,
+            y_std=y_std_test,
+            y_true=y_true_test,
+            y_err=y_err_test,
+            y_alea=None,
+            n_subset=n_subset,
+            task_name=task_name,
+            figpath=figpath,
+            exp_props=exp_props,
+            obs_props=obs_props,
+            recal_model=recal_model,
+        )
+        # uct_logger.wandb_log()
+    else:  # without logging to wandb then
+        uctmetrics, uctplots = calculate_uct_metrics(
+            y_pred=y_pred_test,
+            y_std=y_std_test,
+            y_true=y_true_test,
+            n_subset=n_subset,
+            Nbins=100,
+            task_name=task_name,
+            figpath=figpath,
+            exp_props=exp_props,
+            obs_props=obs_props,
+            recal_model=recal_model,
+        )
+        uqmetrics, uqplots = calculate_uqtools_metrics(
+            y_std_test,
+            y_err_test,
+            Nbins=n_subset,
+            include_bootstrap=True,
+            task_name=task_name,
+            figpath=figpath,
+        )
+        metrics, plots = {**uctmetrics, **uqmetrics}, {
+            **uctplots,
+            **uqplots,
+        }
+
+    plt.close()
+
+    return metrics, plots
 
 
 def recalibrate(
-        y_true_recal, y_pred_recal, y_std_recal, y_err_recal,
-        y_true_test, y_pred_test, y_std_test, y_err_test,
-        n_subset=None,
-        task_name="PCM",
-        savefig: bool = True,
-        save_dir: Path = "path/to/figures",
-        uct_logger = None
+    y_true_recal,
+    y_pred_recal,
+    y_std_recal,
+    y_err_recal,
+    y_true_test,
+    y_pred_test,
+    y_std_test,
+    y_err_test,
+    n_subset=None,
+    task_name="PCM",
+    savefig: bool = True,
+    save_dir: Path = "path/to/figures",
+    uct_logger=None,
 ):
-
     if savefig:
         before_path = Path(save_dir) / "Before_recal"
         after_path = Path(save_dir) / "After_recal"
         before_path.mkdir(exist_ok=True)
         after_path.mkdir(exist_ok=True)
-        before_path_m = before_path / "metrics"
-        after_path_m = after_path / "metrics"
-        before_path_m.mkdir(exist_ok=True)
-        after_path_m.mkdir(exist_ok=True)
+        # before_path_m = before_path / "metrics"
+        # after_path_m = after_path / "metrics"
+        # before_path_m.mkdir(exist_ok=True)
+        # after_path_m.mkdir(exist_ok=True)
 
     else:
         before_path = None
         after_path = None
-        before_path_m = None
-        after_path_m = None
+        # before_path_m = None
+        # after_path_m = None
     # Before Calibration
-    # Plot average calibration
-    fig1, ax1 = plt.subplots(figsize=(6, 4))
-    uct.viz.plot_calibration(y_pred_test, y_std_test, y_true_test, n_subset=n_subset, ax=ax1)
-    ax1.set_title("Calibration Curve - Before Recalibration")
-    plt.gcf().set_size_inches(4, 4)
-    plt.tight_layout()
-
-    if savefig:
-        fig_save_path = Path(save_dir) / "Calib_curve_before_recalibration"
-        uct.viz.save_figure(
-            str(fig_save_path), ext_list=["png", "svg"], white_background=True
-        )
-    plt.show()
-    plt.close()
-    # TODO : uct logger here
-    # metrics, plots = uct_logger(
-    #     y_pred=y_pred,
-    #     y_std=y_std,
-    #     y_true=y_true,
-    #     y_err=y_err,
-    #     y_alea=y_alea,
-    #     task_name="before_calibration",
-    # )
-    uctmetrics, _ = calculate_uct_metrics(
-                y_pred=y_pred_test,
-                y_std=y_std_test,
-                y_true=y_true_test,
-                Nbins=100,
-                task_name=task_name,
-                figpath=before_path_m,
-            )
-    uqmetrics, _ = calculate_uqtools_metrics(
-        y_std_test,
-        y_err_test,
-        Nbins=100,
-        include_bootstrap=True,
-        task_name=task_name,
-        figpath=after_path_m,
+    # calculating exp_prop and obs_prop
+    before_metrics, before_plots = recalibration_metrics_and_plots(
+        y_pred_test=y_pred_test,
+        y_std_test=y_std_test,
+        y_true_test=y_true_test,
+        y_err_test=y_err_test,
+        uct_logger=uct_logger,
+        n_subset=n_subset,
+        task_name=task_name + "_before_calibration",
+        figpath=before_path,
     )
-    _before = {**uctmetrics, **uqmetrics}
-    # wandb.log(data=_before)
-    # plots_before = {**uctplots, **uqplots}
-    plt.close()
+
+    # # Plot average calibration
+    # fig1, ax1 = plt.subplots(figsize=(6, 4))
+    # uct.viz.plot_calibration(
+    #     y_pred_test, y_std_test, y_true_test, n_subset=n_subset, ax=ax1
+    # )
+    # ax1.set_title("Calibration Curve - Before Recalibration")
+    # plt.gcf().set_size_inches(4, 4)
+    # plt.tight_layout()
+    #
+    # if savefig:
+    #     fig_save_path = Path(save_dir) / "Calib_curve_before_recalibration"
+    #     uct.viz.save_figure(
+    #         str(fig_save_path), ext_list=["png", "svg"], white_background=True
+    #     )
+    # plt.show()
+    # plt.close()
 
     # Recalibrating
-    y_pred_recal = y_pred_recal.flatten()
-    y_std_recal = y_std_recal.flatten()
-    exp_props, obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
-        y_pred_recal, y_std_recal, y_true_recal,
+    # * this is the isotonic regression one *
+    iso_recal_model, te_recal_exp_props, te_recal_obs_props = isotonic_recalibrator(
+        y_true_recal=y_true_recal,
+        y_pred_recal=y_pred_recal,
+        y_std_recal=y_std_recal,
+        y_true_test=y_true_test,
+        y_pred_test=y_pred_test,
+        y_std_test=y_std_test,
     )
-    # Train a recalibration model.
-    recal_model = uct.recalibration.iso_recal(exp_props, obs_props)
-    # Get the expected props and observed props using the new recalibrated model
-    te_recal_exp_props, te_recal_obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
-        y_pred_test, y_std_test, y_true_test, recal_model=recal_model
-    )
-    # Show the updated average calibration plot AFTER
-    fig2, ax2 = plt.subplots(figsize=(6, 4))
-    uct.viz.plot_calibration(
-        y_pred_test,
-        y_std_test,
-        y_true_test,
-        n_subset=n_subset,
+
+    # AFter Isotonic metrics
+    recal_metrics, recal_plots = recalibration_metrics_and_plots(
+        y_pred_test=y_pred_test,
+        y_std_test=y_std_test,
+        y_true_test=y_true_test,
+        y_err_test=y_err_test,
+        uct_logger=uct_logger,
         exp_props=te_recal_exp_props,
         obs_props=te_recal_obs_props,
-        ax=ax2
+        recal_model=iso_recal_model,
+        n_subset=n_subset,
+        task_name=task_name + "_after_calibration_with_isotonic_regression",
+        figpath=after_path,
     )
-    ax2.set_title("Calibration Curve - After Recalibration")
-    plt.gcf().set_size_inches(4.0, 4.0)
-    plt.tight_layout()
 
-    if savefig:
-        fig_save_path = Path(save_dir) / "Calib_curve_after_recalibration"
-        uct.viz.save_figure(
-            str(fig_save_path), ext_list=["png", "svg"], white_background=True
-        )
-    plt.show()
-    plt.close()
-
-    uctmetrics, _ = calculate_uct_metrics(
-                y_pred=y_pred_test,
-                y_std=y_std_test,
-                y_true=y_true_test,
-                Nbins=100,
-                task_name=task_name,
-                figpath=after_path_m,
-            )
-    uqmetrics, _ = calculate_uqtools_metrics(
-        y_std_test,
-        y_err_test,
-        Nbins=100,
-        include_bootstrap=True,
-        task_name=task_name,
-        figpath=after_path_m,
+    # * this is the std recalibrator *
+    std_recal, y_std_recal_recalibrated, y_std_test_recalibrated = std_recalibrator(
+        y_true_recal=y_true_recal,
+        y_pred_recal=y_pred_recal,
+        y_std_recal=y_std_recal,
+        y_std_test=y_std_test,
     )
-    _after = {**uctmetrics, **uqmetrics}
-    # plots_before = {**uctplots, **uqplots}
-    plt.close()
 
-    return recal_model
+    # After std recalibrator metrics
+    recal_metrics_std, recal_plots_std = recalibration_metrics_and_plots(
+        y_pred_test=y_pred_test,
+        y_std_test=y_std_test_recalibrated,
+        y_true_test=y_true_test,
+        y_err_test=y_err_test,
+        uct_logger=uct_logger,
+        n_subset=n_subset,
+        task_name=task_name + "_after_calibration_with_std_recalibrator",
+        figpath=after_path,
+    )
 
+    # metrics = {**before_metrics, **recal_metrics, **recal_metrics_std}
+    # plots = {**before_plots, **recal_plots, **recal_plots_std}
+
+    # Let's save the recalibration model
+    recal_model_path = Path(save_dir) / "iso_recalibration_model.pkl"
+    save_pickle(iso_recal_model, recal_model_path)
+
+    # recal_model_path = Path(save_dir) / "std_recalibration_model.pkl"
+    # save_pickle(std_recal, recal_model_path)
+
+    # save metrics after recalibration with isotonic regression
+    recal_metrics_path = Path(save_dir) / "recal_metrics_iso.pkl"
+    save_pickle(recal_metrics, recal_metrics_path)
+
+    # save metrics after recalibration with std recalibrator
+    recal_metrics_std_path = Path(save_dir) / "recal_metrics_std.pkl"
+    save_pickle(recal_metrics_std, recal_metrics_std_path)
+
+    # TODO COME BACK START HERE
+    return iso_recal_model, std_recal  # , metrics, plots
+
+    # y_pred_recal = y_pred_recal.flatten()
+    # y_std_recal = y_std_recal.flatten()
+    # exp_props, obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
+    #     y_pred_recal,
+    #     y_std_recal,
+    #     y_true_recal,
+    # )
+    # # Train a recalibration model.
+    # recal_model = uct.recalibration.iso_recal(exp_props, obs_props)
+    # # Get the expected props and observed props using the new recalibrated model
+    # te_recal_exp_props, te_recal_obs_props = (
+    #     uct.metrics_calibration.get_proportion_lists_vectorized(
+    #         y_pred_test, y_std_test, y_true_test, recal_model=recal_model
+    #     )
+    # )
+    #
+    # # Show the updated average calibration plot AFTER
+    # fig2, ax2 = plt.subplots(figsize=(6, 4))
+    # uct.viz.plot_calibration(
+    #     y_pred_test,
+    #     y_std_test,
+    #     y_true_test,
+    #     n_subset=n_subset,
+    #     exp_props=te_recal_exp_props,
+    #     obs_props=te_recal_obs_props,
+    #     ax=ax2,
+    # )
+    #
+    # ax2.set_title("Calibration Curve - After Recalibration")
+    # plt.gcf().set_size_inches(4.0, 4.0)
+    # plt.tight_layout()
+    #
+    # if savefig:
+    #     fig_save_path = Path(save_dir) / "Calib_curve_after_recalibration"
+    #     uct.viz.save_figure(
+    #         str(fig_save_path), ext_list=["png", "svg"], white_background=True
+    #     )
+    # plt.show()
+    # plt.close()
+
+    # if uct_logger is not None:
+    #     uct_logger(
+    #         y_pred=y_pred_recal,
+    #         y_std=y_std_recal,
+    #         y_true=y_true_recal,
+    #         y_err=y_err_recal,
+    #         task_name="after_calibration",
+    #     )
+    # else:
+    #     uctmetrics, _ = calculate_uct_metrics(
+    #         y_pred=y_pred_test,
+    #         y_std=y_std_test,
+    #         y_true=y_true_test,
+    #         Nbins=100,
+    #         task_name=task_name,
+    #         figpath=after_path_m,
+    #     )
+    #     uqmetrics, _ = calculate_uqtools_metrics(
+    #         y_std_test,
+    #         y_err_test,
+    #         Nbins=100,
+    #         include_bootstrap=True,
+    #         task_name=task_name,
+    #         figpath=after_path_m,
+    #     )
+    #     _after = {**uctmetrics, **uqmetrics}
+    # # plots_before = {**uctplots, **uqplots}
+    # plt.close()
+
+    # return recal_model
 
 
 def calc_aleatoric_mean_var_notnan(vars_all, targets_all):

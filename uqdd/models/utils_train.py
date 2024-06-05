@@ -8,7 +8,7 @@ from torch import nn
 
 from tqdm import tqdm
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, TODAY, FIGS_DIR, MODELS_DIR
-from uqdd.data.utils_data import get_topx, get_tasks #, save_pickle
+from uqdd.data.utils_data import get_topx, get_tasks  # , save_pickle
 
 from uqdd.models.loss import build_loss
 from uqdd.models.utils_metrics import (
@@ -28,7 +28,7 @@ from uqdd.models.utils_models import (
     build_datasets,
     get_desc_len,
     compute_pnorm,
-    compute_gnorm
+    compute_gnorm,
 )
 from uqdd.utils import create_logger, save_pickle
 
@@ -49,8 +49,15 @@ def evidential_processing(outputs, alea_all):
 
 # def apply_model_aleatoric_option()
 def train(
-        model, dataloader, loss_fn, optimizer, device=DEVICE, epoch=0, max_norm=None,
-        lossfname="EvidenceRegressionLoss", tracker="wandb"  # pbar=None,
+    model,
+    dataloader,
+    loss_fn,
+    optimizer,
+    device=DEVICE,
+    epoch=0,
+    max_norm=None,
+    lossfname="EvidenceRegressionLoss",
+    tracker="wandb",  # pbar=None,
 ):
     # max_norm = 10.0
     model.train()
@@ -71,21 +78,22 @@ def train(
         #     _, _, num_repeats = outputs.shape
         #     targets = targets.repeat(num_repeats, 1).t()
         # t = t.unsqueeze(2).expand(-1,-1,5)
-        args = (outputs, targets, vars_) if lossfname == 'gaussnll' else (outputs, targets)
+        args = (
+            (outputs, targets, vars_) if lossfname == "gaussnll" else (outputs, targets)
+        )
         loss = loss_fn(*args)
         vars_all.append(vars_)
 
         loss.backward()
         if max_norm is not None:
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                max_norm=max_norm
-            )
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
         optimizer.step()
         total_loss += loss.item()  # * outputs.size(0)
         # outputs, vars_all = evidential_processing(outputs, vars_all)
         targets_all.append(targets)
-        outputs = outputs[0] if lossfname.lower() == "evidential_regression" else outputs  # Because it gets 4 outputs
+        outputs = (
+            outputs[0] if lossfname.lower() == "evidential_regression" else outputs
+        )  # Because it gets 4 outputs
         outputs_all.append(outputs)
 
     total_loss /= num_batches  # len(dataloader.dataset)
@@ -93,9 +101,7 @@ def train(
     outputs_all = torch.cat(outputs_all, dim=0)
 
     # Calculate metrics
-    train_rmse, train_r2, train_evs = calc_regr_metrics(
-        targets_all, outputs_all
-    )
+    train_rmse, train_r2, train_evs = calc_regr_metrics(targets_all, outputs_all)
     pnorm = compute_pnorm(model)
     gnorm = compute_gnorm(model)
     vars_all = torch.cat(vars_all, dim=0)
@@ -125,23 +131,33 @@ def train(
         )
 
     elif tracker.lower() == "tensor":
-        tracked_vals = np.array([epoch, total_loss, train_rmse, train_r2, train_evs,
-            vars_mean.item(), vars_var.item()], dtype=np.float32) # pnorm, gnorm
+        tracked_vals = np.array(
+            [
+                epoch,
+                total_loss,
+                train_rmse,
+                train_r2,
+                train_evs,
+                vars_mean.item(),
+                vars_var.item(),
+            ],
+            dtype=np.float32,
+        )  # pnorm, gnorm
         return tracked_vals
 
     return total_loss
 
 
 def evaluate(
-        model,
-        dataloader,
-        loss_fn,
-        device=DEVICE,
-        metrics_per_task=False,
-        subset="val",  # can be "train", "val" or "test"
-        epoch=0,
-        lossfname="EvidenceRegressionLoss",
-        tracker="wandb"
+    model,
+    dataloader,
+    loss_fn,
+    device=DEVICE,
+    metrics_per_task=False,
+    subset="val",  # can be "train", "val" or "test"
+    epoch: int | None = 0,
+    lossfname="EvidenceRegressionLoss",
+    tracker="wandb",
 ):
     model.eval()
     total_loss = 0.0
@@ -155,12 +171,18 @@ def evaluate(
             inputs = tuple(x.to(device) for x in inputs)
             targets = targets.to(device)
             outputs, vars_ = model(inputs)
-            args = (outputs, targets, vars_) if lossfname.lower() == 'gaussnll' else (outputs, targets)
+            args = (
+                (outputs, targets, vars_)
+                if lossfname.lower() == "gaussnll"
+                else (outputs, targets)
+            )
             loss = loss_fn(*args)
             vars_all.append(vars_)
             total_loss += loss.item()  # * outputs.size(0)
             targets_all.append(targets)
-            outputs = outputs[0] if lossfname.lower() == "evidential_regression" else outputs  # Because it gets 4 outputs
+            outputs = (
+                outputs[0] if lossfname.lower() == "evidential_regression" else outputs
+            )  # Because it gets 4 outputs
             outputs_all.append(outputs)
 
         total_loss /= num_batches  # len(dataloader.dataset)
@@ -186,7 +208,10 @@ def evaluate(
                 step=epoch,
             )
         elif tracker.lower() == "tensor":
-            tracked_vals = np.array([epoch, total_loss, rmse, r2, evs, vars_mean.item(), vars_var.item()], dtype=np.float32)
+            tracked_vals = np.array(
+                [epoch, total_loss, rmse, r2, evs, vars_mean.item(), vars_var.item()],
+                dtype=np.float32,
+            )
 
         # Calculate metrics
         if metrics_per_task:
@@ -204,7 +229,10 @@ def evaluate(
                         step=epoch,
                     )
                 elif tracker.lower() == "tensor":
-                    tracked_vals = np.append(tracked_vals, [tasks_rmse[task_idx], tasks_r2[task_idx], tasks_evs[task_idx]])
+                    tracked_vals = np.append(
+                        tracked_vals,
+                        [tasks_rmse[task_idx], tasks_r2[task_idx], tasks_evs[task_idx]],
+                    )
     if tracker.lower() == "tensor":
         return tracked_vals
 
@@ -212,10 +240,10 @@ def evaluate(
 
 
 def predict(
-        model,
-        dataloader,
-        # aleatoric=False,
-        device=DEVICE,
+    model,
+    dataloader,
+    # aleatoric=False,
+    device=DEVICE,
 ):
     model.eval()
     outputs_all = []
@@ -224,7 +252,7 @@ def predict(
 
     with torch.no_grad():
         for inputs, targets in tqdm(
-                dataloader, total=len(dataloader), desc="Predicting"
+            dataloader, total=len(dataloader), desc="Predicting"
         ):
             inputs = tuple(x.to(device) for x in inputs)
             outputs, vars_ = model(inputs)
@@ -239,13 +267,14 @@ def predict(
 
 
 def evaluate_predictions(
-        config,
-        preds,
-        labels,
-        alea_vars=None,  # TODO to decide whether to include this in the metrics part
-        model_type="ensemble",
-        logger=None,
-        epi_vars=None,
+    config,
+    preds,
+    labels,
+    alea_vars=None,  # TODO to decide whether to include this in the metrics part
+    model_type="ensemble",
+    logger=None,
+    epi_vars=None,
+    wandb_push=False,
 ):
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
@@ -265,9 +294,19 @@ def evaluate_predictions(
     )
 
     # preds, labels = predict(model, dataloaders["test"], return_targets=True)
-    y_true, y_pred, y_std, y_err, y_alea = process_preds(preds, labels, alea_vars, epi_vars, None)
+    y_true, y_pred, y_std, y_err, y_alea = process_preds(
+        preds, labels, alea_vars, epi_vars, None
+    )
     _ = create_df_preds(
-        y_true, y_pred, y_std, y_err, y_alea, True, data_specific_path, model_name, logger
+        y_true,
+        y_pred,
+        y_std,
+        y_err,
+        y_alea,
+        True,
+        data_specific_path,
+        model_name,
+        logger,
     )
     task_name = f"All {n_targets} Targets" if n_targets > 1 else "PCM"
     # * note here we use only the epistemic part * #
@@ -284,7 +323,9 @@ def evaluate_predictions(
         tasks = get_tasks(data_name, activity_type, n_targets)
         for task_idx in range(len(tasks)):
             task_name = tasks[task_idx]
-            y_true, y_pred, y_std, y_err, y_alea = process_preds(preds, labels, alea_vars, epi_vars, task_idx)
+            y_true, y_pred, y_std, y_err, y_alea = process_preds(
+                preds, labels, alea_vars, epi_vars, task_idx
+            )
             taskmetrics, taskplots = uct_metrics_logger(
                 y_pred=y_pred,
                 y_std=y_std,
@@ -296,35 +337,60 @@ def evaluate_predictions(
             metrics[task_name] = taskmetrics
             plots[task_name] = taskplots
 
-    uct_metrics_logger.wandb_log()
+    # * log the metrics and plots to wandb * #
+    if wandb_push:
+        uct_metrics_logger.wandb_log()
 
     return metrics, plots, uct_metrics_logger
 
 
 def initial_evaluation(
-        model, train_loader, val_loader, loss_fn, device=DEVICE, epoch=0, lossfname="", tracker="wandb"  # pbar=None,
+    model,
+    train_loader,
+    val_loader,
+    loss_fn,
+    device=DEVICE,
+    epoch=0,
+    lossfname="",
+    tracker="wandb",  # pbar=None,
 ):
     val_loss = evaluate(
-        model, val_loader, loss_fn, device, False, "val", epoch, lossfname, tracker=tracker
+        model,
+        val_loader,
+        loss_fn,
+        device,
+        False,
+        "val",
+        epoch,
+        lossfname,
+        tracker=tracker,
     )
     train_loss = evaluate(
-        model, train_loader, loss_fn, device, False, "train", epoch, lossfname, tracker=tracker
+        model,
+        train_loader,
+        loss_fn,
+        device,
+        False,
+        "train",
+        epoch,
+        lossfname,
+        tracker=tracker,
     )
     return train_loss, val_loss
 
 
 def run_one_epoch(
-        model,
-        train_loader,
-        val_loader,
-        loss_fn,
-        optimizer,
-        lr_scheduler,
-        epoch=0,
-        device=DEVICE,
-        max_norm=None,
-        lossfname="",
-        tracker="wandb"
+    model,
+    train_loader,
+    val_loader,
+    loss_fn,
+    optimizer,
+    lr_scheduler,
+    epoch=0,
+    device=DEVICE,
+    max_norm=None,
+    lossfname="",
+    tracker="wandb",
 ):
     """
     Run a single epoch of training and evaluation.
@@ -368,10 +434,26 @@ def run_one_epoch(
 
     else:
         train_loss = train(
-            model, train_loader, loss_fn, optimizer, device, epoch, max_norm=max_norm, lossfname=lossfname, tracker=tracker
+            model,
+            train_loader,
+            loss_fn,
+            optimizer,
+            device,
+            epoch,
+            max_norm=max_norm,
+            lossfname=lossfname,
+            tracker=tracker,
         )
         val_loss = evaluate(
-            model, val_loader, loss_fn, device, False, "val", epoch, lossfname, tracker=tracker
+            model,
+            val_loader,
+            loss_fn,
+            device,
+            False,
+            "val",
+            epoch,
+            lossfname,
+            tracker=tracker,
         )
 
         if lr_scheduler is not None:
@@ -385,15 +467,15 @@ def run_one_epoch(
 
 
 def wandb_epoch_logger(
-        epoch,
-        train_loss,
-        train_rmse,
-        train_r2,
-        train_evs,
-        val_loss,
-        val_rmse,
-        val_r2,
-        val_evs,
+    epoch,
+    train_loss,
+    train_rmse,
+    train_r2,
+    train_evs,
+    val_loss,
+    val_rmse,
+    val_r2,
+    val_evs,
 ):
     wandb.log(
         data={
@@ -411,13 +493,13 @@ def wandb_epoch_logger(
 
 
 def wandb_test_logger(
-        test_loss,
-        test_rmse,
-        test_r2,
-        test_evs,
-        tasks_rmse=None,
-        tasks_r2=None,
-        tasks_evs=None,
+    test_loss,
+    test_rmse,
+    test_r2,
+    test_evs,
+    tasks_rmse=None,
+    tasks_r2=None,
+    tasks_evs=None,
 ):
     wandb.log(
         data={
@@ -439,16 +521,16 @@ def wandb_test_logger(
 
 
 def train_model(
-        model,
-        config,
-        train_loader,
-        val_loader,
-        n_targets=-1,
-        seed=42,
-        device=DEVICE,
-        logger=None,
-        max_norm=None, #10.0
-        tracker="wandb"
+    model,
+    config,
+    train_loader,
+    val_loader,
+    n_targets=-1,
+    seed=42,
+    device=DEVICE,
+    logger=None,
+    max_norm=None,  # 10.0
+    tracker="wandb",
 ):
     try:
         set_seed(seed)
@@ -489,7 +571,7 @@ def train_model(
             try:
                 (
                     epoch,
-                    train_loss, # this can be an array if tracker is tensor
+                    train_loss,  # this can be an array if tracker is tensor
                     val_loss,
                 ) = run_one_epoch(
                     model,
@@ -502,9 +584,11 @@ def train_model(
                     device=device,
                     max_norm=max_norm,
                     lossfname=config.get("loss", "mse"),
-                    tracker=tracker
+                    tracker=tracker,
                 )
-                vloss = val_loss if not isinstance(val_loss, np.ndarray) else val_loss[1]
+                vloss = (
+                    val_loss if not isinstance(val_loss, np.ndarray) else val_loss[1]
+                )
                 if vloss < best_val_loss:
                     best_val_loss = vloss
                     early_stop_counter = 0
@@ -532,14 +616,16 @@ def train_model(
 
 
 def run_model(
-        config,
-        model,
-        dataloaders,
-        device=DEVICE,
-        logger=create_logger("run_model"),
-        max_norm=None, #10.0
-        tracker="wandb"
+    config,
+    model,
+    dataloaders,
+    device=DEVICE,
+    logger=None,  # create_logger("run_model"),
+    max_norm=None,  # 10.0
+    tracker="wandb",
 ):
+    if logger is None:
+        logger = create_logger("run_model")
     seed = config.get("seed", 42)
     n_targets = config.get("n_targets", -1)
     # aleatoric = config.get("aleatoric", False)
@@ -555,12 +641,20 @@ def run_model(
         device,
         logger=logger,
         max_norm=max_norm,
-        tracker=tracker
+        tracker=tracker,
     )
 
     # Testing metrics on the best model
     test_loss = evaluate(
-        best_model, dataloaders["test"], loss_fn, device, metrics_per_task=mt, subset="test", epoch=None, lossfname=config.get("loss", "mse"), tracker=tracker
+        best_model,
+        dataloaders["test"],
+        loss_fn,
+        device,
+        metrics_per_task=mt,
+        subset="test",
+        epoch=None,
+        lossfname=config.get("loss", "mse"),
+        tracker=tracker,
     )
 
     # TODO FOR TESTING
@@ -648,13 +742,14 @@ def get_dataloadar(
 
 
 def post_training_save_model(
-        model,
-        config,
-        model_type="baseline",
-        onnx=True,
-        tracker="wandb",
-        run=None,
-        logger=None,
+    model,
+    config,
+    model_type="baseline",
+    onnx=True,
+    tracker="wandb",
+    run=None,
+    logger=None,
+    write_model=True,
 ):
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
@@ -663,26 +758,31 @@ def post_training_save_model(
     descriptor_chemical = config.get("descriptor_chemical", None)
     split_type = config.get("split_type", "random")
 
-    model_name = f"{TODAY}-{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}"
-    model_name += f"{run.name}" if tracker.lower() == "wandb" else ""
+    model_name = (
+        f"{TODAY}-{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}"
+    )
+    if run:
+        model_name += f"_{run.name}"
+    # model_name += f"{run.name}" if tracker.lower() == "wandb" else ""
     desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein, descriptor_chemical)
 
     # config["model_name"] = model_name
     data_specific_path = Path(data_name) / activity_type / get_topx(n_targets)
     if logger:
-        logger.info(f"Data specific path: {data_specific_path}")
+        logger.debug(f"Data specific path: {data_specific_path}")
     config["data_specific_path"] = data_specific_path
 
-    save_model(
-        config,
-        model,
-        model_name,
-        data_specific_path,
-        desc_prot_len,
-        desc_chem_len,
-        onnx=onnx,
-        tracker=tracker
-    )
+    if write_model:
+        save_model(
+            config,
+            model,
+            model_name,
+            data_specific_path,
+            desc_prot_len,
+            desc_chem_len,
+            onnx=onnx,
+            tracker=tracker,
+        )
 
     return model_name
 
@@ -690,7 +790,11 @@ def post_training_save_model(
 def get_tracker(config, tracker="wandb"):
     if tracker.lower() == "wandb":
         run = wandb.init(
-            config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=config.get("wandb_project_name", "test-project")
+            config=config,
+            dir=WANDB_DIR,
+            mode=WANDB_MODE,
+            project=config.get("wandb_project_name", "test-project"),
+            reinit=True,
         )
         config = wandb.config
         run = assign_wandb_tags(run, config)
@@ -713,14 +817,15 @@ def get_tracker(config, tracker="wandb"):
 
 
 def train_model_e2e(
-        config,
-        model,
-        model_type="baseline",
-        model_kwargs=None,
-        logger=None,
-        seed=42,
-        device=DEVICE,
-        tracker="wandb"
+    config,
+    model,
+    model_type="baseline",
+    model_kwargs=None,
+    logger=None,
+    seed=42,
+    device=DEVICE,
+    tracker="wandb",
+    write_model=True,
 ):
     # start_time = datetime.now()
     # logger = (
@@ -746,7 +851,7 @@ def train_model_e2e(
         "random",
         "scaffold",
         "time",
-        "scaffold_cluster"
+        "scaffold_cluster",
     ], "Split type must be either random or scaffold or scaffold_cluster or time"
 
     mt = n_targets > 1
@@ -764,7 +869,9 @@ def train_model_e2e(
         )
         config["split_type"] = "random"
 
-    config["prot_input_dim"], config["chem_input_dim"] = get_desc_len(descriptor_protein, descriptor_chemical, logger=logger)
+    config["prot_input_dim"], config["chem_input_dim"] = get_desc_len(
+        descriptor_protein, descriptor_chemical, logger=logger
+    )
 
     model_ = model(config=config, **model_kwargs, logger=logger).to(device)
 
@@ -776,10 +883,17 @@ def train_model_e2e(
         device=device,
         logger=logger,
         max_norm=max_norm,
-        tracker=tracker
+        tracker=tracker,
     )
-    config["model_name"] = post_training_save_model(best_model, config, model_type=model_type,
-                                                    tracker=tracker, run=run if tracker.lower() == "wandb" else None, logger=logger)
+    config["model_name"] = post_training_save_model(
+        best_model,
+        config,
+        model_type=model_type,
+        tracker=tracker,
+        run=run,
+        logger=logger,
+        write_model=write_model,
+    )
 
     return best_model, config, results_arr
     # return best_model, dataloaders, config, logger, results_arr
@@ -828,30 +942,58 @@ def train_model_e2e(
     # logger.debug(f"{model_type} - duration: {datetime.now() - start_time}")
 
 
-def recalibrate_model(preds_val, labels_val, preds_test, labels_test, config, epi_val=None, epi_test=None,
-                      uct_logger=None):
+def recalibrate_model(
+    preds_val,
+    labels_val,
+    preds_test,
+    labels_test,
+    config,
+    epi_val=None,
+    epi_test=None,
+    uct_logger=None,
+):
     model_name = config.get("model_name", "ensemble")
     data_specific_path = config.get("data_specific_path", None)
 
     figures_path = FIGS_DIR / data_specific_path / model_name
 
     # Validation Set
-    y_true_val, y_pred_val, y_std_val, y_err_val, _ = process_preds(preds_val, labels_val, epi_vars=epi_val)
-    y_true_test, y_pred_test, y_std_test, y_err_test, _ = process_preds(preds_test, labels_test, epi_vars=epi_test)
-
-    recal_model = recalibrate(
-        y_true_val, y_pred_val, y_std_val, y_err_val, y_true_test, y_pred_test, y_std_test, y_err_test,
-        n_subset=None, savefig=True, save_dir=figures_path, uct_logger=uct_logger
+    y_true_val, y_pred_val, y_std_val, y_err_val, _ = process_preds(
+        preds_val, labels_val, epi_vars=epi_val
     )
-    # TODO add task_name
-    model_dir = MODELS_DIR / "saved_models" / data_specific_path if data_specific_path else MODELS_DIR / "saved_models"
-    model_dir.mkdir(exist_ok=True)
-    model_name = config.get("model_name", "ensemble") + "_recalibrate_model.pkl"
-    # pickle save the model to model_dir
-    save_pickle(recal_model, model_dir / model_name)
+    y_true_test, y_pred_test, y_std_test, y_err_test, _ = process_preds(
+        preds_test, labels_test, epi_vars=epi_test
+    )
+
+    iso_recal_model, std_recal = recalibrate(
+        y_true_val,
+        y_pred_val,
+        y_std_val,
+        y_err_val,
+        y_true_test,
+        y_pred_test,
+        y_std_test,
+        y_err_test,
+        n_subset=None,
+        savefig=True,
+        save_dir=figures_path,
+        uct_logger=uct_logger,
+    )
+    # # TODO add task_name
+    # model_dir = (
+    #     MODELS_DIR / "saved_models" / data_specific_path
+    #     if data_specific_path
+    #     else MODELS_DIR / "saved_models"
+    # )
+    # model_dir.mkdir(exist_ok=True)
+    # model_name = config.get("model_name", "ensemble") + "_recalibrate_model.pkl"
+    # # pickle save the model to model_dir
+    # save_pickle(recal_model, model_dir / model_name)
 
     # Test Set
-    return recal_model
+    # return recal_model
+    return iso_recal_model, std_recal  # , metrics, plots
+
 
 # def _run_model_e2e(
 #     model,
