@@ -2,6 +2,7 @@ import math
 import os
 import random
 import logging
+from pathlib import Path
 from typing import Union
 
 import numpy as np
@@ -13,6 +14,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from uqdd import CONFIG_DIR, MODELS_DIR, TODAY, DEVICE
+from uqdd.data.utils_data import get_topx
 from uqdd.utils import get_config, create_logger
 
 string_types = (type(b""), type(""))
@@ -551,6 +553,66 @@ def save_model(
 
     except Exception as e:
         print("Error saving models: " + str(e))
+
+
+def ckpt(model, config, random_num=None):
+    dir = MODELS_DIR / "ckpt"
+    dir.mkdir(parents=True, exist_ok=True)
+    if config.get("ckpt_name", None):
+        ckpt_name = config.get("ckpt_name")
+    else:
+        ckpt_name = get_model_name(config) + f"_{random_num}" if random_num else ""
+        config["ckpt_name"] = ckpt_name
+
+    model_path = dir / f"{ckpt_name}.pth"
+    torch.save(model.state_dict(), model_path)
+
+    return config
+
+
+def load_ckpt(model, config, ckpt_name=None):
+    if ckpt_name is None:
+        ckpt_name = config.get("ckpt_name", None)
+    if ckpt_name:
+        model_path = MODELS_DIR / "ckpt" / f"{ckpt_name}.pth"
+        model.load_state_dict(torch.load(model_path))
+    return model
+
+
+def get_model_name(config, run=None):
+    if config.get("model_name", None):
+        model_name = config.get("model_name")
+    else:
+        data_name = config.get("data_name", "papyrus")
+        activity_type = config.get("activity_type", "xc50")
+        descriptor_protein = config.get("descriptor_protein", None)
+        descriptor_chemical = config.get("descriptor_chemical", None)
+        split_type = config.get("split_type", "random")
+        model_type = config.get("model_type", "baseline")
+        multitask = config.get("MT", False)
+
+        model_name = f"{TODAY}-{data_name}_{activity_type}_{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}"
+        model_name += "_MT" if multitask else ""
+
+    # check if run and the name doesnt end with run.name already
+    if run and not model_name.endswith(run.name):
+        model_name += f"_{run.name}"
+
+    return model_name
+
+
+def get_data_specific_path(config, logger=None):
+    if config.get("data_specific_path", None):
+        return config.get("data_specific_path")
+
+    data_name = config.get("data_name", "papyrus")
+    activity_type = config.get("activity_type", "xc50")
+    n_targets = config.get("n_targets", -1)
+
+    data_specific_path = Path(data_name) / activity_type / get_topx(n_targets)
+    if logger:
+        logger.debug(f"Data specific path: {data_specific_path}")
+    return data_specific_path
 
 
 # def make_uct_plots(
