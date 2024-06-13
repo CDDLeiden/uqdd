@@ -1,4 +1,3 @@
-import argparse
 import wandb
 
 import torch
@@ -8,7 +7,7 @@ from tqdm import tqdm
 
 from uqdd import DEVICE
 from uqdd.models.baseline import BaselineDNN
-from uqdd.utils import create_logger, parse_list
+from uqdd.utils import create_logger
 
 from uqdd.models.utils_train import (
     train_model_e2e,
@@ -32,9 +31,10 @@ def ev_predict(model, test_loader, device=DEVICE):
             test_loader, total=len(test_loader), desc="Evidential prediction"
         ):
             inputs = tuple(x.to(device) for x in inputs)
-            outputs, alea_vars = model(inputs)
+            outputs = model(inputs)  # , alea_vars
+
             mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
-            # alea_vars = beta / (alpha - 1)  # aleatoric
+            alea_vars = beta / (alpha - 1)  # aleatoric
             epist_var = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
             outputs = mu
 
@@ -58,8 +58,8 @@ class NormalInvGamma(nn.Module):
         self.dense = nn.Linear(in_features, out_units * 4)
         self.out_units = out_units
 
-    def evidence(self, x):
-        return F.softplus(x)
+    def evidence(self, x, eps=1e-2):
+        return F.softplus(x) + eps
 
     def forward(self, x):
         out = self.dense(x)
@@ -68,8 +68,8 @@ class NormalInvGamma(nn.Module):
         v = self.evidence(logv)
         alpha = self.evidence(logalpha) + 1
         beta = self.evidence(logbeta)
-        alea_var = beta / (alpha - 1)
-        return (mu, v, alpha, beta), alea_var
+        # alea_var = beta / (alpha - 1)
+        return mu, v, alpha, beta  # , alea_var
 
 
 class Dirichlet(nn.Module):
@@ -78,8 +78,8 @@ class Dirichlet(nn.Module):
         self.dense = nn.Linear(in_features, out_units)
         self.out_units = int(out_units)
 
-    def evidence(self, x):
-        return F.softplus(x)
+    def evidence(self, x, eps=1e-2):
+        return F.softplus(x) + eps
 
     def forward(self, x):
         out = self.dense(x)
@@ -105,6 +105,7 @@ class EvidentialDNN(BaselineDNN):
         super(EvidentialDNN, self).__init__(
             config,
             logger,
+            aleavar_layer_included=False,
             **kwargs,
         )
 
@@ -134,9 +135,10 @@ class EvidentialDNN(BaselineDNN):
         else:
             combined_features = chem_features
         _output = self.regressor_or_classifier(combined_features)
-        output, var_ = self.output_layer(_output)
+        # output, var_ = self.output_layer(_output)
+        output = self.output_layer(_output)
 
-        return output, var_
+        return output
 
 
 def run_evidential(config=None):
@@ -220,26 +222,23 @@ def run_evidential_wrapper(**kwargs):
     return run_evidential(config)
 
 
-#
-# if __name__ == "__main__":
-#     run_evidential_wrapper(
-#         data_name="papyrus",
-#         n_targets=-1,
-#         task_type="regression",
-#         activity_type="xc50",
-#         split_type="random",
-#         descriptor_protein="ankh-large",
-#         descriptor_chemical="ecfp2048",
-#         median_scaling=False,
-#         ext="pkl",
-#         wandb_project_name="evidential-test",
-#         epochs=5,
-#         # sweep_count = 0  # 250
-#         # aleatoric = True
-#         # epochs=1
-#     )
-#     pass
-#
+if __name__ == "__main__":
+    run_evidential_wrapper(
+        data_name="papyrus",
+        n_targets=-1,
+        task_type="regression",
+        activity_type="xc50",
+        split_type="random",
+        descriptor_protein="ankh-large",
+        descriptor_chemical="ecfp2048",
+        median_scaling=False,
+        ext="pkl",
+        wandb_project_name="evidential-test",
+        epochs=200,
+        seed=50,
+    )
+    pass
+
 # def main():
 #     parser = argparse.ArgumentParser(description="Run Ensemble Model")
 #     parser.add_argument(
