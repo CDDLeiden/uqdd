@@ -16,6 +16,7 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 
 from uqdd import FIGS_DIR, TODAY, DATA_DIR
+from matplotlib.ticker import MaxNLocator
 
 # from uqdd.data.utils_data import save_pickle, save_df
 from uqdd.utils import create_logger, save_df, save_pickle
@@ -390,12 +391,14 @@ def plot_true_vs_preds(
     y_pred,
     y_true,
     n_subset=None,
-    ax=None,
+    # ax=None,
+    distant_threshold=3,  # Define the threshold for distant points in terms of RMSE
+    savefig=False,  # Whether to save the figure
+    save_dir=None,  # Directory to save the figure
     **kwargs,
 ):
     if n_subset is not None and n_subset < len(y_true):
         # Randomly select indices if subset_size is specified and less than the total number of points
-        # random generator
         rng = np.random.default_rng(42)
         indices = rng.choice(len(y_true), size=n_subset, replace=False)
 
@@ -406,58 +409,325 @@ def plot_true_vs_preds(
         y_true_subset = y_true
         y_preds_subset = y_pred
 
-    # Sort the subset based on y_true for better visualization
-    sorted_indices = np.argsort(y_true_subset)
-    sorted_y_true = y_true_subset[sorted_indices]
-    sorted_y_preds = y_preds_subset[sorted_indices]
+    # Create a DataFrame for seaborn
+    data = pd.DataFrame(
+        {"True Values": y_true_subset, "Predicted Values": y_preds_subset}
+    )
+    #
+    # Calculate RMSE for the subset
+    rmse = np.sqrt(np.mean((data["Predicted Values"] - data["True Values"]) ** 2))
 
-    # Plot the graph
-    if ax is None:
-        fig, ax = plt.subplots()
-    ax.plot(sorted_y_true, sorted_y_preds, "o", label="Predictions")
-    ax.set_xlabel("True Values")
-    ax.set_ylabel("Predicted Values")
-    # ax.set_title(f"True vs. Predicted Values - {task_name or 'PCM'}")
+    # Identify distant/erroneous points
+    # distant_threshold = 3
+    data["Distant"] = (
+        np.abs(data["True Values"] - data["Predicted Values"])
+        > distant_threshold * rmse
+    )
+    # Calculate the errors
+    data["Error"] = np.abs(data["True Values"] - data["Predicted Values"])
 
-    # Calculate the best-fitting line
-    best_fit_coeffs = np.polyfit(sorted_y_true, sorted_y_preds, deg=1)
-    best_fit_line = np.poly1d(best_fit_coeffs)
-    ax.plot(
-        sorted_y_true, best_fit_line(sorted_y_true), color="red", label="Best Fit Line"
+    g = sns.JointGrid(data=data, x="True Values", y="Predicted Values")
+
+    # Add the marginal histograms without hue
+    sns.histplot(
+        data=data,
+        x="True Values",
+        ax=g.ax_marg_x,
+        bins=50,
+        fill=True,
+        color="gray",
+        kde=True,
+    )  # green
+    sns.histplot(
+        data=data,
+        y="Predicted Values",
+        ax=g.ax_marg_y,
+        bins=50,
+        fill=True,
+        color="gray",
+        kde=True,
+    )  # 'green'
+
+    # Set identical integer ticks for x and y axes
+    g.ax_joint.xaxis.set_major_locator(MaxNLocator(integer=True))
+    g.ax_joint.yaxis.set_major_locator(MaxNLocator(integer=True))
+    # Add identity line
+    min_val = min(g.ax_joint.get_xlim()[0], g.ax_joint.get_ylim()[0])
+    max_val = max(g.ax_joint.get_xlim()[1], g.ax_joint.get_ylim()[1])
+    g.ax_joint.set_xlim(min_val, max_val)
+    g.ax_joint.set_ylim(min_val, max_val)
+    g.ax_joint.plot(
+        [min_val, max_val],
+        [min_val, max_val],
+        linestyle="--",
+        color="gray",
+        alpha=0.5,
+        label=None,
+    )
+    g.ax_joint.fill_between(
+        np.arange(int(min_val), int(max_val) + 1),
+        np.arange(int(min_val), int(max_val) + 1) - rmse,
+        np.arange(int(min_val), int(max_val) + 1) + rmse,
+        color="mediumblue",
+        alpha=0.2,
+        label=f"±1 RMSE ({rmse:.2f})",
+    )
+    g.ax_joint.fill_between(
+        np.arange(int(min_val), int(max_val) + 1),
+        np.arange(int(min_val), int(max_val) + 1) - 2 * rmse,
+        np.arange(int(min_val), int(max_val) + 1) + 2 * rmse,
+        color="skyblue",
+        alpha=0.5,
+        label=f"±2 RMSE ({2 * rmse:.2f})",
     )
 
-    # Calculate and display the RMSE for the subset
-    rmse = np.sqrt(np.mean((sorted_y_preds - best_fit_line(sorted_y_true)) ** 2))
-    ax.text(
-        0.95, 0.05, f"RMSE: {rmse:.2f}", transform=ax.transAxes, ha="right", va="bottom"
+    # Add the scatter plot with colors
+    sns.scatterplot(
+        data=data,
+        x="True Values",
+        y="Predicted Values",
+        ax=g.ax_joint,
+        size=20,
+        alpha=0.5,
+        hue="Distant",
+        palette={
+            True: "darkorange",
+            False: "cornflowerblue",
+        },  # indianred, cornflowerblue
+    )
+    sns.regplot(
+        data=data,
+        x="True Values",
+        y="Predicted Values",
+        ax=g.ax_joint,
+        scatter=False,
+        ci=95,
+        n_boot=1000,
     )
 
-    # Show the legend and display/save the graph
-    ax.legend(loc="upper left")
+    within_1_rmse = (
+        np.mean((np.abs(data["True Values"] - data["Predicted Values"]) <= rmse)) * 100
+    )
+    within_2_rmse = (
+        np.mean((np.abs(data["True Values"] - data["Predicted Values"]) <= 2 * rmse))
+        * 100
+    )
+    distant_percentage = np.mean(data["Distant"]) * 100
+    # legend_text = [
+    #     f'±1 RMSE ({rmse:.2f}): {within_1_rmse:.2f}%',
+    #     f'±2 RMSE ({2 * rmse:.2f}): {within_2_rmse:.2f}%',
+    #     f'> {distant_threshold} RMSE: {distant_percentage:.2f}%'
+    # ]
+    legend_elements = [
+        plt.Line2D(
+            [0],
+            [0],
+            color="mediumblue",
+            lw=4,
+            alpha=0.2,
+            label=f"±1 RMSE ({rmse:.2f}): {within_1_rmse:.2f}%",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            color="skyblue",
+            lw=4,
+            alpha=0.5,
+            label=f"±2 RMSE ({2 * rmse:.2f}): {within_2_rmse:.2f}%",
+        ),
+        plt.Line2D(
+            [0],
+            [0],
+            color="darkorange",
+            alpha=0.5,
+            marker="o",
+            linestyle="",
+            markersize=8,
+            label=f"> {distant_threshold} RMSE: {distant_percentage:.2f}%",
+        ),  # indianred
+    ]
+    legend = g.ax_joint.legend(
+        handles=legend_elements,
+        title="RMSE Bands",
+        loc="upper left",
+        # labels=legend_text,
+        fontsize=8,
+        title_fontsize=10,
+        handletextpad=0.5,
+        labelspacing=0.5,
+        borderaxespad=0.5,
+    )
+    # )
+    # # Set the provided ax for the JointGrid
+    # if ax is not None:
+    #     g.fig = plt.gcf()
+    #     g.ax_joint = ax
     #
-    # if save_path:
-    #     plt.savefig(save_path)
-    #     print(f"Saved true_vs_preds_plot to {save_path}")
-    # else:
-    #     plt.show()
+    #     # Adjust the grids to match the ax
+    #     for ax_name in ["ax_marg_x", "ax_marg_y", "ax_joint"]:
+    #         g.fig.axes.remove(getattr(g, ax_name))
     #
-    # return fig
+    #     ax_joint_pos = g.ax_joint.get_position()
+    #     ax_marg_x_pos = g.ax_marg_x.get_position()
+    #     ax_marg_y_pos = g.ax_marg_y.get_position()
+    #
+    #     g.fig.add_axes(ax)
+    #     g.ax_joint.set_position(ax_joint_pos)
+    #     g.ax_marg_x.set_position(ax_marg_x_pos)
+    #     g.ax_marg_y.set_position(ax_marg_y_pos)
 
-    # Calculate the distances of each point to the best-fitted line
-    # distances = np.abs(best_fit_line(sorted_y_true) - sorted_y_preds)
-    # normalized_distances = distances / np.max(distances)
-    # ax.plot(sorted_y_true, sorted_y_preds, color="gray", alpha=0.2)
-    # for i in range(len(sorted_y_true)):
-    #     ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
-    #              color='gray', alpha=normalized_distances[i])
-    # Plot the grey lines between dots and best fit line
-    # for i in range(len(sorted_y_true)):
-    #     ax.plot(
-    #         [sorted_y_true[i], sorted_y_true[i]],
-    #         [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
-    #         color="gray",
-    #         alpha=0.2,
-    #     )
+    if savefig:
+        g.savefig(
+            save_dir / f"true_vs_preds_plot_with_errs.png",
+            format="png",
+            bbox_inches="tight",
+        )
+        g.savefig(
+            save_dir / f"true_vs_preds_plot_with_errs.svg",
+            format="svg",
+            bbox_inches="tight",
+        )
+    return g.figure
+
+
+#     data["Color"] = pd.cut(
+#         data["Difference"], bins=[-np.inf, 1, 2, np.inf], labels=["<=1", ">1", ">2"]
+#     )
+#
+#     data.to_csv("/home/bkhalil/Repos/uqdd/data.csv")
+#     # If ax is None, create a new figure and axes
+#     if ax is None:
+#         fig, ax = plt.subplots(figsize=(6, 4))
+#
+#     # Create the jointplot
+#     g = sns.jointplot(
+#         data=data,
+#         x="True Values",
+#         y="Predicted Values",
+#         kind="reg",
+#         hue="Color",
+#         palette={"<=1": "blue", ">1": "orange", ">2": "red"},
+#         marginal_kws={"bins": 20, "fill": True},
+#         scatter_kws={"alpha": alpha},
+#         ax=ax,
+#         **kwargs,
+#     )
+#
+#     # Annotate RMSE on the plot
+#     g.ax_joint.annotate(
+#         f"RMSE: {rmse:.2f}",
+#         xy=(0.95, 0.05),
+#         xycoords="axes fraction",
+#         ha="right",
+#         va="bottom",
+#     )
+#
+#     plt.show()
+#
+#     # return g
+#     g = sns.JointGrid(
+#         data=data,
+#         x="True Values",
+#         y="Predicted Values",
+#         hue="Color",
+#         palette={"<=1": "blue", ">1": "orange", ">2": "red"},
+#     )
+#     g.plot_joint(
+#         sns.regplot,
+#         scatter_kws={"alpha": alpha, "hue": "Color"},
+#     )
+#     g.plot_marginals(sns.histplot, bins=20, fill=True, kde=True)
+#     # Add the regression line
+#     sns.regplot(
+#         data=data,
+#         x="True Values",
+#         y="Predicted Values",
+#         ax=g.ax_joint,
+#         scatter=False,
+#         color="red",
+#     )
+#
+#     g.ax_joint.annotate(
+#         f"RMSE: {rmse:.2f}",
+#         xy=(0.95, 0.05),
+#         xycoords="axes fraction",
+#         ha="right",
+#         va="bottom",
+#     )
+#
+#
+# def _plot_true_vs_preds(
+#     y_pred,
+#     y_true,
+#     n_subset=None,
+#     ax=None,
+#     **kwargs,
+# ):
+#     if n_subset  is not None and n_subset < len(y_true):
+#         # Randomly select indices if subset_size is specified and less than the total number of points
+#         # random generator
+#         rng = np.random.default_rng(42)
+#         indices = rng.choice(len(y_true), size=n_subset, replace=False)
+#
+#         y_true_subset = y_true[indices]
+#         y_preds_subset = y_pred[indices]
+#     else:
+#         # Use all points if no subset_size is specified or if subset_size is larger than available points
+#         y_true_subset = y_true
+#         y_preds_subset = y_pred
+#
+#     # Sort the subset based on y_true for better visualization
+#     sorted_indices = np.argsort(y_true_subset)
+#     sorted_y_true = y_true_subset[sorted_indices]
+#     sorted_y_preds = y_preds_subset[sorted_indices]
+#
+#     # Plot the graph
+#     if ax is None:
+#         fig, ax = plt.subplots()
+#     ax.plot(sorted_y_true, sorted_y_preds, "o", label="Predictions")
+#     ax.set_xlabel("True Values")
+#     ax.set_ylabel("Predicted Values")
+#     # ax.set_title(f"True vs. Predicted Values - {task_name or 'PCM'}")
+#
+#     # Calculate the best-fitting line
+#     best_fit_coeffs = np.polyfit(sorted_y_true, sorted_y_preds, deg=1)
+#     best_fit_line = np.poly1d(best_fit_coeffs)
+#     ax.plot(
+#         sorted_y_true, best_fit_line(sorted_y_true), color="red", label="Best Fit Line"
+#     )
+#
+#     # Calculate and display the RMSE for the subset
+#     rmse = np.sqrt(np.mean((sorted_y_preds - best_fit_line(sorted_y_true)) ** 2))
+#     ax.text(
+#         0.95, 0.05, f"RMSE: {rmse:.2f}", transform=ax.transAxes, ha="right", va="bottom"
+#     )
+#
+#     # Show the legend and display/save the graph
+#     ax.legend(loc="upper left")
+#     #
+#     # if save_path:
+#     #     plt.savefig(save_path)
+#     #     print(f"Saved true_vs_preds_plot to {save_path}")
+#     # else:
+#     #     plt.show()
+#     #
+#     # return fig
+#
+#     # Calculate the distances of each point to the best-fitted line
+#     # distances = np.abs(best_fit_line(sorted_y_true) - sorted_y_preds)
+#     # normalized_distances = distances / np.max(distances)
+#     # ax.plot(sorted_y_true, sorted_y_preds, color="gray", alpha=0.2)
+#     # for i in range(len(sorted_y_true)):
+#     #     ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
+#     #              color='gray', alpha=normalized_distances[i])
+#     # Plot the grey lines between dots and best fit line
+#     # for i in range(len(sorted_y_true)):
+#     #     ax.plot(
+#     #         [sorted_y_true[i], sorted_y_true[i]],
+#     #         [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
+#     #         color="gray",
+#     #         alpha=0.2,
+#     #     )
 
 
 def plot_pred_intervals(
@@ -494,6 +764,7 @@ def plot_pred_intervals(
         )
 
     rmse = np.sqrt(np.mean((y_pred - y_true) ** 2))
+
     ax.text(
         0.05,
         0.95,
@@ -564,7 +835,7 @@ def make_uct_plots(
         ),
         ("sharpness", plot_sharpness, {}),
         ("residuals_vs_stds", uct_viz.plot_residuals_vs_stds, {}),
-        ("true_vs_predictions", plot_true_vs_preds, {}),
+        # ("true_vs_predictions", plot_true_vs_preds, {}),
     ]
 
     for plot_name, plot_func, kwargs in plot_functions:
@@ -594,6 +865,14 @@ def make_uct_plots(
             )
             # plt.savefig(fig_save_path, format="png", bbox_inches="tight")
     #
+    plots["true_vs_predictions"] = plot_true_vs_preds(
+        y_pred=y_pred,
+        y_true=y_true,
+        n_subset=n_subset,
+        distant_threshold=3,
+        savefig=savefig,
+        save_dir=save_dir,
+    )
 
     return plots
 
@@ -766,7 +1045,7 @@ def make_uq_plots(
     gaus_pred,
     errors_observed,
     mis_cal,
-    Nbins=20,
+    Nbins=100,
     include_bootstrap=True,
     task_name="PCM",
     figpath=FIGS_DIR,
@@ -1299,7 +1578,7 @@ class MetricsTable:
             cols.extend(["aleatoric_uct_mean", "epistemic_uct_mean", "total_uct_mean"])
         self.table = wandb.Table(columns=cols)
         # TODO save this to a one table specific to the data_specific_path
-        self.df_path = FIGS_DIR / self.data_specific_path / f"{self.model_name}.csv"
+        self.df_path = FIGS_DIR / self.data_specific_path / f"{self.model_name}.xlsx"
 
     def __call__(
         self,
@@ -1803,7 +2082,6 @@ def recalibrate(
     recal_metrics_std_path = Path(save_dir) / "recal_metrics_std.pkl"
     save_pickle(recal_metrics_std, recal_metrics_std_path)
 
-    # TODO COME BACK START HERE
     return iso_recal_model, std_recal  # , metrics, plots
 
     # y_pred_recal = y_pred_recal.flatten()
@@ -1878,7 +2156,7 @@ def recalibrate(
     # return recal_model
 
 
-def calc_aleatoric_mean_var_notnan(vars_all, targets_all):
+def calc_alea_epi_mean_var_notnan(vars_all, targets_all):
     """
     Calculate the mean and variance of vars_all considering only the valid (non-NaN) corresponding targets.
 
@@ -1907,8 +2185,8 @@ def calc_aleatoric_mean_var_notnan(vars_all, targets_all):
     valid_vars_flat = vars_all[valid_mask]
 
     # Calculate mean and variance on the flattened valid data
-    vars_mean = torch.mean(valid_vars_flat)
-    vars_var = torch.var(valid_vars_flat)
+    vars_mean = torch.mean(valid_vars_flat.detach())
+    vars_var = torch.var(valid_vars_flat.detach())
 
     return vars_mean, vars_var
 
