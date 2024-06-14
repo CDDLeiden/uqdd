@@ -11,7 +11,7 @@ import torch
 import torch.optim as optim
 import wandb
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from uqdd import CONFIG_DIR, MODELS_DIR, TODAY, DEVICE
 from uqdd.data.utils_data import get_topx
@@ -234,10 +234,15 @@ def build_loader(datasets, batch_size, shuffle=False):
         # num_cpu_cores = os.cpu_count()
         dataloaders = {}
         for k, v in datasets.items():
+            if k == "train":
+                sampler = get_sampler(v, bins=1000)
+            else:
+                sampler = None
             dataloaders[k] = DataLoader(
                 v,
                 batch_size=batch_size,
                 shuffle=shuffle,
+                sampler=sampler,
                 # num_workers=4,
                 # pin_memory=True,
             )
@@ -246,6 +251,74 @@ def build_loader(datasets, batch_size, shuffle=False):
         raise RuntimeError(f"Error loading data {e}")
 
     return dataloaders
+
+
+def get_sampler(dataset, bins=50):
+    labels = dataset.labels
+    # mean = labels.mean()
+    # std = labels.std()
+    # from scipy.stats import norm
+    #
+    # pdf_values = norm.pdf(labels.cpu().numpy(), loc=mean.cpu(), scale=std.cpu())
+    # # Step 2: Compute the inverse of these PDF values to get the weights
+    # weights = 1.0 / pdf_values
+    #
+    # # Step 3: Normalize these weights to form a valid probability distribution
+    # weights /= weights.sum()
+    # # Convert weights to a tensor
+    # weights_tensor = torch.tensor(weights, dtype=torch.double, device=labels.device)
+
+    # # Create the sampler with the calculated weights
+    # sampler = WeightedRandomSampler(
+    #     weights=weights_tensor.squeeze(),
+    #     num_samples=len(weights_tensor),
+    #     replacement=True,
+    #     generator=torch.Generator(device=labels.device),
+    # )
+    min_val, max_val = labels.min(), labels.max()
+    bin_edges = torch.linspace(min_val, max_val, bins + 1, device=labels.device)
+    bin_indices = torch.bucketize(labels, bin_edges)
+    bin_counts = torch.bincount(bin_indices.squeeze(), minlength=bins + 1).float()
+
+    # Compute weights for each sample - inverse of the frequency of the bin
+    weights = 1.0 / (bin_counts[bin_indices] + 1e-2)
+    # weights = 1e4 / (bin_counts[bin_indices] + 1e3)
+
+    # Normalize the weights
+    weights = weights / weights.sum() * len(weights)
+    # Clip weights to avoid excessive emphasis on rare samples
+    # max_weight = 200 * weights.min()
+    # weights = torch.clamp(weights, max=max_weight)
+    # weights = torch.log10(weights)  # min_wt keeps it at least 0,1
+    # weights += weights.min() + 0.1
+    # Plot the weights distribution
+    # import matplotlib.pyplot as plt
+    #
+    # plt.figure(figsize=(10, 6))
+    # plt.scatter(labels.cpu().numpy(), weights.cpu().numpy(), marker="o")
+    # plt.xlabel("Labels")
+    # plt.ylabel("Weights")
+    # plt.title("Weights per Label")
+    # plt.grid(True)
+    # plt.savefig("/home/bkhalil/Repos/uqdd/wts_test.png")
+
+    # Create the sampler with the calculated weights
+    sampler = WeightedRandomSampler(
+        weights=weights.squeeze(),
+        num_samples=len(weights),
+        replacement=True,
+        generator=torch.Generator(device=labels.device),
+    )
+    # labels[torch.where(weights>1000)]
+    return sampler
+
+    # labels = dataset.labels
+    # mean = labels.mean()
+    # abs_diffs = torch.abs(labels - mean)
+    #
+    # min_diff = abs_diffs.min()
+    # max_diff = abs_diffs.max()
+    # scaled_diffs = (torch.abs(abs_diffs - min_diff) + 1) / (max_diff - min_diff)
 
 
 def _build_loader(datasets, batch_size, ecfp_size=1024):
