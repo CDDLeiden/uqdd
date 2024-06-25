@@ -9,6 +9,7 @@ uqdd/data/papyrus/
 uqdd/data/tdc/
 uqdd/models/saved_models/
 uqdd/models/wandb/
+uqdd/figures/
 uqdd/run_scripts/wandb/
 wandb/
 uqdd/logs/
