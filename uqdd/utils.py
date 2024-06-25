@@ -14,7 +14,7 @@ string_types = (type(b""), type(""))
 
 
 def float_or_none(value):
-    if value.lower() == 'none':
+    if value.lower() == "none":
         return None
     try:
         return float(value)
@@ -59,7 +59,12 @@ def create_logger(name="logger", file_level="debug", stream_level="info"):
     return log
 
 
-def get_config(config_name: str, config_dir: Union[str, Path] = CONFIG_DIR, **kwargs):
+def get_config(
+    config_name: str,
+    config_dir: Union[str, Path] = CONFIG_DIR,
+    split_key=None,
+    **kwargs,
+):
     config_path = Path(config_dir) / f"{config_name}.json"
     if not config_path.exists():
         raise FileNotFoundError(
@@ -68,6 +73,8 @@ def get_config(config_name: str, config_dir: Union[str, Path] = CONFIG_DIR, **kw
 
     with open(config_path) as f:
         config = json.load(f)
+        if split_key is not None:
+            config = config[split_key]
 
     if kwargs:
         config.update(kwargs)
@@ -372,6 +379,7 @@ def load_pickle(filepath):
     except Exception as e:
         logging.error(f"Error loading file {filepath}: {e}")
 
+
 def save_df(
     df, file_path=None, output_path="./", filename="exported_file", ext="csv", **kwargs
 ):
@@ -418,6 +426,8 @@ def save_df(
         df.to_feather(file_path, **kwargs)
     elif ext == "pkl":
         df.to_pickle(file_path, **kwargs)
+    elif ext == "xlsx":
+        df.to_excel(file_path, index=False, **kwargs)
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
@@ -450,7 +460,9 @@ def load_df(input_path, **kwargs):
 def split_list_by_sizes(input_list, sizes):
     # Verify that the input list and sizes list are valid
     if len(input_list) != sum(sizes):
-        raise ValueError("The sum of sizes must be equal to the length of the input list.")
+        raise ValueError(
+            "The sum of sizes must be equal to the length of the input list."
+        )
 
     result = []
     start_index = 0
@@ -461,4 +473,3 @@ def split_list_by_sizes(input_list, sizes):
         start_index = end_index
 
     return result
-

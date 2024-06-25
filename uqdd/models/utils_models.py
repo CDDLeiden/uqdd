@@ -136,9 +136,15 @@ def get_model_config(model_name="baseline", **kwargs):
         "ensemble",
         "mcdropout",
         "evidential",
-        "gp",
+        # "gp",
     ], f"Invalid model name: {model_name}"
-    return get_config(config_name=model_name, config_dir=CONFIG_DIR, **kwargs)
+
+    split_type = kwargs.get("split_type", "random")
+    print(split_type)
+
+    return get_config(
+        config_name=model_name, config_dir=CONFIG_DIR, split_key=split_type, **kwargs
+    )
 
 
 def get_sweep_config(model_name="baseline", **kwargs):
@@ -234,15 +240,15 @@ def build_loader(datasets, batch_size, shuffle=False):
         # num_cpu_cores = os.cpu_count()
         dataloaders = {}
         for k, v in datasets.items():
-            if k == "train":
-                sampler = get_sampler(v, bins=1000)
-            else:
-                sampler = None
+            # if k == "train":
+            #     sampler = get_sampler(v, bins=1000)
+            # else:
+            #     sampler = None
             dataloaders[k] = DataLoader(
                 v,
                 batch_size=batch_size,
                 shuffle=shuffle,
-                sampler=sampler,
+                # sampler=sampler,
                 # num_workers=4,
                 # pin_memory=True,
             )
@@ -628,27 +634,66 @@ def save_model(
         print("Error saving models: " + str(e))
 
 
-def ckpt(model, config, random_num=None):
+def get_ckpt_path(config):
     dir = MODELS_DIR / "ckpt"
     dir.mkdir(parents=True, exist_ok=True)
     if config.get("ckpt_name", None):
         ckpt_name = config.get("ckpt_name")
     else:
-        ckpt_name = get_model_name(config) + f"_{random_num}" if random_num else ""
-        config["ckpt_name"] = ckpt_name
+        ckpt_name = get_model_name(config)
+    i = 0
+    model_path = Path(dir / f"{ckpt_name}.pth")
+    while model_path.exists():
+        ckpt_name_m = ckpt_name + f"{i}"
+        model_path = dir / f"{ckpt_name_m}.pth"
+        i += 1
 
-    model_path = dir / f"{ckpt_name}.pth"
-    torch.save(model.state_dict(), model_path)
+    config["ckpt_name"] = model_path.stem
+    config["ckpt_path"] = model_path
 
     return config
 
 
-def load_ckpt(model, config, ckpt_name=None):
-    if ckpt_name is None:
-        ckpt_name = config.get("ckpt_name", None)
-    if ckpt_name:
-        model_path = MODELS_DIR / "ckpt" / f"{ckpt_name}.pth"
-        model.load_state_dict(torch.load(model_path))
+def ckpt(model, config):  #  random_num=None
+    ckpt_path = config.get("ckpt_path", None)
+    if not ckpt_path:  # First time saving
+        config = get_ckpt_path(config)
+        ckpt_path = config["ckpt_path"]
+    torch.save(model.state_dict(), ckpt_path)
+    return config
+    #
+    # dir = MODELS_DIR / "ckpt"
+    # dir.mkdir(parents=True, exist_ok=True)
+    # if config.get("ckpt_name", None):
+    #     ckpt_name = config.get("ckpt_name")
+    # else:
+    #     ckpt_name = get_model_name(config) + f"_{random_num}" if random_num else ""
+    #
+    #     config["ckpt_name"] = ckpt_name
+    #
+    # model_path = dir / f"{ckpt_name}"
+    # i = 0
+    # while Path(model_path).exists():
+    #     ckpt_name_m = ckpt_name + f"{i}"
+    #     model_path = dir / f"{ckpt_name_m}"
+    #     i += 1
+    # torch.save(model.state_dict(), model_path)
+    #
+    # return config
+
+
+def load_ckpt(model, config):  # , ckpt_name=None
+    ckpt_path = config.get("ckpt_path", None)
+    ckpt_name = config.get("ckpt_name", None)
+    if ckpt_path:
+        print(f"Loading model {ckpt_name} from {ckpt_path}")
+        model.load_state_dict(torch.load(ckpt_path))
+    # if ckpt_name is None:
+    #     ckpt_name = config.get("ckpt_name", None)
+    #     # model_path = config.get("ckpt_path", None)
+    # if ckpt_name:
+    #     model_path = MODELS_DIR / "ckpt" / f"{ckpt_name}.pth"
+    #     model.load_state_dict(torch.load(model_path))
     return model
 
 

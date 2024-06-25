@@ -10,7 +10,7 @@ from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
     recalibrate_model,
-    get_dataloadar,
+    get_dataloader,
 )
 
 from uqdd.models.utils_models import (
@@ -155,8 +155,8 @@ def mc_predict(model, test_loader, aleatoric=False, num_mc_samples=100, device=D
             output_samples, alea_samples = [], []
             for _ in range(num_mc_samples):  # Multiple forward passes
                 if aleatoric:
-                    outputs, logvars = model(inputs)
-                    vars_ = torch.exp(logvars)
+                    outputs, vars_ = model(inputs)
+                    # vars_ = torch.exp(logvars)
                     output_samples.append(outputs)
                     alea_samples.append(vars_)
                 else:
@@ -185,13 +185,13 @@ def run_mcdropout(config=None):
     if config is None:
         config = get_model_config("mcdropout")
     # best_model, dataloaders, config, logger, _ = train_model_e2e(
-    best_model, config, _ = train_model_e2e(
+    best_model, config, _, _ = train_model_e2e(
         config,
         model=BaselineDNN,
         model_type="mcdropout",
         logger=LOGGER,
     )
-    dataloaders = get_dataloadar(config, device=DEVICE, logger=LOGGER)
+    dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
     aleatoric = config.get("aleatoric", False)
     num_mc_samples = config.get("num_mc_samples", 100)
 
@@ -262,11 +262,12 @@ def run_mcdropout_hyperparm(**kwargs):
 #         descriptor_protein="ankh-large",
 #         descriptor_chemical="ecfp2048",
 #         median_scaling=False,
-#         split_type="random",
+#         split_type="scaffold_cluster",
 #         ext="pkl",
 #         task_type="regression",
 #         wandb_project_name=f"mcdp-test",
-#         num_mc_samples=100,
+#         epochs=3000,
+#         num_mc_samples=10,
 #     )
 # #
 # def main():
