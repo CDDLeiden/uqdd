@@ -15,6 +15,9 @@ from tdc import Evaluator
 import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 
+from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as XLImage
+
 from uqdd import FIGS_DIR, TODAY, DATA_DIR
 from matplotlib.ticker import MaxNLocator
 
@@ -313,9 +316,8 @@ def process_preds(
         vars_[nan_mask],
     )
     # Calculate the error
-    y_err = (
-        y_pred - y_true
-    ).abs()  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
+    y_err = y_pred - y_true
+    # .abs()  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
     # Convert to numpy arrays
     y_pred, y_std, y_true, y_err, vars_ = map(
         lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)
@@ -1492,7 +1494,7 @@ class MetricsTable:
         self.config = config
         self.logger = logger or create_logger("MetricsTable")
         self.activity = config.get("activity_type", "xc50")
-        self.split = config.get("split_type", "time")
+        self.split = config.get("split_type", "scaffold_cluster")
         self.model_type = model_type
         self.desc_prot = config.get("descriptor_protein", None)
         self.desc_chem = config.get("descriptor_chemical", None)
@@ -1501,13 +1503,18 @@ class MetricsTable:
         self.data_specific_path = config.get("data_specific_path", None)
         self.model_name = config.get("model_name", "ensemble")
         self.aleatoric = config.get("aleatoric", False)
+        self.dropout = config.get("dropout", None)
         self.add_plots_to_table = add_plots_to_table
+
+        self.wandb_project_name = wandb.run.project
+        self.wandb_run_name = wandb.run.name
+
         cols = []
         if self.model_type:
             cols += ["Model type", "Task"]
         # if self.mt:
         # cols += []
-        cols += ["Activity", "Split", "desc_prot", "desc_chem"]
+        cols += ["Activity", "Split", "desc_prot", "desc_chem", "dropout"]
         if self.task_type == "regression":
             cols.extend(
                 [
@@ -1546,22 +1553,22 @@ class MetricsTable:
                 ]
             )
             if add_plots_to_table:
-                # plots
-                cols.extend(
-                    [
-                        "prediction_intervals",
-                        "ordered_prediction_intervals",
-                        "calibration",
-                        "adversarial_group_calibration",
-                        "sharpness",
-                        "residuals_vs_pred_std",
-                        "true_vs_preds",
-                        "rmv_vs_rmse",
-                        "Z_scores",
-                        "calibration_curve",
-                    ]
-                )
+                self.plot_cols = [
+                    "prediction_intervals",
+                    "ordered_prediction_intervals",
+                    "calibration",
+                    "adversarial_group_calibration",
+                    "sharpness",
+                    "residuals_vs_pred_std",
+                    "true_vs_preds",
+                    "rmv_vs_rmse",
+                    "Z_scores",
+                    "calibration_curve",
+                ]
+                cols.extend(self.plot_cols)
+
         elif self.task_type == "classification":
+            self.plot_cols = None
             cols.extend(
                 [
                     "PR-AUC",
@@ -1577,8 +1584,11 @@ class MetricsTable:
         if self.aleatoric:
             cols.extend(["aleatoric_uct_mean", "epistemic_uct_mean", "total_uct_mean"])
         self.table = wandb.Table(columns=cols)
+        self.plot_table = pd.DataFrame(columns=self.plot_cols)
         # TODO save this to a one table specific to the data_specific_path
-        self.df_path = FIGS_DIR / self.data_specific_path / f"{self.model_name}.xlsx"
+        self.df_path = (
+            FIGS_DIR / self.data_specific_path / f"{self.wandb_project_name}.csv"
+        )
 
     def __call__(
         self,
@@ -1762,6 +1772,7 @@ class MetricsTable:
         -------
         None
         """
+        # self.plot_table._append(plots, ignore_index=True)
         vals = [self.model_type] if self.model_type is not None else []
         # if self.mt:
         vals.append(task_name)
@@ -1771,6 +1782,7 @@ class MetricsTable:
                 self.split,
                 self.desc_prot,
                 self.desc_chem,
+                self.dropout,
             ]
         )
         if self.task_type == "regression":
@@ -1852,17 +1864,59 @@ class MetricsTable:
         self.table.add_data(*vals)
         plt.close()
 
+    def excel_log(self, df, path, add_plots=False):
+        if add_plots:
+            raise NotImplementedError
+        else:
+            # dropping the wandb objects
+            df.drop(columns=self.plot_cols, inplace=True, errors="ignore")
+        df["wandb project"] = self.wandb_project_name
+        df["wandb run"] = self.wandb_run_name
+
+        if path.exists():
+            book = load_workbook(path)
+            writer = pd.ExcelWriter(path, engine="openpyxl")
+            writer.book = book
+            startrow = writer.sheets["Sheet1"].max_row
+        else:
+            writer = pd.ExcelWriter(path, engine="openpyxl")
+            startrow = 0
+
+        df.to_excel(
+            writer,
+            sheet_name="Sheet1",
+            startrow=startrow,
+            header=startrow == 0,
+            index=False,
+        )
+        writer.save()
+
+    def csv_log(self):
+        df = self.table.get_dataframe()
+        df["wandb project"] = self.wandb_project_name
+        df["wandb run"] = self.wandb_run_name
+        df["model name"] = self.model_name
+
+        df.drop(columns=self.plot_cols, inplace=True, errors="ignore")
+        df.to_csv(
+            self.df_path,
+            index=False,
+            mode="a" if self.df_path.exists() else "w",
+            header=not self.df_path.exists(),
+        )
+
     def wandb_log(self):
         """
         Export the UCT metrics table to wandb.
         """
-        df = self.table.get_dataframe()
-        save_df(df, self.df_path)
+        self.csv_log()  # TODO to be replaced with excel_log when we figure out how to add the images.
+        # self.excel_log(df, self.df_path)
         wandb.log(
             {
                 f"Uncertainty Metrics Table - {self.model_type} - {wandb.run.name}": self.table
             }
-        )  #  - {self.model_type}
+        )
+        #  - {self.model_type}
         # wandb.run.log_artifact({f"Uncertainty Metrics Table": self.table})  #  - {self.model_type}
 
 
@@ -2189,6 +2243,98 @@ def calc_alea_epi_mean_var_notnan(vars_all, targets_all):
     vars_var = torch.var(valid_vars_flat.detach())
 
     return vars_mean, vars_var
+
+
+def aggregate_metrics_csv(input_file_path, output_file_path):
+    """
+    Aggregates a CSV file by specified columns, calculating mean and standard deviation
+    for numeric columns and collecting string columns into lists.
+
+    Parameters:
+    -----------
+    input_file_path (str): Path to the input CSV file.
+    output_file_path (str): Path to save the aggregated CSV file.
+
+    Returns:
+    --------
+    None
+
+    Example:
+    --------
+    >> input_file_path = '/path/to/your/inputfile.csv'  # Replace with your actual input file path
+    >> output_file_path = '/path/to/your/outputfile.csv'  # Replace with your desired output file path
+    >> aggregate_csv(input_file_path, output_file_path)
+    """
+    # Step 1: Read the CSV file into a DataFrame
+    df = pd.read_csv(input_file_path, header=0)
+
+    # Step 2: Define the columns for grouping and the columns for aggregation
+    group_cols = ["Model type", "Task", "Activity", "Split", "desc_prot", "desc_chem"]
+    numeric_cols = [
+        "RMSE",
+        "R2",
+        "MAE",
+        "MDAE",
+        "MARPD",
+        "PCC",
+        "RMS Calibration",
+        "MA Calibration",
+        "Miscalibration Area",
+        "Sharpness",
+        "NLL",
+        "CRPS",
+        "Check",
+        "Interval",
+        "rho_rank",
+        "rho_rank_sim",
+        "rho_rank_sim_std",
+        "uq_mis_cal",
+        "uq_NLL",
+        "uq_NLL_sim",
+        "uq_NLL_sim_std",
+        "Z_var",
+        "Z_var_CI_low",
+        "Z_var_CI_high",
+        "Z_mean",
+        "Z_mean_CI_low",
+        "Z_mean_CI_high",
+        "aleatoric_uct_mean",
+        "epistemic_uct_mean",
+        "total_uct_mean",
+    ]
+    string_cols = ["wandb project", "wandb run", "model name"]
+
+    # Step 3: Group the DataFrame by the specified columns
+    grouped = df.groupby(group_cols)
+
+    # Step 4: Aggregate the numeric columns
+    aggregated = grouped[numeric_cols].agg(["mean", "std"])
+
+    # Combine mean and std into the required format
+    for col in numeric_cols:
+        aggregated[(col, "combined")] = (
+            aggregated[(col, "mean")].round(3).astype(str)
+            + " ("
+            + aggregated[(col, "std")].round(3).astype(str)
+            + ")"
+        )
+
+    # Drop the separate mean and std columns, keeping only the combined column
+    aggregated = aggregated[[col for col in aggregated.columns if col[1] == "combined"]]
+
+    # Rename the columns to a simpler format
+    aggregated.columns = [col[0] for col in aggregated.columns]
+
+    # Step 5: Aggregate the string columns into lists
+    string_aggregated = grouped[string_cols].agg(lambda x: list(x))
+
+    # Combine the numeric and string aggregations
+    final_aggregated = pd.concat([aggregated, string_aggregated], axis=1).reset_index()
+
+    # Step 6: Write the aggregated results into a new CSV file
+    final_aggregated.to_csv(output_file_path, index=False)
+
+    print("Aggregation complete and results saved to", output_file_path)
 
 
 #
