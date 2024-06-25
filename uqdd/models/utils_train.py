@@ -656,7 +656,9 @@ def train_model(
         results_arr = []
         # "none", "mean", "sum"
         # get a random number to add to the name of the best modelfor checkpointing
-        random_num = np.random.randint(0, 1000000)
+        random_num = np.random.randint(0, 10000000000)
+
+        # create ckpting path here
 
         for epoch in tqdm(range(config.get("epochs", 10)), desc="Epochs"):
             # for epoch in range(config.epochs + 1):
@@ -685,7 +687,7 @@ def train_model(
                 if vloss < best_val_loss:
                     best_val_loss = vloss
                     early_stop_counter = 0
-                    config = ckpt(model, config, random_num=random_num)
+                    config = ckpt(model, config)
                     # best_model = model
                     # save the best model state dict to var
                     # torch.save(model.state_dict(), MODELS_DIR / "best_model_ckpt.pth")
@@ -846,6 +848,7 @@ def assign_wandb_tags(run, config):
         f"max_norm={config.get('max_norm', None)}",
         TODAY,
         config.get("tags", None),
+        f"ev_lamb={config.get('lamb', None)}",
     ]
     # filter out None values
     wandb_tags = [tag for tag in wandb_tags if tag]
@@ -853,7 +856,7 @@ def assign_wandb_tags(run, config):
     return run
 
 
-def get_dataloadar(
+def get_dataloader(
     config,
     device=DEVICE,
     logger=None,
@@ -1030,7 +1033,7 @@ def train_model_e2e(
 
     model_ = model(config=config, **model_kwargs, logger=logger).to(device)
 
-    dataloaders = get_dataloadar(config, device=device, logger=logger)
+    dataloaders = get_dataloader(config, device=device, logger=logger)
     best_model, test_loss, results_arr = run_model(
         config,
         model_,
