@@ -19,7 +19,7 @@ from uqdd.models.utils_train import (
     predict,
     recalibrate_model,
     assign_wandb_tags,
-    get_dataloadar,
+    get_dataloader,
     post_training_save_model,
 )
 
@@ -76,7 +76,6 @@ class EnsembleDNN(nn.Module):
 
 
 def log_wandb_ensemble(results_tensor_avg, config):
-
     wandb_keys = [
         "epoch",
         "train/loss",
@@ -85,6 +84,8 @@ def log_wandb_ensemble(results_tensor_avg, config):
         "train/evs",
         "train/alea_mean",
         "train/alea_var",
+        "model/pnorm",
+        "model/gnorm",
         "val/loss",
         "val/rmse",
         "val/r2",
@@ -109,6 +110,41 @@ def log_wandb_ensemble(results_tensor_avg, config):
     # run.finish()
 
 
+def log_wandb_test(test_tensor_avg, config):
+    wandb_keys = [
+        "test/loss",
+        "test/rmse",
+        "test/r2",
+        "test/evs",
+        "test/alea_mean",
+        "test/alea_var",
+    ]
+    # multitask = config.get("MT", False)
+    n_targets = config.get("n_targets", -1)
+
+    if n_targets > 1:  # MT
+        for task in n_targets:
+            wandb_keys += [
+                f"test/rmse/task_{task}",
+                f"test/r2/task_{task}",
+                f"test/evs/task_{task}",
+            ]
+
+    test_data = dict(zip(wandb_keys, test_tensor_avg[1:]))
+    wandb.log(test_data)
+
+    # # iterate over the metrics and log them to wandb
+    # num_epochs, num_metrics = test_tensor_avg.shape
+    #
+    # for epoch in range(num_epochs):
+    #     wandb.log(
+    #         # all data except epoch
+    #         data=dict(zip(wandb_keys, test_tensor_avg[epoch, :])),
+    #         step=epoch,  # int(results_tensor_avg[epoch, 0]),
+    #     )
+    # # run.finish()
+
+
 def fill_to_max_epochs(array, max_epochs):
     num_metrics = array.shape[1]
     filled_array = np.full((max_epochs, num_metrics), np.nan)
@@ -116,7 +152,7 @@ def fill_to_max_epochs(array, max_epochs):
     return filled_array
 
 
-def process_results_arrs(result_arrs, config, logger):
+def process_results_arrs(result_arrs, test_arrs, config, logger):
     try:
         # get the maximum number of epochs
         max_epochs = max([results_arr.shape[0] for results_arr in result_arrs])
@@ -126,9 +162,8 @@ def process_results_arrs(result_arrs, config, logger):
         ]
         # now we stack result tensors on dim 2
         result_arrs = np.stack(result_arrs, axis=2)
-        logger.debug(
-            f"{result_arrs.shape=}"
-        )  # this should equal to (num_epochs, metrics_collected, ensemble_size)
+        logger.debug(f"{result_arrs.shape=}")
+        # this should equal to (num_epochs, metrics_collected, ensemble_size)
 
         # Take average across model metrics
         # results_tensor_avg = result_arrs.nanmean(2)
@@ -136,6 +171,13 @@ def process_results_arrs(result_arrs, config, logger):
         print(f"{results_tensor_avg.shape=}")
         # HERE we should report to wandb
         log_wandb_ensemble(results_tensor_avg, config)
+
+        # Test Arrs
+        test_arrs = np.stack(test_arrs, axis=1)
+        test_tensor_avg = np.nanmean(test_arrs, 1)
+        logger.debug(f"{test_tensor_avg.shape=}")
+
+        log_wandb_test(test_tensor_avg, config)
 
     except Exception as e:
         logger.exception(f"Error in stacking results: {e}")
@@ -324,6 +366,7 @@ def run_ensemble(config=None):
     logger = LOGGER
     best_models = []
     result_arrs = []
+    test_arrs = []
 
     # Here we should init the wandb to track the resources
     # start wandb run
@@ -341,8 +384,8 @@ def run_ensemble(config=None):
     for _ in range(ensemble_size):
         # best_model, dataloaders, config_, logger, results_arr = train_model_e2e(
         # For debugging of different sizes results
-        config["epochs"] += 1
-        best_model, config_, results_arr = train_model_e2e(
+        # config["epochs"] += 1
+        best_model, config_, results_arr, test_arr = train_model_e2e(
             config,
             model=BaselineDNN,
             model_type="ensemble",
@@ -354,10 +397,14 @@ def run_ensemble(config=None):
         config["seed"] += 1
 
         result_arrs.append(results_arr)
+        test_arrs.append(test_arr)
 
     # else:
-    #     best_models, result_arrs, config_ = parallel_train_ensemble(ensemble_size, config, logger)
-    process_results_arrs(result_arrs, config_, logger)
+    #     best_models, result_arrs, config_ = parallel_train_ensemble(ensemble_size, config, logger)del model
+    # gc.collect()
+    # torch.cuda.empty_cache()
+
+    process_results_arrs(result_arrs, test_arrs, config_, logger)
 
     logger.debug(f"{len(best_models)=}")
     ensemble_model = EnsembleDNN(config_, model_list=best_models).to(DEVICE)
@@ -373,7 +420,7 @@ def run_ensemble(config=None):
         write_model=True,
     )
 
-    dataloaders = get_dataloadar(config, device=DEVICE, logger=LOGGER)
+    dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
 
     preds, labels, alea_vars = predict(
         ensemble_model, dataloaders["test"], device=DEVICE
@@ -427,7 +474,6 @@ def run_ensemble_hyperparm(**kwargs):
     wandb.agent(sweep_id, function=run_ensemble, count=sweep_count)
 
 
-#
 # if __name__ == "__main__":
 #     ensemble_model, iso_recal_model, std_recal, metrics, plots = run_ensemble_wrapper(
 #         data_name="papyrus",
