@@ -1,5 +1,5 @@
 {
-  "program": "baseline.py",
+  "program": "model_parser.py",
   "entity": "bolak92",
   "method": "bayes",
   "metric": {
@@ -7,6 +7,9 @@
     "name": "val/loss"
   },
   "parameters": {
+    "model": {
+      "value": "baseline"
+    },
     "aleatoric": {
       "value": true
     },
