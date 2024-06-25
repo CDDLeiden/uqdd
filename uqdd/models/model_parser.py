@@ -43,9 +43,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--median_scaling",
-        action="store_true",
-        help="Use median scaling",
+        type=bool,
+        default=False,
+        help="Label Median scaling function argument",
     )
+    # parser.add_argument(
+    #     "--median_scaling",
+    #     action="store_true",
+    #     help="Use median scaling",
+    # )
     parser.add_argument(
         "--task_type",
         type=str,
@@ -213,7 +219,7 @@ if __name__ == "__main__":
     )
 
     # * Evidential args * #
-
+    parser.add_argument("--lamb", type=float, default=None, help="Lambda value")
     parser.add_argument("--tags", type=str, default=None, help="Extra Tags for wandb")
     parser.add_argument(
         "--seed",
