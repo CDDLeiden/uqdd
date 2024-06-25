@@ -681,7 +681,7 @@ def standardize_df(
 
 # define function that transforms SMILES strings into ECFPs
 def ecfp_from_smiles(
-    smiles, radius=4, length=2**10, use_features=False, use_chirality=False
+    smiles, radius=2, length=2**10, use_features=False, use_chirality=False
 ):
     """
     Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
@@ -732,7 +732,7 @@ def wrapper_ecfp_from_smiles(args):
 
 def generate_ecfp(
     smiles,
-    radius=4,
+    radius=2,
     length=2**10,
     use_features=False,
     use_chirality=False,
@@ -961,7 +961,7 @@ def get_chem_desc(
         )
     elif desc_type.startswith("ecfp"):
         length = int(desc_type[4:])
-        desc_mapper = generate_ecfp(unique_entries, radius=4, length=length, **kwargs)
+        desc_mapper = generate_ecfp(unique_entries, radius=2, length=length, **kwargs)
     elif desc_type == "moldesc":  # errorness
         desc_mapper = generate_mol_descriptors(unique_entries, **kwargs)
     elif desc_type == "graph2d":
