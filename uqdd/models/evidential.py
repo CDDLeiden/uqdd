@@ -13,7 +13,7 @@ from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
     recalibrate_model,
-    get_dataloadar,
+    get_dataloader,
 )
 
 from uqdd.models.utils_models import (
@@ -64,12 +64,14 @@ class NormalInvGamma(nn.Module):
     def forward(self, x):
         out = self.dense(x)
         mu, logv, logalpha, logbeta = torch.split(out, self.out_units, dim=-1)
-        # mu_c, logv_c, logalpha_c, logbeta_c = torch.chunk(out, 4, dim=-1)
         v = self.evidence(logv)
         alpha = self.evidence(logalpha) + 1
         beta = self.evidence(logbeta)
+
+        return mu, v, alpha, beta
+        # , alea_var
+        # mu_c, logv_c, logalpha_c, logbeta_c = torch.chunk(out, 4, dim=-1)
         # alea_var = beta / (alpha - 1)
-        return mu, v, alpha, beta  # , alea_var
 
 
 class Dirichlet(nn.Module):
@@ -160,13 +162,13 @@ def run_evidential(config=None):
     # config["aleatoric"] = False
 
     # best_model, dataloaders, config, logger, _ = train_model_e2e(
-    best_model, config, _ = train_model_e2e(
+    best_model, config, _, _ = train_model_e2e(
         config,
         model=EvidentialDNN,
         model_type="evidential",
         logger=LOGGER,
     )
-    dataloaders = get_dataloadar(config, device=DEVICE, logger=LOGGER)
+    dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
 
     preds, labels, alea_vars, epi_vars = ev_predict(
         best_model, dataloaders["test"], device=DEVICE
@@ -222,22 +224,24 @@ def run_evidential_wrapper(**kwargs):
     return run_evidential(config)
 
 
-if __name__ == "__main__":
-    run_evidential_wrapper(
-        data_name="papyrus",
-        n_targets=-1,
-        task_type="regression",
-        activity_type="xc50",
-        split_type="random",
-        descriptor_protein="ankh-large",
-        descriptor_chemical="ecfp2048",
-        median_scaling=False,
-        ext="pkl",
-        wandb_project_name="evidential-test",
-        epochs=200,
-        seed=50,
-    )
-    pass
+#
+# #
+# if __name__ == "__main__":
+#     run_evidential_wrapper(
+#         data_name="papyrus",
+#         n_targets=-1,
+#         task_type="regression",
+#         activity_type="xc50",
+#         split_type="random",
+#         descriptor_protein="ankh-large",
+#         descriptor_chemical="ecfp2048",
+#         median_scaling=False,
+#         ext="pkl",
+#         wandb_project_name="evidential-test",
+#         epochs=5,
+#         seed=50,
+#     )
+#     pass
 
 # def main():
 #     parser = argparse.ArgumentParser(description="Run Ensemble Model")
