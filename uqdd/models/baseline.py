@@ -18,6 +18,7 @@ class BaselineDNN(nn.Module):
         self,
         config=None,
         logger=None,
+        aleavar_layer_included=True,
         **kwargs,
     ):
         super(BaselineDNN, self).__init__()
@@ -28,7 +29,7 @@ class BaselineDNN(nn.Module):
         n_targets = config.get("n_targets", -1)
         self.MT = config.get("MT", n_targets > 1)
         self.aleatoric = config.get("aleatoric", False)
-
+        self.aleavar_layer_included = aleavar_layer_included
         assert task_type in [
             "regression",
             "classification",
@@ -79,8 +80,11 @@ class BaselineDNN(nn.Module):
 
         _output = self.regressor_or_classifier(combined_features)
         output = self.output_layer(_output)
-
-        var_ = self.aleavar_layer(_output)
+        var_ = (
+            self.aleavar_layer(_output)
+            if self.aleatoric and self.aleavar_layer_included
+            else None
+        )
 
         return output, var_
         # if self.aleatoric:
@@ -147,7 +151,7 @@ class BaselineDNN(nn.Module):
         self.logger.debug(f"Regressor layers: {regressor_layers}")
         self.logger.debug(f"Output dimension: {output_dim}")
         self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
-        if self.aleatoric:
+        if self.aleatoric and self.aleavar_layer_included:
             self.aleavar_layer = nn.Sequential(
                 nn.Linear(regressor_layers[-1], output_dim),
                 nn.Softplus(),  # TODO questionable
@@ -165,8 +169,10 @@ class BaselineDNN(nn.Module):
 
 
 def run_baseline(config=None):
+    # if config is None and wandb.config is not None:
+    #     config = wandb.config
     # best_model, _, _, _, _ = train_model_e2e(
-    best_model, _, _ = train_model_e2e(
+    best_model, _, _, _ = train_model_e2e(
         config, model=BaselineDNN, model_type="baseline", logger=LOGGER
     )
 
@@ -201,7 +207,58 @@ def run_baseline_hyperparam(**kwargs):
         project=wandb_project_name,
     )
     print(f"Running sweep with SWEEP_ID: {sweep_id}")
+
     wandb.agent(sweep_id, function=run_baseline, count=sweep_count)
+
+
+#
+# if __name__ == "__main__":
+#     data_name = "papyrus"
+#     n_targets = -1
+#     task_type = "regression"
+#     activity = "xc50"
+#     split = "random"
+#     desc_prot = "ankh-large"
+#     desc_chem = "ecfp2048"
+#     median_scaling = False
+#     ext = "pkl"
+#     wandb_project_name = "baseline-test"
+#     sweep_count = 0  # 250
+#     aleatoric = True
+#     # epochs=1
+#     #
+#     run_baseline_wrapper(
+#         data_name=data_name,
+#         activity_type=activity,
+#         n_targets=n_targets,
+#         descriptor_protein=desc_prot,
+#         descriptor_chemical=desc_chem,
+#         median_scaling=median_scaling,
+#         split_type=split,
+#         aleatoric=aleatoric,
+#         ext=ext,
+#         task_type=task_type,
+#         wandb_project_name=wandb_project_name,
+#         logger=None,
+#         epochs=5,
+#     )
+#     #
+#     sweep_count = 5
+#     epochs = 5
+#     run_baseline_hyperparam(
+#         sweep_count=sweep_count,
+#         epochs=epochs,
+#         data_name=data_name,
+#         activity_type=activity,
+#         n_targets=n_targets,
+#         descriptor_protein=desc_prot,
+#         descriptor_chemical=desc_chem,
+#         split_type=split,
+#         ext=ext,
+#         task_type=task_type,
+#         wandb_project_name=wandb_project_name,
+#     )
+#     print("Done")
 
 
 #
@@ -423,52 +480,6 @@ def run_baseline_hyperparam(**kwargs):
 #         )
 #
 #
-# if __name__ == "__main__":
-#     main()
-# #
-# data_name = "papyrus"
-# n_targets = -1
-# task_type = "regression"
-# activity = "xc50"
-# split = "random"
-# desc_prot = "ankh-base"
-# desc_chem = "ecfp2048"
-# median_scaling = False
-# ext = "pkl"
-# wandb_project_name = "baseline-test-272"
-# sweep_count = 0  # 250
-# aleatoric = True
-# # epochs=1
-#
-# run_baseline_wrapper(
-#     data_name=data_name,
-#     activity_type=activity,
-#     n_targets=n_targets,
-#     descriptor_protein=desc_prot,
-#     descriptor_chemical=desc_chem,
-#     median_scaling=median_scaling,
-#     split_type=split,
-#     aleatoric=aleatoric,
-#     ext=ext,
-#     task_type=task_type,
-#     wandb_project_name=wandb_project_name,
-#     logger=None,
-# )
-
-# sweep_count = 10
-# run_baseline_hyperparam(
-#     sweep_count=sweep_count,
-#     data_name=data_name,
-#     activity_type=activity,
-#     n_targets=n_targets,
-#     descriptor_protein=desc_prot,
-#     descriptor_chemical=desc_chem,
-#     split_type=split,
-#     ext=ext,
-#     task_type=task_type,
-#     wandb_project_name=wandb_project_name,
-# )
-# print("Done")
 
 
 # def _run_baseline(
