@@ -634,6 +634,32 @@ def save_model(
         print("Error saving models: " + str(e))
 
 
+def load_model(model_class, model_path, **model_kwargs):
+    """
+    Load a PyTorch model from a saved state dictionary.
+
+    Parameters:
+    -----------
+    model_class (torch.nn.Module): The class of the model to be loaded.
+    model_path (str): Path to the .pt file containing the state dictionary.
+    **model_kwargs: Additional keyword arguments to initialize the model.
+
+    Returns:
+    -------
+        torch.nn.Module: The model with loaded weights.
+    """
+    # Initialize the model
+    model = model_class(**model_kwargs)
+
+    # Load the state dictionary from the specified path
+    state_dict = torch.load(model_path)
+
+    # Load the state dictionary into the model
+    model.load_state_dict(state_dict)
+
+    return model
+
+
 def get_ckpt_path(config):
     dir = MODELS_DIR / "ckpt"
     dir.mkdir(parents=True, exist_ok=True)
