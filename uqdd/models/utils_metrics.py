@@ -335,7 +335,7 @@ def get_preds_export_path(data_specific_path, model_name):
 def create_df_preds(
     y_true,
     y_pred,
-    y_std,
+    y_eps,
     y_err,
     y_alea=None,
     export: bool = True,
@@ -353,8 +353,8 @@ def create_df_preds(
         The true target values.
     y_pred : array-like
         The predicted values.
-    y_std : array-like
-        The standard deviation of the predictions.
+    y_eps : array-like
+        The epistemic uncertainty part.
     y_err : array-like
         The prediction errors.
     y_alea : array-like or None
@@ -375,7 +375,7 @@ def create_df_preds(
         {
             "y_true": y_true,
             "y_pred": y_pred,
-            "y_std": y_std,
+            "y_eps": y_eps,
             "y_err": y_err,
             "y_alea": y_alea,
         }
@@ -1476,6 +1476,111 @@ def get_rmvs_and_rmses(uq_ordered, errors_ordered, Nbins=10, include_bootstrap=T
     return rmvs, rmses, ci_low, ci_high
 
 
+# TODO : Implement Reliability Diagrams
+def reliability_diagram(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    n_bins: int = 10,
+    ax: plt.Axes = None,
+    **kwargs,
+):  # CONCEPT FROM COPILOT
+    """
+    Plot a reliability diagram.
+
+    Parameters
+    ----------
+    y_true : np.ndarray
+        True values.
+    y_pred : np.ndarray
+        Predicted values.
+    n_bins : int, optional
+        Number of bins. The default is 10.
+    ax : plt.Axes, optional
+        Matplotlib axes. The default is None.
+
+    Returns
+    -------
+    ax : plt.Axes
+        Matplotlib axes.
+    """
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    # Calculate the number of samples in each bin
+    bin_sizes = np.histogram(y_pred, bins=n_bins)[0]
+    bin_edges = np.histogram(y_pred, bins=n_bins)[1]
+
+    # Calculate the mean predicted value in each bin
+    bin_means = [
+        y_pred[(y_pred >= bin_edges[i]) & (y_pred < bin_edges[i + 1])].mean()
+        for i in range(n_bins)
+    ]
+
+    # Calculate the mean true value in each bin
+    bin_true_means = [
+        y_true[(y_pred >= bin_edges[i]) & (y_pred < bin_edges[i + 1])].mean()
+        for i in range(n_bins)
+    ]
+
+    # Calculate the fraction of true values in each bin
+    bin_fractions = [
+        y_true[(y_pred >= bin_edges[i]) & (y_pred < bin_edges[i + 1])].mean()
+        for i in range(n_bins)
+    ]
+
+    # Plot the reliability diagram
+    ax.plot(bin_means, bin_fractions, **kwargs)
+    ax.plot([0, 1], [0, 1], "k--", label="Perfectly calibrated")
+    ax.set_xlabel("Mean predicted value")
+    ax.set_ylabel("Fraction of true values")
+    ax.set_title("Reliability Diagram")
+    ax.legend()
+
+    return ax
+
+
+# TODO Implement accuracy-rejection curves - Concept from Kajetan
+
+unc_names = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]
+components = ["TU", "AU", "EU"]
+thresholds = list(range(50, 101, 1))
+
+
+# def evaluate_all(preds, y_tests, uncertainties, metric, runs):
+#
+#     all_perfs = list()
+#
+#     torch.manual_seed(seed)
+#
+#     for i in range(len(dataset_names)):
+#         for c, comp in enumerate(components):
+#             for measure in unc_names:
+#                 if comp == "EU" and measure == "B2":
+#                     continue  # B2 is not defined for epistemic uncertainty
+#                 scores = uncertainties[i][measure][c]
+#                 for r in range(runs):
+#                     for t in thresholds:
+#                         num_samples = int(len(preds[i]) / 100 * t)
+#                         idx = torch.argsort(scores[:, r], descending=False)[
+#                             :num_samples
+#                         ]
+#                         all_perfs.append(
+#                             metric(preds[i][idx, r], y_tests[i][idx]).item() * 100
+#                         )
+#         # add random selection
+#         for r in range(runs):
+#             for t in thresholds:
+#                 idx = torch.randperm(len(preds[i]))[: int(len(preds[i]) / 100 * t)]
+#                 all_perfs.append(metric(preds[i][idx, r], y_tests[i][idx]).item() * 100)
+#
+#     return torch.tensor(all_perfs).reshape(
+#         len(dataset_names), (len(components) * len(unc_names)), runs, len(thresholds)
+#     )
+
+
 class MetricsTable:
     def __init__(
         self,
@@ -1483,6 +1588,8 @@ class MetricsTable:
         model_type=None,
         add_plots_to_table=False,
         logger=None,
+        project_name=None,
+        run_name=None,
     ):
         """
         Initialize the metrics table.
@@ -1502,12 +1609,12 @@ class MetricsTable:
         self.task_type = config.get("task_type", "regression")
         self.data_specific_path = config.get("data_specific_path", None)
         self.model_name = config.get("model_name", "ensemble")
-        self.aleatoric = config.get("aleatoric", False)
+        # self.aleatoric = config.get("aleatoric", False)
         self.dropout = config.get("dropout", None)
         self.add_plots_to_table = add_plots_to_table
 
-        self.wandb_project_name = wandb.run.project
-        self.wandb_run_name = wandb.run.name
+        self.wandb_project_name = wandb.run.project or project_name
+        self.wandb_run_name = wandb.run.name or run_name
 
         cols = []
         if self.model_type:
@@ -1518,8 +1625,8 @@ class MetricsTable:
         if self.task_type == "regression":
             cols.extend(
                 [
-                    "RMSE",
                     "R2",
+                    "RMSE",
                     "MAE",
                     "MDAE",
                     "MARPD",
@@ -1581,8 +1688,8 @@ class MetricsTable:
                     "RP@K",
                 ]
             )
-        if self.aleatoric:
-            cols.extend(["aleatoric_uct_mean", "epistemic_uct_mean", "total_uct_mean"])
+        # if self.aleatoric:
+        cols.extend(["aleatoric_uct_mean", "epistemic_uct_mean", "total_uct_mean"])
         self.table = wandb.Table(columns=cols)
         self.plot_table = pd.DataFrame(columns=self.plot_cols)
         # TODO save this to a one table specific to the data_specific_path
@@ -1596,7 +1703,8 @@ class MetricsTable:
         y_std,
         y_true,
         y_err,
-        y_alea=None,
+        y_eps,
+        # y_alea=None,
         n_subset=None,
         task_name=None,
         figpath=None,
@@ -1642,7 +1750,8 @@ class MetricsTable:
             y_std=y_std,
             y_true=y_true,
             y_err=y_err,
-            y_alea=y_alea,
+            # y_alea=y_alea,
+            y_eps=y_eps,
             n_subset=n_subset,
             task_name=task_name,
             data_specific_path=self.data_specific_path,
@@ -1672,10 +1781,11 @@ class MetricsTable:
     def calculate_metrics(
         self,
         y_pred,
-        y_std,
+        y_std,  # Predicted std (Aleatoric from PNN)
         y_true,
         y_err,
-        y_alea,
+        # y_alea,
+        y_eps=None,
         data_specific_path=None,
         n_subset=None,
         task_name=None,  # model_name=None,
@@ -1735,19 +1845,22 @@ class MetricsTable:
             plots = {}
 
         # self.aleatoric = False if y_alea is None else True
-        if self.aleatoric:
-            if y_alea is None:
-                (
-                    metrics["aleatoric_uct_mean"],
-                    metrics["epistemic_uct_mean"],
-                    metrics["total_uct_mean"],
-                ) = (None, None, None)
-            else:
-                y_alea_mean = y_alea.mean()
-                y_std_mean = y_std.mean()
-                metrics["aleatoric_uct_mean"] = y_alea_mean
-                metrics["epistemic_uct_mean"] = y_std_mean
-                metrics["total_uct_mean"] = y_alea_mean + y_std_mean
+        # if self.aleatoric:
+        # if y_alea is None:
+        if y_eps is None:
+            (
+                metrics["aleatoric_uct_mean"],
+                metrics["epistemic_uct_mean"],
+                metrics["total_uct_mean"],
+            ) = (None, None, None)
+        else:
+            # y_alea_mean = y_alea.mean()
+            y_eps_mean = y_eps.mean()
+            y_alea_mean = y_std.mean()
+            # y_std_mean = y_std.mean()
+            metrics["aleatoric_uct_mean"] = y_alea_mean
+            metrics["epistemic_uct_mean"] = y_eps_mean
+            metrics["total_uct_mean"] = y_alea_mean + y_eps_mean
 
         plots = {k: wandb.Image(v) for k, v in plots.items()}
 
@@ -1788,8 +1901,8 @@ class MetricsTable:
         if self.task_type == "regression":
             vals.extend(
                 [
-                    metrics["accuracy"]["rmse"],
                     metrics["accuracy"]["r2"],
+                    metrics["accuracy"]["rmse"],
                     metrics["accuracy"]["mae"],
                     metrics["accuracy"]["mdae"],
                     metrics["accuracy"]["marpd"],
@@ -1852,14 +1965,14 @@ class MetricsTable:
                     metrics["RP@K"],
                 ]
             )
-        if self.aleatoric:
-            vals.extend(
-                [
-                    metrics["aleatoric_uct_mean"],
-                    metrics["epistemic_uct_mean"],
-                    metrics["total_uct_mean"],
-                ]
-            )
+        # if self.aleatoric:
+        vals.extend(
+            [
+                metrics["aleatoric_uct_mean"],
+                metrics["epistemic_uct_mean"],
+                metrics["total_uct_mean"],
+            ]
+        )
 
         self.table.add_data(*vals)
         plt.close()
