@@ -355,7 +355,7 @@ def evaluate_predictions(
     config,
     preds,
     labels,
-    alea_vars=None,  # TODO to decide whether to include this in the metrics part
+    alea_vars,  # TODO to decide whether to include this in the metrics part
     model_type="ensemble",
     logger=None,
     epi_vars=None,
@@ -377,20 +377,21 @@ def evaluate_predictions(
     uct_metrics_logger = MetricsTable(
         model_type=model_type,
         config=config,
-        add_plots_to_table=True,  # * we can turn on if we want to see them in wandb * #
+        add_plots_to_table=True,
+        # * we can turn on if we want to see them in wandb * #
         logger=logger,
     )
 
     # preds, labels = predict(model, dataloaders["test"], return_targets=True)
-    y_true, y_pred, y_std, y_err, y_alea = process_preds(
+    y_true, y_pred, y_eps, y_err, y_alea = process_preds(
         preds, labels, alea_vars, epi_vars, None
     )
     _ = create_df_preds(
         y_true,
         y_pred,
-        y_std,
+        y_alea,  # y_std,
         y_err,
-        y_alea,
+        y_eps,  # y_alea,
         True,
         data_specific_path,
         model_name,
@@ -400,30 +401,55 @@ def evaluate_predictions(
     # * note here we use only the epistemic part * #
     metrics, plots = uct_metrics_logger(
         y_pred=y_pred,
-        y_std=y_std,
+        y_std=y_alea,
         y_true=y_true,
         y_err=y_err,
-        y_alea=y_alea,
+        # y_alea=y_alea,
+        y_eps=y_eps,
         task_name=task_name,
+    )
+
+    # * calculate metrics for a subset of the datapoints * #
+    submetrics, subplots = uct_metrics_logger(
+        y_pred=y_pred,
+        y_std=y_alea,
+        y_true=y_true,
+        y_err=y_err,
+        # y_alea=y_alea,
+        y_eps=y_eps,
+        task_name=task_name + " Subset",
+        n_subset=100,
     )
 
     if multitask:
         tasks = get_tasks(data_name, activity_type, n_targets)
         for task_idx in range(len(tasks)):
             task_name = tasks[task_idx]
-            y_true, y_pred, y_std, y_err, y_alea = process_preds(
+            y_true, y_pred, y_eps, y_err, y_alea = process_preds(
                 preds, labels, alea_vars, epi_vars, task_idx
             )
             taskmetrics, taskplots = uct_metrics_logger(
                 y_pred=y_pred,
-                y_std=y_std,
+                y_std=y_alea,
                 y_true=y_true,
                 y_err=y_err,
-                y_alea=y_alea,
+                # y_alea=y_alea,
+                y_eps=y_eps,
                 task_name=task_name,
             )
             metrics[task_name] = taskmetrics
             plots[task_name] = taskplots
+
+            submetrics[task_name], subplots[task_name] = uct_metrics_logger(
+                y_pred=y_pred,
+                y_std=y_alea,
+                y_true=y_true,
+                y_err=y_err,
+                # y_alea=y_alea,
+                y_eps=y_eps,
+                task_name=task_name + " Subset",
+                n_subset=100,
+            )
 
     # * log the metrics and plots to wandb * #
     if wandb_push:
@@ -1115,7 +1141,7 @@ def recalibrate_model(
 
     figures_path = FIGS_DIR / data_specific_path / model_name
 
-    # Validation Set
+    # Validation Set # TODO need to fix this
     y_true_val, y_pred_val, y_std_val, y_err_val, _ = process_preds(
         preds_val, labels_val, epi_vars=epi_val
     )
