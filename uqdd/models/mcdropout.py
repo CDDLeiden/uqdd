@@ -146,7 +146,15 @@ def mc_predict(model, test_loader, aleatoric=False, num_mc_samples=100, device=D
     outputs_all = []
     targets_all = []
     aleatoric_all = []
-
+    # Here we need to selectively set batchnorm layers to eval mode
+    for m in model.modules():
+        if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            m.eval()
+    # network.train()
+    # # put bachnorm in eval mode
+    # for m in network.modules():
+    #     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+    #         m.eval()
     with torch.no_grad():
         for inputs, targets in tqdm(
             test_loader, total=len(test_loader), desc="MC prediction"
