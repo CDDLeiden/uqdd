@@ -191,7 +191,9 @@ def mc_predict(model, test_loader, aleatoric=False, num_mc_samples=100, device=D
 
 def run_mcdropout(config=None):
     if config is None:
-        config = get_model_config("mcdropout")
+        config = get_model_config(
+            "mcdropout", split_type="random"
+        )  # * Defaulting to random split_type *
     # best_model, dataloaders, config, logger, _ = train_model_e2e(
     best_model, config, _, _ = train_model_e2e(
         config,
@@ -224,20 +226,27 @@ def run_mcdropout(config=None):
         num_mc_samples=num_mc_samples,
         device=DEVICE,
     )
-    iso_recal_model, std_recal = recalibrate_model(
-        preds_val, labels_val, preds, labels, config, uct_logger=uct_logger
+    iso_recal_model = recalibrate_model(
+        preds_val,
+        labels_val,
+        alea_vars_val,
+        preds,
+        labels,
+        alea_vars,
+        config=config,
+        uct_logger=uct_logger,
     )
 
     uct_logger.wandb_log()
     wandb.finish()
 
-    return best_model, iso_recal_model, std_recal, metrics, plots
+    return best_model, iso_recal_model, metrics, plots
 
 
 def run_mcdropout_wrapper(**kwargs):
     global LOGGER
     LOGGER = create_logger(name="mcdropout", file_level="debug", stream_level="info")
-    config = get_model_config(model_name="mcdropout", **kwargs)
+    config = get_model_config(model_type="mcdropout", **kwargs)
 
     return run_mcdropout(config)
     # best_model, metrics, plots = run_mcdropout(config)
