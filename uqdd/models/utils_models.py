@@ -97,7 +97,7 @@ def get_desc_len(*descriptors: str, logger=None):
     return tuple(lengths)
 
 
-def get_model_config(model_name="baseline", **kwargs):
+def get_model_config(model_type="baseline", **kwargs):
     """
     Retrieve the configuration dictionary for model training.
 
@@ -131,19 +131,19 @@ def get_model_config(model_name="baseline", **kwargs):
     # Example 4: Provide config as a dictionary and additional keyword arguments
     config = get_config(config=custom_config, num_epochs=1000, batch_size=32)
     """
-    assert model_name in [
+    assert model_type in [
         "baseline",
         "ensemble",
         "mcdropout",
         "evidential",
         # "gp",
-    ], f"Invalid model name: {model_name}"
+    ], f"Invalid model name: {model_type}"
 
     split_type = kwargs.get("split_type", "random")
-    print(split_type)
+    # print(split_type)
 
     return get_config(
-        config_name=model_name, config_dir=CONFIG_DIR, split_key=split_type, **kwargs
+        config_name=model_type, config_dir=CONFIG_DIR, split_key=split_type, **kwargs
     )
 
 
