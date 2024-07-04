@@ -22,6 +22,9 @@ class BaselineDNN(nn.Module):
         **kwargs,
     ):
         super(BaselineDNN, self).__init__()
+        if config is None:
+            config = get_model_config(model_type="baseline", **kwargs)
+        self.config = config
 
         chem_input_dim = config.get("chem_input_dim", None)
         prot_input_dim = config.get("prot_input_dim", None)
@@ -48,9 +51,6 @@ class BaselineDNN(nn.Module):
             else logger
         )
 
-        if config is None:
-            config = get_model_config(model_name="baseline", **kwargs)
-        self.config = config
         n_targets = 1 if not self.MT else n_targets
         # active inactive per each target if classification
         self.output_dim = n_targets if task_type == "regression" else 2 * n_targets
@@ -185,10 +185,7 @@ def run_baseline_wrapper(
     global LOGGER
     LOGGER = create_logger("baseline", file_level="debug", stream_level="info")
 
-    config = get_model_config(
-        "baseline",
-        **kwargs,
-    )
+    config = get_model_config("baseline", **kwargs)
     run_baseline(config=config)
 
 
