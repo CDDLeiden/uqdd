@@ -37,7 +37,7 @@ class EnsembleDNN(nn.Module):
     def __init__(self, config=None, model_class=BaselineDNN, model_list=None, **kwargs):
         super(EnsembleDNN, self).__init__()
         if config is None:
-            config = get_model_config(model_name="ensemble", **kwargs)
+            config = get_model_config(model_type="ensemble", **kwargs)
         # self.ensemble_size = ensemble_size
         self.config = config
         self.logger = create_logger(name="EnsembleDNN")
@@ -419,6 +419,8 @@ def run_ensemble(config=None):
         logger=logger,
         write_model=True,
     )
+    # logging config model_name to wandb
+    run.config.update(config_)
 
     dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
 
@@ -428,27 +430,41 @@ def run_ensemble(config=None):
 
     # Then comes the predict metrics part
     metrics, plots, uct_logger = evaluate_predictions(
-        config_, preds, labels, alea_vars, "ensemble", logger, wandb_push=False
+        config_,
+        preds,
+        labels,
+        alea_vars,
+        "ensemble",
+        logger,
+        wandb_push=False,
+        verbose=True,
     )
 
     # RECALIBRATION # Get Calibration / Validation Set
     preds_val, labels_val, alea_vars_val = predict(
         ensemble_model, dataloaders["val"], device=DEVICE
     )
-    iso_recal_model, std_recal = recalibrate_model(
-        preds_val, labels_val, preds, labels, config_, uct_logger=uct_logger
+    iso_recal_model = recalibrate_model(
+        preds_val,
+        labels_val,
+        alea_vars_val,
+        preds,
+        labels,
+        alea_vars,
+        config=config_,
+        uct_logger=uct_logger,
     )
 
     uct_logger.wandb_log()
     wandb.finish()
 
-    return ensemble_model, iso_recal_model, std_recal, metrics, plots
+    return ensemble_model, iso_recal_model, metrics, plots
 
 
 def run_ensemble_wrapper(**kwargs):
     global LOGGER
     LOGGER = create_logger(name="ensemble", file_level="debug", stream_level="info")
-    config = get_model_config(model_name="ensemble", **kwargs)
+    config = get_model_config(model_type="ensemble", **kwargs)
     return run_ensemble(config)
 
     # best_model, recal_model, metrics, plots = run_ensemble(config)
