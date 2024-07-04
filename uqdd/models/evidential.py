@@ -191,11 +191,13 @@ def run_evidential(config=None):
         best_model, dataloaders["val"], device=DEVICE
     )
 
-    iso_recal_model, std_recal = recalibrate_model(
+    iso_recal_model = recalibrate_model(
         preds_val,
         labels_val,
+        alea_vars_val,
         preds,
         labels,
+        alea_vars,
         config,
         epi_val=epi_vars_vals,
         epi_test=epi_vars,
@@ -205,7 +207,7 @@ def run_evidential(config=None):
     uct_logger.wandb_log()
     wandb.finish()
 
-    return best_model, iso_recal_model, std_recal, metrics, plots
+    return best_model, iso_recal_model, metrics, plots
 
     #
     # # TODO:
@@ -219,7 +221,7 @@ def run_evidential(config=None):
 def run_evidential_wrapper(**kwargs):
     global LOGGER
     LOGGER = create_logger(name="evidential", file_level="debug", stream_level="info")
-    config = get_model_config(model_name="evidential", **kwargs)
+    config = get_model_config(model_type="evidential", **kwargs)
 
     return run_evidential(config)
 
