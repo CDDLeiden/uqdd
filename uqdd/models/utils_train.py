@@ -360,6 +360,12 @@ def evaluate_predictions(
     logger=None,
     epi_vars=None,
     wandb_push=False,
+    run_name=None,
+    project_name=None,
+    figpath=None,
+    export_preds=True,
+    verbose=True,
+    csv_path=None,
 ):
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
@@ -380,6 +386,10 @@ def evaluate_predictions(
         add_plots_to_table=True,
         # * we can turn on if we want to see them in wandb * #
         logger=logger,
+        run_name=run_name,
+        project_name=project_name,
+        verbose=verbose,
+        csv_path=csv_path,
     )
 
     # preds, labels = predict(model, dataloaders["test"], return_targets=True)
@@ -392,7 +402,7 @@ def evaluate_predictions(
         y_alea,  # y_std,
         y_err,
         y_eps,  # y_alea,
-        True,
+        export_preds,
         data_specific_path,
         model_name,
         logger,
@@ -407,6 +417,7 @@ def evaluate_predictions(
         # y_alea=y_alea,
         y_eps=y_eps,
         task_name=task_name,
+        figpath=figpath,
     )
 
     # * calculate metrics for a subset of the datapoints * #
@@ -417,8 +428,9 @@ def evaluate_predictions(
         y_err=y_err,
         # y_alea=y_alea,
         y_eps=y_eps,
-        task_name=task_name + " Subset",
+        task_name=task_name + "_subset_100",
         n_subset=100,
+        figpath=figpath,
     )
 
     if multitask:
@@ -436,6 +448,7 @@ def evaluate_predictions(
                 # y_alea=y_alea,
                 y_eps=y_eps,
                 task_name=task_name,
+                figpath=figpath,
             )
             metrics[task_name] = taskmetrics
             plots[task_name] = taskplots
@@ -447,8 +460,9 @@ def evaluate_predictions(
                 y_err=y_err,
                 # y_alea=y_alea,
                 y_eps=y_eps,
-                task_name=task_name + " Subset",
+                task_name=task_name + "_subset_100",
                 n_subset=100,
+                figpath=figpath,
             )
 
     # * log the metrics and plots to wandb * #
@@ -1129,40 +1143,43 @@ def train_model_e2e(
 def recalibrate_model(
     preds_val,
     labels_val,
+    alea_vars_val,
     preds_test,
     labels_test,
+    alea_vars_test,
     config,
     epi_val=None,
     epi_test=None,
     uct_logger=None,
+    figpath=None,
 ):
     model_name = config.get("model_name", "ensemble")
     data_specific_path = config.get("data_specific_path", None)
 
-    figures_path = FIGS_DIR / data_specific_path / model_name
+    figures_path = figpath or (FIGS_DIR / data_specific_path / model_name)
 
     # Validation Set # TODO need to fix this
-    y_true_val, y_pred_val, y_std_val, y_err_val, _ = process_preds(
-        preds_val, labels_val, epi_vars=epi_val
+    y_true_val, y_pred_val, y_std_val, y_err_val, y_alea_val = process_preds(
+        preds_val, labels_val, alea_vars_val, epi_vars=epi_val
     )
-    y_true_test, y_pred_test, y_std_test, y_err_test, _ = process_preds(
-        preds_test, labels_test, epi_vars=epi_test
+    y_true_test, y_pred_test, y_std_test, y_err_test, y_alea_test = process_preds(
+        preds_test, labels_test, alea_vars_test, epi_vars=epi_test
     )
 
-    iso_recal_model, std_recal = recalibrate(
+    iso_recal_model = recalibrate(  # , std_recal
         y_true_val,
         y_pred_val,
-        y_std_val,
+        y_alea_val,
         y_err_val,
         y_true_test,
         y_pred_test,
-        y_std_test,
+        y_alea_test,
         y_err_test,
         n_subset=None,
         savefig=True,
         save_dir=figures_path,
         uct_logger=uct_logger,
-    )
+    )  # y_std_val, # y_std_test,
     # # TODO add task_name
     # model_dir = (
     #     MODELS_DIR / "saved_models" / data_specific_path
@@ -1176,8 +1193,10 @@ def recalibrate_model(
 
     # Test Set
     # return recal_model
-    return iso_recal_model, std_recal  # , metrics, plots
+    return iso_recal_model
 
+
+#
 
 # def _run_model_e2e(
 #     model,
