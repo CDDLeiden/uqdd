@@ -283,11 +283,12 @@ def process_preds(
         # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
     else:
         if epi_vars is None:
+            # ensemble and mcdp case so we need to take mean
             vars_ = alea_vars.mean(dim=-1)  # .squeeze()
-        else:
+        else:  # evidential case no need to take mean
             vars_ = alea_vars
 
-    if epi_vars is None:
+    if epi_vars is None:  # once again ensemble and mcdp case
         epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
         predictions = predictions.mean(dim=-1)  # .squeeze()
     # Get the predictions mean and std
@@ -920,7 +921,7 @@ def calculate_uct_metrics(
     exp_props: Union[np.ndarray, None] = None,
     obs_props: Union[np.ndarray, None] = None,
     recal_model=None,
-    # verbose=True,
+    verbose=True,
 ):
     """
     Calculate metrics for the predictions.
@@ -947,6 +948,8 @@ def calculate_uct_metrics(
         Observed proportions for calibration plot.
     recal_model : IsotonicRegression or None
         Isotonic regression model for recalibration.
+    verbose : bool
+        Whether to print the metrics. Default is True.
 
     Returns
     -------
@@ -963,12 +966,12 @@ def calculate_uct_metrics(
         num_bins=Nbins,
         resolution=99,
         scaled=True,
-        verbose=True,
+        verbose=verbose,
     )
     if recal_model is not None:
         # updating this one to include recalibration
         metrics["avg_calibration"] = get_calib_with_recal(
-            recal_model, y_pred, y_std, y_true, Nbins, verbose=True
+            recal_model, y_pred, y_std, y_true, Nbins, verbose=verbose
         )
 
     # else:
@@ -1590,6 +1593,8 @@ class MetricsTable:
         logger=None,
         project_name=None,
         run_name=None,
+        verbose=True,
+        csv_path=None,
     ):
         """
         Initialize the metrics table.
@@ -1600,6 +1605,7 @@ class MetricsTable:
         """
         self.config = config
         self.logger = logger or create_logger("MetricsTable")
+        self.verbose = verbose
         self.activity = config.get("activity_type", "xc50")
         self.split = config.get("split_type", "scaffold_cluster")
         self.model_type = model_type
@@ -1612,9 +1618,14 @@ class MetricsTable:
         # self.aleatoric = config.get("aleatoric", False)
         self.dropout = config.get("dropout", None)
         self.add_plots_to_table = add_plots_to_table
-
-        self.wandb_project_name = wandb.run.project or project_name
-        self.wandb_run_name = wandb.run.name or run_name
+        self.wandb_run_name = run_name or wandb.run.name
+        self.wandb_project_name = project_name or wandb.run.project
+        # if wandb.run is None:
+        #     self.wandb_run_name = run_name
+        #     self.wandb_project_name = project_name
+        # else:
+        #     self.wandb_project_name = wandb.run.project
+        #     self.wandb_run_name = wandb.run.name
 
         cols = []
         if self.model_type:
@@ -1693,7 +1704,7 @@ class MetricsTable:
         self.table = wandb.Table(columns=cols)
         self.plot_table = pd.DataFrame(columns=self.plot_cols)
         # TODO save this to a one table specific to the data_specific_path
-        self.df_path = (
+        self.df_path = Path(csv_path) or (
             FIGS_DIR / self.data_specific_path / f"{self.wandb_project_name}.csv"
         )
 
@@ -1794,7 +1805,7 @@ class MetricsTable:
         obs_props=None,
         recal_model=None,
     ):
-        figures_path = (
+        figures_path = Path(
             FIGS_DIR / data_specific_path / self.model_name
             if not figpath and data_specific_path
             else figpath
@@ -1819,6 +1830,7 @@ class MetricsTable:
                 exp_props=exp_props,
                 obs_props=obs_props,
                 recal_model=recal_model,
+                verbose=self.verbose,
             )
             # calculate other uqtools metrics
             uqmetrics, uqplots = calculate_uqtools_metrics(
@@ -2085,7 +2097,7 @@ def recalibration_metrics_and_plots(
             y_std=y_std_test,
             y_true=y_true_test,
             y_err=y_err_test,
-            y_alea=None,
+            y_eps=None,
             n_subset=n_subset,
             task_name=task_name,
             figpath=figpath,
@@ -2093,6 +2105,20 @@ def recalibration_metrics_and_plots(
             obs_props=obs_props,
             recal_model=recal_model,
         )
+        # submetrics, subplots = uct_logger( # for saved plots with 100 samples
+        #     y_pred=y_pred_test,
+        #     y_std=y_std_test,
+        #     y_true=y_true_test,
+        #     y_err=y_err_test,
+        #     y_eps=None,
+        #     n_subset=100,
+        #     task_name=task_name + " Subset 100",
+        #     figpath=figpath,
+        #     exp_props=exp_props,
+        #     obs_props=obs_props,
+        #     recal_model=recal_model,
+        # )
+
         # uct_logger.wandb_log()
     else:  # without logging to wandb then
         uctmetrics, uctplots = calculate_uct_metrics(
@@ -2119,6 +2145,18 @@ def recalibration_metrics_and_plots(
             **uctplots,
             **uqplots,
         }
+        # submetrics, subplots = calculate_uct_metrics(
+        #     y_pred=y_pred_test,
+        #     y_std=y_std_test,
+        #     y_true=y_true_test,
+        #     n_subset=100,
+        #     Nbins=100,
+        #     task_name=task_name + " Subset 100",
+        #     figpath=figpath,
+        #     exp_props=exp_props,
+        #     obs_props=obs_props,
+        #     recal_model=recal_model,
+        # )
 
     plt.close()
 
@@ -2128,11 +2166,11 @@ def recalibration_metrics_and_plots(
 def recalibrate(
     y_true_recal,
     y_pred_recal,
-    y_std_recal,
+    y_alea_recal,  # y_std_recal,
     y_err_recal,
     y_true_test,
     y_pred_test,
-    y_std_test,
+    y_alea_test,  # y_std_test,
     y_err_test,
     n_subset=None,
     task_name="PCM",
@@ -2159,12 +2197,23 @@ def recalibrate(
     # calculating exp_prop and obs_prop
     before_metrics, before_plots = recalibration_metrics_and_plots(
         y_pred_test=y_pred_test,
-        y_std_test=y_std_test,
+        y_std_test=y_alea_test,
         y_true_test=y_true_test,
         y_err_test=y_err_test,
         uct_logger=uct_logger,
         n_subset=n_subset,
         task_name=task_name + "_before_calibration",
+        figpath=before_path,
+    )
+    # subset
+    subbefore_metrics, subbefore_plots = recalibration_metrics_and_plots(
+        y_pred_test=y_pred_test,
+        y_std_test=y_alea_test,
+        y_true_test=y_true_test,
+        y_err_test=y_err_test,
+        uct_logger=uct_logger,
+        n_subset=100,
+        task_name=task_name + "_before_calibration_subset_100",
         figpath=before_path,
     )
 
@@ -2190,16 +2239,16 @@ def recalibrate(
     iso_recal_model, te_recal_exp_props, te_recal_obs_props = isotonic_recalibrator(
         y_true_recal=y_true_recal,
         y_pred_recal=y_pred_recal,
-        y_std_recal=y_std_recal,
+        y_std_recal=y_alea_recal,
         y_true_test=y_true_test,
         y_pred_test=y_pred_test,
-        y_std_test=y_std_test,
+        y_std_test=y_alea_test,
     )
 
     # AFter Isotonic metrics
     recal_metrics, recal_plots = recalibration_metrics_and_plots(
         y_pred_test=y_pred_test,
-        y_std_test=y_std_test,
+        y_std_test=y_alea_test,
         y_true_test=y_true_test,
         y_err_test=y_err_test,
         uct_logger=uct_logger,
@@ -2210,26 +2259,39 @@ def recalibrate(
         task_name=task_name + "_after_calibration_with_isotonic_regression",
         figpath=after_path,
     )
-
-    # * this is the std recalibrator *
-    std_recal, y_std_recal_recalibrated, y_std_test_recalibrated = std_recalibrator(
-        y_true_recal=y_true_recal,
-        y_pred_recal=y_pred_recal,
-        y_std_recal=y_std_recal,
-        y_std_test=y_std_test,
-    )
-
-    # After std recalibrator metrics
-    recal_metrics_std, recal_plots_std = recalibration_metrics_and_plots(
+    subrecal_metrics, subrecal_plots = recalibration_metrics_and_plots(
         y_pred_test=y_pred_test,
-        y_std_test=y_std_test_recalibrated,
+        y_std_test=y_alea_test,
         y_true_test=y_true_test,
         y_err_test=y_err_test,
         uct_logger=uct_logger,
-        n_subset=n_subset,
-        task_name=task_name + "_after_calibration_with_std_recalibrator",
+        exp_props=te_recal_exp_props,
+        obs_props=te_recal_obs_props,
+        recal_model=iso_recal_model,
+        n_subset=100,
+        task_name=task_name + "_after_calibration_with_isotonic_regression_subset_100",
         figpath=after_path,
     )
+
+    # # * this is the std recalibrator *
+    # std_recal, y_std_recal_recalibrated, y_std_test_recalibrated = std_recalibrator(
+    #     y_true_recal=y_true_recal,
+    #     y_pred_recal=y_pred_recal,
+    #     y_std_recal=y_std_recal,
+    #     y_std_test=y_std_test,
+    # )
+    #
+    # # After std recalibrator metrics
+    # recal_metrics_std, recal_plots_std = recalibration_metrics_and_plots(
+    #     y_pred_test=y_pred_test,
+    #     y_std_test=y_std_test_recalibrated,
+    #     y_true_test=y_true_test,
+    #     y_err_test=y_err_test,
+    #     uct_logger=uct_logger,
+    #     n_subset=n_subset,
+    #     task_name=task_name + "_after_calibration_with_std_recalibrator",
+    #     figpath=after_path,
+    # )
 
     # metrics = {**before_metrics, **recal_metrics, **recal_metrics_std}
     # plots = {**before_plots, **recal_plots, **recal_plots_std}
@@ -2246,10 +2308,10 @@ def recalibrate(
     save_pickle(recal_metrics, recal_metrics_path)
 
     # save metrics after recalibration with std recalibrator
-    recal_metrics_std_path = Path(save_dir) / "recal_metrics_std.pkl"
-    save_pickle(recal_metrics_std, recal_metrics_std_path)
+    # recal_metrics_std_path = Path(save_dir) / "recal_metrics_std.pkl"
+    # save_pickle(recal_metrics_std, recal_metrics_std_path)
 
-    return iso_recal_model, std_recal  # , metrics, plots
+    return iso_recal_model  # std_recal  # , metrics, plots
 
     # y_pred_recal = y_pred_recal.flatten()
     # y_std_recal = y_std_recal.flatten()
