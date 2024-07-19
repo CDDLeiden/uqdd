@@ -227,7 +227,9 @@ if __name__ == "__main__":
         default=42,
         help="Random seed",
     )
-
+    parser.add_argument(
+        "--wt_resampler", type=bool, default=False, help="Weighted resampler"
+    )
     args = parser.parse_args()
     # Construct kwargs, excluding arguments that were not provided
     kwargs = {k: v for k, v in vars(args).items() if v is not None}
