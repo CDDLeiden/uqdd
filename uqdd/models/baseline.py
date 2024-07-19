@@ -173,7 +173,11 @@ def run_baseline(config=None):
     #     config = wandb.config
     # best_model, _, _, _, _ = train_model_e2e(
     best_model, _, _, _ = train_model_e2e(
-        config, model=BaselineDNN, model_type="baseline", logger=LOGGER
+        config,
+        model=BaselineDNN,
+        model_type="baseline",
+        logger=LOGGER,
+        # tracker="none-test",
     )
 
     return best_model
