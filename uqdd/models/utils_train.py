@@ -926,7 +926,10 @@ def get_dataloader(
     )
 
     batch_size = config.get("batch_size", 128)
-    dataloaders = build_loader(datasets, batch_size, shuffle=False)
+    wt_resampler = config.get("wt_resampler", False)
+    dataloaders = build_loader(
+        datasets, batch_size, shuffle=False, wt_resampler=wt_resampler
+    )
 
     return dataloaders
 

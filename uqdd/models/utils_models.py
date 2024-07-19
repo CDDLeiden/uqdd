@@ -235,20 +235,20 @@ def build_datasets(
     return datasets
 
 
-def build_loader(datasets, batch_size, shuffle=False):
+def build_loader(datasets, batch_size, shuffle=False, wt_resampler=False):
     try:
         # num_cpu_cores = os.cpu_count()
         dataloaders = {}
         for k, v in datasets.items():
-            # if k == "train":
-            #     sampler = get_sampler(v, bins=1000)
-            # else:
-            #     sampler = None
+            if k == "train" and wt_resampler:
+                sampler = get_sampler(v, bins=1000)
+            else:
+                sampler = None
             dataloaders[k] = DataLoader(
                 v,
                 batch_size=batch_size,
                 shuffle=shuffle,
-                # sampler=sampler,
+                sampler=sampler,
                 # num_workers=4,
                 # pin_memory=True,
             )
