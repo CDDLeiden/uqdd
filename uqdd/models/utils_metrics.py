@@ -398,6 +398,7 @@ def plot_true_vs_preds(
     distant_threshold=3,  # Define the threshold for distant points in terms of RMSE
     savefig=False,  # Whether to save the figure
     save_dir=None,  # Directory to save the figure
+    task_name=None,
     **kwargs,
 ):
     if n_subset is not None and n_subset < len(y_true):
@@ -581,13 +582,24 @@ def plot_true_vs_preds(
 
     if savefig:
         g.savefig(
-            save_dir / f"true_vs_preds_plot_with_errs.png",
+            save_dir / f"true_vs_preds_plot_with_errs_{task_name}.png",
             format="png",
+            bbox_inches="tight",
+            dpi=1200,
+        )
+        g.savefig(
+            save_dir / f"true_vs_preds_plot_with_errs_{task_name}.svg",
+            format="svg",
             bbox_inches="tight",
         )
         g.savefig(
-            save_dir / f"true_vs_preds_plot_with_errs.svg",
-            format="svg",
+            save_dir / f"true_vs_preds_plot_with_errs_{task_name}.pdf",
+            format="pdf",
+            bbox_inches="tight",
+        )
+        g.savefig(
+            save_dir / f"true_vs_preds_plot_with_errs_{task_name}.eps",
+            format="eps",
             bbox_inches="tight",
         )
     return g.figure
@@ -864,7 +876,9 @@ def make_uct_plots(
         if savefig:
             fig_save_path = save_dir / f"{plot_save_str}_{plot_name}"
             uct.viz.save_figure(
-                str(fig_save_path), ext_list=["png", "svg"], white_background=True
+                str(fig_save_path),
+                ext_list=["png", "svg", "eps"],
+                white_background=True,
             )
             # plt.savefig(fig_save_path, format="png", bbox_inches="tight")
     #
@@ -875,6 +889,7 @@ def make_uct_plots(
         distant_threshold=3,
         savefig=savefig,
         save_dir=save_dir,
+        task_name=task_name,
     )
 
     return plots
@@ -1065,19 +1080,22 @@ def make_uq_plots(
         logger=logger,
     )
     if figpath is not None:
-        fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.png")
+        fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.png", dpi=1200)
         fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.svg")
+        fig.savefig(Path(figpath) / f"{task_name}_rmv_vs_rmse.eps")
 
     # Generate Z-score plot and calibration curve
     fig2, _ = plot_Z_scores(ordered_df.errors, ordered_df.uq)
     if figpath is not None:
-        fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.png")
+        fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.png", dpi=1200)
         fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.svg")
+        fig2.savefig(Path(figpath) / f"{task_name}_Z_scores.eps")
 
     fig3 = plot_calibration_curve(gaus_pred, errors_observed, mis_cal)
     if figpath is not None:
-        fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.png")
+        fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.png", dpi=1200)
         fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.svg")
+        fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.eps")
     plots = {"rmv_vs_rmse": fig, "Z_scores": fig2, "calibration_curve": fig3}
     return plots
 
@@ -1704,9 +1722,12 @@ class MetricsTable:
         self.table = wandb.Table(columns=cols)
         self.plot_table = pd.DataFrame(columns=self.plot_cols)
         # TODO save this to a one table specific to the data_specific_path
-        self.df_path = Path(csv_path) or (
-            FIGS_DIR / self.data_specific_path / f"{self.wandb_project_name}.csv"
-        )
+        if csv_path:
+            self.df_path = Path(csv_path)
+        else:
+            self.df_path = (
+                FIGS_DIR / self.data_specific_path / f"{self.wandb_project_name}.csv"
+            )
 
     def __call__(
         self,
