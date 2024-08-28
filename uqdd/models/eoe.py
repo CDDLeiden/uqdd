@@ -45,37 +45,26 @@ class EoEDNN(nn.Module):
         self.models = nn.ModuleList(models)
 
     def forward(self, inputs):
-        outputs = []
+        # outputs = []
+        mus, vs, alphas, betas = [], [], [], []
         for model in self.models:
             output = model(inputs)
-            outputs.append(output)
-        outputs = torch.stack(outputs, dim=2)
-        return outputs
+            mu, v, alpha, beta = output
+            mus.append(mu)
+            vs.append(v)
+            alphas.append(alpha)
+            betas.append(beta)
+
+            # outputs.append(output)
+        mus = torch.stack(mus, dim=2)
+        vs = torch.stack(vs, dim=2)
+        alphas = torch.stack(alphas, dim=2)
+        betas = torch.stack(betas, dim=2)
+        return mus, vs, alphas, betas
 
 
-def eoe_predict(eoe_model_list, dataloader, device=DEVICE):
-    outputs_list = []
-    targets_list = []
-    alea_list = []
-    epistemic_list = []
-
-    outputs_, targets_, alea_, epistemic_ = ev_predict(
-        eoe_model_list, dataloader, device
-    )
-
-    for model in eoe_model_list:
-        outputs, targets, alea, epistemic = ev_predict(model, dataloader, device)
-        outputs_list.append(outputs)
-        targets_list.append(targets)
-        alea_list.append(alea)
-        epistemic_list.append(epistemic)
-
-    outputs = torch.stack(outputs_list, dim=2)
-    targets = torch.stack(targets_list, dim=2)
-    alea = torch.stack(alea_list, dim=2)
-    epistemic = torch.stack(epistemic_list, dim=2)
-
-    return outputs, targets, alea, epistemic
+def calculate_means(*tensors):
+    return [torch.mean(tensor, dim=2) for tensor in tensors]
 
 
 def run_eoe(config=None):
@@ -110,7 +99,7 @@ def run_eoe(config=None):
 
         result_arrs.append(results_arr)
         test_arrs.append(test_arr)
-
+    print(f"{config_=}")
     res_arr = process_results_arrs(result_arrs, test_arrs, config_, logger, "eoe")
     logger.debug(f"{len(best_models)=}")
     eoe_model = EoEDNN(config=config, model_list=best_models).to(DEVICE)
@@ -127,19 +116,15 @@ def run_eoe(config=None):
 
     dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
 
-    preds, labels, alea, epistemic = eoe_predict(
+    preds, labels, alea, epistemic = ev_predict(
         eoe_model, dataloaders["test"], device=DEVICE
     )
-
-    alea_mean = torch.mean(alea, dim=2)
-    epistemic_mean = torch.mean(epistemic, dim=2)
-    preds_mean = torch.mean(preds, dim=2)
-    labels_mean = torch.mean(labels, dim=2)
+    alea_mean, epistemic_mean, preds_mean = calculate_means(alea, epistemic, preds)
 
     metrics, plots, uct_logger = evaluate_predictions(
         config_,
         preds_mean,
-        labels_mean,
+        labels,
         alea_mean,
         "eoe",
         logger,
@@ -147,22 +132,19 @@ def run_eoe(config=None):
         wandb_push=False,
         verbose=True,
     )
-
-    preds_val, labels_val, alea_val, epistemic_val = eoe_predict(
+    preds_val, labels_val, alea_val, epistemic_val = ev_predict(
         eoe_model, dataloaders["val"], device=DEVICE
     )
-
-    alea_mean_val = torch.mean(alea_val, dim=2)
-    epistemic_mean_val = torch.mean(epistemic_val, dim=2)
-    preds_mean_val = torch.mean(preds_val, dim=2)
-    labels_mean_val = torch.mean(labels_val, dim=2)
+    alea_mean_val, epistemic_mean_val, preds_mean_val = calculate_means(
+        alea_val, epistemic_val, preds_val
+    )
 
     iso_recal_model = recalibrate_model(
         preds_mean_val,
-        labels_mean_val,
+        labels_val,
         alea_mean_val,
         preds_mean,
-        labels_mean,
+        labels,
         alea_mean,
         config=config_,
         epi_val=epistemic_mean_val,
@@ -187,20 +169,61 @@ if __name__ == "__main__":
     # vars
     eoe_model, iso_recal_model, metrics, plots = run_eoe_wrapper(
         data_name="papyrus",
-        activity_type="xc50",
+        activity_type="kx",
         n_targets=-1,
         descriptor_protein="ankh-large",
         descriptor_chemical="ecfp2048",
         median_scaling=False,
-        split_type="random",
+        split_type="time",
         ext="pkl",
         task_type="regression",
         wandb_project_name="eoe-test",
-        ensemble_size=10,
-        epochs=10,
+        ensemble_size=2,
+        epochs=2,
         seed=440,
     )
 
+    # outputs = torch.stack(outputs, dim=2)
+    # return outputs
+
+    # preds, labels, alea, epistemic = eoe_predict(
+    #     best_models, dataloaders["test"], device=DEVICE
+    # )
+    #
+    # alea_mean = torch.mean(alea, dim=2)
+    # epistemic_mean = torch.mean(epistemic, dim=2)
+    # preds_mean = torch.mean(preds, dim=2)
+    # labels_mean = torch.mean(labels, dim=2)
+    # preds_val, labels_val, alea_val, epistemic_val = eoe_predict(
+    #     eoe_model, dataloaders["val"], device=DEVICE
+    # )
+    # alea_mean_val = torch.mean(alea_val, dim=2)
+    # epistemic_mean_val = torch.mean(epistemic_val, dim=2)
+    # preds_mean_val = torch.mean(preds_val, dim=2)
+    # labels_mean_val = torch.mean(labels_val, dim=2)
+# def eoe_predict(eoe_model_list, dataloader, device=DEVICE):
+#     outputs_list = []
+#     targets_list = []
+#     alea_list = []
+#     epistemic_list = []
+#
+#     outputs_, targets_, alea_, epistemic_ = ev_predict(
+#         eoe_model_list, dataloader, device
+#     )
+#
+#     for model in eoe_model_list:
+#         outputs, targets, alea, epistemic = ev_predict(model, dataloader, device)
+#         outputs_list.append(outputs)
+#         targets_list.append(targets)
+#         alea_list.append(alea)
+#         epistemic_list.append(epistemic)
+#
+#     outputs = torch.stack(outputs_list, dim=2)
+#     targets = torch.stack(targets_list, dim=2)
+#     alea = torch.stack(alea_list, dim=2)
+#     epistemic = torch.stack(epistemic_list, dim=2)
+#
+#     return outputs, targets, alea, epistemic
 
 # class EoEDNN(nn.Module):
 #     def __init__(self, config=None, model_list=None, **kwargs):
