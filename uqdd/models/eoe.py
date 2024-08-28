@@ -17,7 +17,40 @@ from uqdd.models.utils_train import (
     post_training_save_model,
 )
 
-from uqdd.models.utils_models import get_model_config
+from uqdd.models.utils_models import get_model_config, set_seed
+
+
+class EoEDNN(nn.Module):
+    def __init__(self, config=None, model_list=None, **kwargs):
+        super(EoEDNN, self).__init__()
+        self.model_list = model_list
+        self.config = config
+        self.device = DEVICE
+        self.ensemble_size = config.get("ensemble_size", 10)
+        self.model_type = config.get("model_type", "eoe")
+        self.logger = config.get("logger", None)
+        self.tracker = config.get("tracker", "tensor")
+
+        if model_list is not None:
+            models = model_list
+        else:
+            models = []
+            seed = config.get("seed", 42)
+            for _ in range(self.ensemble_size):
+                model = EvidentialDNN(config=config, **kwargs)
+                model.to(self.device)
+                set_seed(seed)
+                models.append(model)
+                seed += 1
+        self.models = nn.ModuleList(models)
+
+    def forward(self, inputs):
+        outputs = []
+        for model in self.models:
+            output = model(inputs)
+            outputs.append(output)
+        outputs = torch.stack(outputs, dim=2)
+        return outputs
 
 
 def eoe_predict(eoe_model_list, dataloader, device=DEVICE):
@@ -25,6 +58,11 @@ def eoe_predict(eoe_model_list, dataloader, device=DEVICE):
     targets_list = []
     alea_list = []
     epistemic_list = []
+
+    outputs_, targets_, alea_, epistemic_ = ev_predict(
+        eoe_model_list, dataloader, device
+    )
+
     for model in eoe_model_list:
         outputs, targets, alea, epistemic = ev_predict(model, dataloader, device)
         outputs_list.append(outputs)
@@ -62,7 +100,7 @@ def run_eoe(config=None):
         best_model, config_, results_arr, test_arr = train_model_e2e(
             config,
             model=EvidentialDNN,
-            model_type="evidential",
+            model_type="eoe",
             logger=logger,
             tracker="tensor",
             write_model=False,
@@ -74,9 +112,9 @@ def run_eoe(config=None):
         test_arrs.append(test_arr)
 
     res_arr = process_results_arrs(result_arrs, test_arrs, config_, logger, "eoe")
-
     logger.debug(f"{len(best_models)=}")
-    eoe_model = nn.ModuleList(best_models)
+    eoe_model = EoEDNN(config=config, model_list=best_models).to(DEVICE)
+    # eoe_model = nn.ModuleList(best_models)
     config_["model_name"] = post_training_save_model(
         eoe_model,
         config,
@@ -154,12 +192,12 @@ if __name__ == "__main__":
         descriptor_protein="ankh-large",
         descriptor_chemical="ecfp2048",
         median_scaling=False,
-        split_type="time",
+        split_type="random",
         ext="pkl",
         task_type="regression",
         wandb_project_name="eoe-test",
-        ensemble_size=5,
-        epochs=5,
+        ensemble_size=10,
+        epochs=10,
         seed=440,
     )
 
