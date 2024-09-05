@@ -4,6 +4,7 @@ import random
 import logging
 from pathlib import Path
 from typing import Union
+from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
@@ -136,14 +137,21 @@ def get_model_config(model_type="baseline", **kwargs):
         "ensemble",
         "mcdropout",
         "evidential",
+        "eoe",
+        "emc",
         # "gp",
     ], f"Invalid model name: {model_type}"
 
     split_type = kwargs.get("split_type", "random")
+    activity_type = kwargs.get("activity_type", "xc50")
     # print(split_type)
 
     return get_config(
-        config_name=model_type, config_dir=CONFIG_DIR, split_key=split_type, **kwargs
+        config_name=model_type,
+        config_dir=CONFIG_DIR,
+        split_key=split_type,
+        activity_key=activity_type,
+        **kwargs,
     )
 
 
@@ -634,7 +642,28 @@ def save_model(
         print("Error saving models: " + str(e))
 
 
-def load_model(model_class, model_path, **model_kwargs):
+def add_prefix_to_state_dict_keys(state_dict, prefix):
+    """
+    Add a prefix to the keys of a state dictionary.
+
+    Parameters:
+    -----------
+    state_dict (dict): The state dictionary to modify.
+    prefix (str): The prefix to add to the keys.
+
+    Returns:
+    --------
+    dict: The modified state dictionary with the new keys.
+    """
+    new_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        new_key = key if key.startswith(prefix) else f"{prefix}{key}"
+        # new_key = prefix + key
+        new_state_dict[new_key] = value
+    return new_state_dict
+
+
+def load_model(model_class, model_path, prefix_to_state_keys=None, **model_kwargs):
     """
     Load a PyTorch model from a saved state dictionary.
 
@@ -654,6 +683,9 @@ def load_model(model_class, model_path, **model_kwargs):
     # Load the state dictionary from the specified path
     state_dict = torch.load(model_path)
 
+    if prefix_to_state_keys:
+        state_dict = add_prefix_to_state_dict_keys(state_dict, prefix_to_state_keys)
+
     # Load the state dictionary into the model
     model.load_state_dict(state_dict)
 
@@ -670,9 +702,11 @@ def get_ckpt_path(config):
     i = 0
     model_path = Path(dir / f"{ckpt_name}.pth")
     while model_path.exists():
-        ckpt_name_m = ckpt_name + f"{i}"
+        ckpt_name_m = ckpt_name + f"_{i}"
         model_path = dir / f"{ckpt_name_m}.pth"
         i += 1
+    # we need to create the file here as placeholder
+    model_path.touch()
 
     config["ckpt_name"] = model_path.stem
     config["ckpt_path"] = model_path
@@ -757,6 +791,10 @@ def get_data_specific_path(config, logger=None):
     if logger:
         logger.debug(f"Data specific path: {data_specific_path}")
     return data_specific_path
+
+
+def calculate_means(*tensors):
+    return [torch.mean(tensor, dim=2) for tensor in tensors]
 
 
 # def make_uct_plots(
