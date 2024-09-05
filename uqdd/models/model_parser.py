@@ -4,6 +4,8 @@ from uqdd.models.baseline import run_baseline_wrapper, run_baseline_hyperparam
 from uqdd.models.ensemble import run_ensemble_wrapper, run_ensemble_hyperparm
 from uqdd.models.mcdropout import run_mcdropout_wrapper, run_mcdropout_hyperparm
 from uqdd.models.evidential import run_evidential_wrapper  # , run_evidential_hyperparam
+from uqdd.models.eoe import run_eoe_wrapper
+from uqdd.models.emc import run_emc_wrapper
 from uqdd.utils import float_or_none, parse_list
 
 query_dict = {
@@ -14,6 +16,8 @@ query_dict = {
     "mcdropout": run_mcdropout_wrapper,
     "mcdropout_hyperparam": run_mcdropout_hyperparm,
     "evidential": run_evidential_wrapper,
+    "eoe": run_eoe_wrapper,
+    "emc": run_emc_wrapper,
 }
 
 
@@ -119,7 +123,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="baseline",
-        choices=["baseline", "ensemble", "mcdropout", "evidential"],
+        choices=["baseline", "ensemble", "mcdropout", "evidential", "eoe", "emc"],
         help="Model name argument",
     )
     parser.add_argument(
