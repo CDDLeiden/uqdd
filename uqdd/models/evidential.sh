@@ -1,6 +1,6 @@
 #!/bin/bash
 
-gpu_device=${1:-3}
+gpu_device=${1:-0}
 sweep_count=${2:-0}
 data=${3:-"papyrus"}
 activity=${4:-"xc50"}
@@ -21,10 +21,11 @@ echo "Script started at: $(date)"
 #data="papyrus"
 ext="pkl"
 task_type="regression"
+#wandb_project="${today}-all-models" #"2024-04-16-baseline"
 wandb_project="${today}-all-models" #"2024-04-16-baseline"
 logname="${wandb_project}-evidential.txt"
 
-python evidential.py --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project --sweep-count "$sweep_count" 2>&1 | tee ../logs/"${logname}"
+python model_parser.py --model evidential --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project --sweep-count "$sweep_count" 2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"
