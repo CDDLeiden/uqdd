@@ -31,6 +31,8 @@ class BaselineDNN(nn.Module):
         task_type = config.get("task_type", "regression")
         n_targets = config.get("n_targets", -1)
         self.MT = config.get("MT", n_targets > 1)
+        self.MT = False if type(self.MT) != bool else self.MT
+
         self.aleatoric = config.get("aleatoric", False)
         self.aleavar_layer_included = aleavar_layer_included
         assert task_type in [
@@ -190,7 +192,7 @@ def run_baseline_wrapper(
     LOGGER = create_logger("baseline", file_level="debug", stream_level="info")
 
     config = get_model_config("baseline", **kwargs)
-    run_baseline(config=config)
+    return run_baseline(config=config)
 
 
 def run_baseline_hyperparam(**kwargs):
@@ -218,7 +220,7 @@ def run_baseline_hyperparam(**kwargs):
 #     n_targets = -1
 #     task_type = "regression"
 #     activity = "xc50"
-#     split = "random"
+#     split = "time"
 #     desc_prot = "ankh-large"
 #     desc_chem = "ecfp2048"
 #     median_scaling = False
@@ -234,7 +236,7 @@ def run_baseline_hyperparam(**kwargs):
 #         n_targets=n_targets,
 #         descriptor_protein=desc_prot,
 #         descriptor_chemical=desc_chem,
-#         median_scaling=median_scaling,
+#         # median_scaling=median_scaling,
 #         split_type=split,
 #         aleatoric=aleatoric,
 #         ext=ext,
