@@ -22,13 +22,14 @@ from uqdd.models.utils_models import (
 )
 
 
-def ev_predict(model, test_loader, device=DEVICE):
-    model.eval()
+def ev_predict(model, dataloader, device=DEVICE, set_on_eval=True):
+    if set_on_eval:
+        model.eval()
     outputs_all, targets_all = [], []
     alea_all, epistemic_all = [], []
     with torch.no_grad():
         for inputs, targets in tqdm(
-            test_loader, total=len(test_loader), desc="Evidential prediction"
+            dataloader, total=len(dataloader), desc="Evidential prediction"
         ):
             inputs = tuple(x.to(device) for x in inputs)
             outputs = model(inputs)  # , alea_vars
@@ -69,9 +70,6 @@ class NormalInvGamma(nn.Module):
         beta = self.evidence(logbeta)
 
         return mu, v, alpha, beta
-        # , alea_var
-        # mu_c, logv_c, logalpha_c, logbeta_c = torch.chunk(out, 4, dim=-1)
-        # alea_var = beta / (alpha - 1)
 
 
 class Dirichlet(nn.Module):
@@ -87,14 +85,6 @@ class Dirichlet(nn.Module):
         out = self.dense(x)
         alpha = self.evidence(out) + 1
         return alpha
-
-        # TRANSLATED FROM TF
-        # output = self.dense(x)
-        # evidence_ = torch.exp(output)
-        # alpha = evidence_ + 1
-        # prob = alpha / torch.sum(alpha, dim=1, keepdim=True)
-        # # return torch.cat([alpha, prob], dim=-1)
-        # return prob, alpha
 
 
 class EvidentialDNN(BaselineDNN):
@@ -179,10 +169,10 @@ def run_evidential(config=None):
         config,
         preds,
         labels,
-        alea_vars,  # TODO dealing with epistemic_vars instead of std Shapes are important here
+        alea_vars,
         "evidential",
-        LOGGER,
-        epi_vars,
+        logger=LOGGER,
+        epi_vars=epi_vars,
         wandb_push=False,
     )
 
