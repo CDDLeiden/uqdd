@@ -277,7 +277,6 @@ def process_preds(
         A tuple containing arrays for predictions mean, standard deviation, targets,
         and absolute error, filtered to exclude NaN values.
     """
-
     if alea_vars is None:
         vars_ = torch.zeros_like(targets)
         # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
@@ -316,6 +315,11 @@ def process_preds(
         y_true[nan_mask],
         vars_[nan_mask],
     )
+    # solve shape issues between y_pred and y_true in case y_true dimensions (e.g. (14088,) are less than y_pred (e.g. (14088,10))
+    # if y_pred.dim() > y_true.dim():
+    #     y_true = y_true.unsqueeze(-1).expand_as(
+    #         y_pred
+    #     )  # Fastest as already expanded here
     # Calculate the error
     y_err = y_pred - y_true
     # .abs()  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
@@ -1072,7 +1076,7 @@ def make_uq_plots(
     logger=logging.Logger("uqtools"),
 ):
     # generate error-based calibration plot
-    fig, _, _, _ = get_slope_metric(
+    fig, slope, r_sq, intercept = get_slope_metric(
         ordered_df.uq,
         ordered_df.errors,
         Nbins=Nbins,
@@ -1097,7 +1101,7 @@ def make_uq_plots(
         fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.svg")
         fig3.savefig(Path(figpath) / f"{task_name}_uq_calibration_curve.eps")
     plots = {"rmv_vs_rmse": fig, "Z_scores": fig2, "calibration_curve": fig3}
-    return plots
+    return plots, slope, r_sq, intercept
 
 
 def calculate_uqtools_metrics(
@@ -1146,7 +1150,7 @@ def calculate_uqtools_metrics(
     NLL_sim_std = np.std(exp_NLL)
     logger.debug(f"NLL_sim = {NLL_sim:.2f} +/- {NLL_sim_std:.2f}")
 
-    plots = make_uq_plots(
+    plots, slope, r_sq, intercept = make_uq_plots(
         ordered_df,
         gaus_pred,
         errors_observed,
@@ -1181,6 +1185,9 @@ def calculate_uqtools_metrics(
         "Z_mean": Z_mean,
         "Z_mean_CI_low": interval_mean.confidence_interval.low,
         "Z_mean_CI_high": interval_mean.confidence_interval.high,
+        "rmv_rmse_slope": slope,
+        "rmv_rmse_r_sq": r_sq,
+        "rmv_rmse_intercept": intercept,
     }
 
     return metrics, plots
@@ -1497,6 +1504,13 @@ def get_rmvs_and_rmses(uq_ordered, errors_ordered, Nbins=10, include_bootstrap=T
     return rmvs, rmses, ci_low, ci_high
 
 
+def spearman_r(y_test, y_pred, y_var):
+    """
+    Calculate the Spearman \\rho coefficient
+    """
+    return spearmanr((y_test - y_pred) ** 2, y_var).correlation
+
+
 # TODO : Implement Reliability Diagrams
 def reliability_diagram(
     y_true: np.ndarray,
@@ -1563,13 +1577,12 @@ def reliability_diagram(
     return ax
 
 
-# TODO Implement accuracy-rejection curves - Concept from Kajetan
-
-unc_names = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]
-components = ["TU", "AU", "EU"]
-thresholds = list(range(50, 101, 1))
-
-
+#
+# # TODO Implement accuracy-rejection curves - Concept from Kajetan
+#
+# unc_names = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]
+# components = ["TU", "AU", "EU"]
+# thresholds = list(range(50, 101, 1))
 # def evaluate_all(preds, y_tests, uncertainties, metric, runs):
 #
 #     all_perfs = list()
@@ -1686,6 +1699,9 @@ class MetricsTable:
                     "Z_mean",
                     "Z_mean_CI_low",
                     "Z_mean_CI_high",
+                    "rmv_rmse_slope",
+                    "rmv_rmse_r_sq",
+                    "rmv_rmse_intercept",
                 ]
             )
             if add_plots_to_table:
@@ -1966,6 +1982,9 @@ class MetricsTable:
                     metrics["Z_mean"],
                     metrics["Z_mean_CI_low"],
                     metrics["Z_mean_CI_high"],
+                    metrics["rmv_rmse_slope"],
+                    metrics["rmv_rmse_r_sq"],
+                    metrics["rmv_rmse_intercept"],
                 ]
             )
             if self.add_plots_to_table:
@@ -2494,6 +2513,9 @@ def aggregate_metrics_csv(input_file_path, output_file_path):
         "Z_mean",
         "Z_mean_CI_low",
         "Z_mean_CI_high",
+        "rmv_rmse_slope",
+        "rmv_rmse_r_sq",
+        "rmv_rmse_intercept",
         "aleatoric_uct_mean",
         "epistemic_uct_mean",
         "total_uct_mean",
