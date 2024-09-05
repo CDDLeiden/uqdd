@@ -3,14 +3,16 @@ import pandas as pd
 
 import glob
 from uqdd import DEVICE, MODELS_DIR
+from uqdd.models.emc import emc_predict
 
 # from uqdd.utils import get_config
 from uqdd.utils import load_df, create_logger
-from uqdd.models.utils_models import load_model, get_model_config
+from uqdd.models.utils_models import load_model, get_model_config, calculate_means
 from uqdd.models.baseline import BaselineDNN
 from uqdd.models.ensemble import EnsembleDNN
 from uqdd.models.mcdropout import mc_predict
 from uqdd.models.evidential import EvidentialDNN, ev_predict
+from uqdd.models.eoe import EoEDNN
 
 # METRICS
 from uqdd.models.utils_train import (
@@ -23,7 +25,7 @@ from uqdd.models.utils_metrics import process_preds, create_df_preds
 
 # # Importing models and their predict functions
 # from uqdd.models.utils_train import predict # for ensemble
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import ast
 
 
@@ -107,39 +109,45 @@ def get_model_class(model_type: str):
         model_class = BaselineDNN
     elif model_type.lower() == "ensemble":
         model_class = EnsembleDNN
-    elif model_type.lower() == "evidential":
+    elif model_type.lower() in ["evidential", "emc"]:
         model_class = EvidentialDNN
+    elif model_type.lower() == "eoe":
+        model_class = EoEDNN
     else:
         raise ValueError(f"Model type {model_type} not recognized")
     return model_class
 
 
-def get_predict_fn(model_type: str):
+def get_predict_fn(model_type: str, num_mc_samples=100):
     if model_type.lower() == "mcdropout":
         predict_fn = mc_predict
-        predict_kwargs = {"aleatoric": True, "num_mc_samples": 100}
-
+        predict_kwargs = {"num_mc_samples": num_mc_samples}
     elif model_type.lower() in ["ensemble", "baseline"]:
         predict_fn = predict
         predict_kwargs = {}
-
-    elif model_type.lower() == "evidential":
+    elif model_type.lower() in ["evidential", "eoe"]:
         predict_fn = ev_predict
         predict_kwargs = {}
+    elif model_type.lower() == "emc":
+        predict_fn = emc_predict
+        predict_kwargs = {"num_mc_samples": num_mc_samples}
     else:
         raise ValueError(f"Model type {model_type} not recognized")
     return predict_fn, predict_kwargs
 
 
-def get_preds(model, dataloaders, model_type, subset="test"):
-    predict_fn, predict_kwargs = get_predict_fn(model_type)
+def get_preds(model, dataloaders, model_type, subset="test", num_mc_samples=100):
+    predict_fn, predict_kwargs = get_predict_fn(
+        model_type, num_mc_samples=num_mc_samples
+    )
     preds_res = predict_fn(model, dataloaders[subset], device=DEVICE, **predict_kwargs)
-    if model_type == "evidential":
+    if model_type in ["evidential", "eoe", "emc"]:
         preds, labels, alea_vars, epi_vars = preds_res
     else:
         preds, labels, alea_vars = preds_res
         epi_vars = None
-
+    if model_type in ["eoe", "emc"]:
+        preds, alea_vars, epi_vars = calculate_means(preds, alea_vars, epi_vars)
     return preds, labels, alea_vars, epi_vars
 
 
@@ -176,32 +184,42 @@ def reassess_metrics(
     for index, row in runs_df.iterrows():
         model_path = row["model_path"]
         model_name = row["model_name"]
+        # activity_type = row["activity_type"]
 
         # print(type(model_path))
         rowkwargs = row.to_dict()
         # popping the model_type
         model_type = rowkwargs.pop("model_type")
+        activity_type = rowkwargs.pop("activity_type")
 
         if model_path:
             model_fig_out_path = os.path.join(figs_out_path, model_name)
-
             if os.path.exists(model_fig_out_path):
                 print(f"Model {model_name} already reassessed")
                 continue
-
             # make the model_fig_out_path dir
             os.makedirs(model_fig_out_path, exist_ok=True)
 
-            config = get_model_config(model_type=model_type, **rowkwargs)
+            config = get_model_config(
+                model_type=model_type, activity_type=activity_type, **rowkwargs
+            )
+            num_mc_samples = config.get("num_mc_samples", 100)
             model_class = get_model_class(model_type)
-            model = load_model(model_class, model_path, config=config).to(DEVICE)
+            prefix = "models." if model_type == "eoe" else ""
+            model = load_model(
+                model_class, model_path, prefix_to_state_keys=prefix, config=config
+            ).to(DEVICE)
 
             # Getting DataLoaders
             dataloaders = get_dataloader(config, device=DEVICE, logger=logger)
 
             # RePredict and Evaluate preds
             preds, labels, alea_vars, epi_vars = get_preds(
-                model, dataloaders, model_type, subset="test"
+                model,
+                dataloaders,
+                model_type,
+                subset="test",
+                num_mc_samples=num_mc_samples,
             )
             df = pkl_preds_export(
                 preds, labels, alea_vars, epi_vars, model_fig_out_path
@@ -227,7 +245,11 @@ def reassess_metrics(
 
             # Recalibrate model
             preds_val, labels_val, alea_vars_val, epi_vars_val = get_preds(
-                model, dataloaders, model_type, subset="val"
+                model,
+                dataloaders,
+                model_type,
+                subset="val",
+                num_mc_samples=num_mc_samples,
             )
 
             iso_recal_model = recalibrate_model(
@@ -253,6 +275,9 @@ if __name__ == "__main__":
     activity_type = "xc50"
     type_n_targets = "all"
     project_name = "2024-06-25-all-models-100"
+    # activity_type = "kx"
+    # project_name = "2024-07-22-all-models-100-kx"
+
     project_out_name = f"reassess-{project_name}"
     data_specific_path = f"{data_name}/{activity_type}/{type_n_targets}"
     # DESCRIPTORS
@@ -271,7 +296,7 @@ if __name__ == "__main__":
     runs_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_name}/runs.csv"
 
     # FIGS OUT PATH
-    figs_out_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_name}/{activity_type}/{type_n_targets}/{project_out_name}/"
+    figs_out_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}/"
 
     csv_out_path = figs_out_path + "metrics.csv"
 
