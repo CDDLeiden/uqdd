@@ -6,7 +6,7 @@ data=${3:-"papyrus"}
 activity=${4:-"xc50"}
 desc_prot=${5:-"ankh-large"}
 desc_chem=${6:-"ecfp2048"}
-split_type=${7:-"random"}
+split_type=${7:-"time"}
 n_targets=${8:--1}
 
 export CUDA_VISIBLE_DEVICES=$gpu_device
@@ -30,7 +30,7 @@ task_type="regression"
 wandb_project="baseline-test" #"${today}-baseline" # "2024-04-30-baseline" #"${today}-baseline" #"2024-04-16-baseline"
 logname="${wandb_project}-baseline.txt"
 
-python baseline.py --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project --sweep-count "$sweep_count" #2>&1 | tee ../logs/"${logname}"
+python model_parser.py --model baseline --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project #--sweep-count "$sweep_count" #2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"
