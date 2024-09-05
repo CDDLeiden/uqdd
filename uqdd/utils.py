@@ -63,6 +63,7 @@ def get_config(
     config_name: str,
     config_dir: Union[str, Path] = CONFIG_DIR,
     split_key=None,
+    activity_key=None,
     **kwargs,
 ):
     config_path = Path(config_dir) / f"{config_name}.json"
@@ -73,6 +74,8 @@ def get_config(
 
     with open(config_path) as f:
         config = json.load(f)
+        if activity_key is not None:
+            config = config[activity_key]
         if split_key is not None:
             config = config[split_key]
 
