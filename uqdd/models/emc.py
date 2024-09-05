@@ -18,7 +18,7 @@ from uqdd.models.utils_train import (
     post_training_save_model,
 )
 
-from uqdd.models.utils_models import get_model_config, set_seed
+from uqdd.models.utils_models import get_model_config, set_seed, calculate_means
 from tqdm import tqdm
 
 
@@ -34,9 +34,9 @@ def emc_predict(ev_model, dataloader, num_mc_samples=10, device=DEVICE):
         aleatoric_all.append(alea)
         epistemic_all.append(epistemic)
 
-    outputs_all = torch.stack(outputs_all, dim=2).mean(dim=2)
-    aleatoric_all = torch.stack(aleatoric_all, dim=2).mean(dim=2)
-    epistemic_all = torch.stack(epistemic_all, dim=2).mean(dim=2)
+    outputs_all = torch.stack(outputs_all, dim=2)  # .mean(dim=2)
+    aleatoric_all = torch.stack(aleatoric_all, dim=2)  # .mean(dim=2)
+    epistemic_all = torch.stack(epistemic_all, dim=2)  # .mean(dim=2)
 
     return outputs_all.cpu(), labels.cpu(), aleatoric_all.cpu(), epistemic_all.cpu()
 
@@ -57,6 +57,8 @@ def run_emc(config=None):
     preds, labels, alea_vars, epi_vars = emc_predict(
         best_model, dataloaders["test"], num_mc_samples=num_mc_samples, device=DEVICE
     )
+    preds, alea_vars, epi_vars = calculate_means(preds, alea_vars, epi_vars)
+
     # Then comes the predict metrics part
     metrics, plots, uct_logger = evaluate_predictions(
         config,
@@ -73,7 +75,9 @@ def run_emc(config=None):
     preds_val, labels_val, alea_vars_val, epi_vars_val = emc_predict(
         best_model, dataloaders["val"], num_mc_samples=num_mc_samples, device=DEVICE
     )
-
+    preds_val, alea_vars_val, epi_vars_val = calculate_means(
+        preds_val, alea_vars_val, epi_vars_val
+    )
     iso_recal_model = recalibrate_model(
         preds_val,
         labels_val,
@@ -99,7 +103,7 @@ def run_emc_wrapper(**kwargs):
     config = get_model_config(model_type="emc", **kwargs)
     return run_emc(config=config)
 
-#
+
 # if __name__ == "__main__":
 #     run_emc_wrapper(
 #         data_name="papyrus",
@@ -112,9 +116,9 @@ def run_emc_wrapper(**kwargs):
 #         split_type="random",
 #         ext="pkl",
 #         task_type="regression",
-#         wandb_project_name=f"emc-test",
-#         epochs=10,
-#         num_mc_samples=10,
+#         wandb_project_name="emc-test",
+#         epochs=5,
+#         num_mc_samples=5,
 #     )
 #     print("done")
 
