@@ -11,6 +11,7 @@ from uqdd.models.utils_train import (
     evaluate_predictions,
     recalibrate_model,
     get_dataloader,
+    predict,
 )
 
 from uqdd.models.utils_models import (
@@ -18,182 +19,36 @@ from uqdd.models.utils_models import (
     get_sweep_config,
 )
 
-#
-#
-#
-#
-# import os
-# import sys
-#
-# sys.path.append(
-#     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# )
-# from datetime import date
-# import torch
-# import matplotlib.pyplot as plt
-# from tqdm import tqdm
-# from uqdd.models.models_utils import set_seed, get_model_config, get_datasets, get_tasks
-# from uqdd.models.models_utils import (
-#     build_loader,
-#     build_optimizer,
-#     MultiTaskLoss,
-#     save_models,
-# )
-# from uqdd.models.models_utils import UCTMetricsTable, process_preds
-# from uqdd.models.baseline import train_model
-#
-# from functools import partial
-# import numpy as np
-# import torch.nn as nn
-# import wandb
-# from torch.optim.lr_scheduler import ReduceLROnPlateau
-#
-# today = date.today()
-# today = today.strftime("%Y%m%d")
-#
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# print("Device: " + str(device))
-# print(torch.version.cuda) if device == "cuda" else None
-#
-# LOG_DIR = os.environ.get("LOG_DIR")
-# DATA_DIR = os.environ.get("DATA_DIR")
-# DATASET_DIR = os.path.join(DATA_DIR, "dataset")
-# CONFIG_DIR = os.environ.get("CONFIG_DIR")
-# FIGS_DIR = os.environ.get("FIGS_DIR")
-#
-# # wandb_dir = '../logs/'
-# wandb_mode = "online"  # 'offline')))))
 
-
-# def mc_predict(
-#     model,
-#     test_loader,
-#     aleatoric=False,
-#     num_samples=100,
-#     device=DEVICE
-# ):
-#     model.train()  # Enable dropout
-#     outputs_all = []
-#     targets_all = []
-#     vars_all = []
-#
-#     with torch.no_grad():
-#         for inputs, targets in tqdm(test_loader, total=len(test_loader), desc="MC prediction"):
-#             inputs = tuple(x.to(device) for x in inputs)
-#             output_samples, vars_samples = [], []
-#             for _ in range(num_samples): # Multiple forward passes
-#                 if aleatoric:
-#                     outputs, logvars = model(inputs)
-#                     vars_ = torch.exp(logvars)
-#                     output_samples.append(outputs)
-#                     vars_samples.append(vars_)
-#                 else:
-#                     outputs = model(inputs)
-#                     output_samples.append(outputs)
-#
-#             outputs = torch.stack(output_samples, dim=2)
-#             if aleatoric:
-#                 vars_ = torch.stack(vars_samples, dim=2)
-#                 vars_all.append(vars_)
-#             outputs_all.append(outputs)
-#             targets_all.append(targets)
-#
-#     model.eval()  # Disable dropout
-#     outputs_all = torch.cat(outputs_all, dim=0).cpu()
-#     targets_all = torch.cat(targets_all, dim=0).cpu()
-#
-#     if aleatoric:
-#         vars_all = torch.cat(vars_all, dim=0).cpu()
-#         return outputs_all, targets_all, vars_all
-#
-#     return outputs_all, targets_all, None
-# if return_targets:
-#     targets_all = torch.cat(targets_all, dim=0)
-#     return outputs_all, targets_all
-# return outputs_all
-
-
-# def mc_uncertainty_estimate(outputs):
-#     outputs = outputs.cpu().detach()
-#     y_mean = outputs.mean(dim=2).numpy()
-#     y_std = outputs.std(dim=2).numpy()
-#     # y_var = outputs.var(dim=0)
-#     # y_std = torch.sqrt(y_var)
-#
-#     return y_mean, y_std # , y_var
-
-
-# def plot_predictions(y_true, y_pred, y_std):
-#     plt.figure(figsize=(12, 6))
-#     plt.errorbar(y_true, y_pred, yerr=y_std, fmt="o")
-#     plt.xlabel("True values")
-#     plt.ylabel("Predicted values")
-#     plt.grid()
-#     plt.show()
-#
-#
-# def plot_uncertainty_distribution(y_std):
-#     plt.figure(figsize=(12, 6))
-#     plt.hist(y_std, bins=50)
-#     plt.xlabel("Uncertainty")
-#     plt.ylabel("Frequency")
-#     plt.grid()
-#     plt.show()
-
-
-def mc_predict(model, test_loader, aleatoric=False, num_mc_samples=100, device=DEVICE):
-    model.train()  # Enable dropout
-    outputs_all = []
-    targets_all = []
-    aleatoric_all = []
-    # Here we need to selectively set batchnorm layers to eval mode
+def enable_dropout(model):
     for m in model.modules():
-        if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-            m.eval()
-    # network.train()
-    # # put bachnorm in eval mode
-    # for m in network.modules():
-    #     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-    #         m.eval()
-    with torch.no_grad():
-        for inputs, targets in tqdm(
-            test_loader, total=len(test_loader), desc="MC prediction"
-        ):
-            inputs = tuple(x.to(device) for x in inputs)
-            output_samples, alea_samples = [], []
-            for _ in range(num_mc_samples):  # Multiple forward passes
-                if aleatoric:
-                    outputs, vars_ = model(inputs)
-                    # vars_ = torch.exp(logvars)
-                    output_samples.append(outputs)
-                    alea_samples.append(vars_)
-                else:
-                    outputs = model(inputs)
-                    output_samples.append(outputs)
+        if m.__class__.__name__.startswith("Dropout"):
+            m.train()
 
-            outputs = torch.stack(output_samples, dim=2)
-            if aleatoric:
-                vars_ = torch.stack(alea_samples, dim=2)
-                aleatoric_all.append(vars_)
-            outputs_all.append(outputs)
-            targets_all.append(targets)
 
-    model.eval()  # Disable dropout
-    outputs_all = torch.cat(outputs_all, dim=0).cpu()
-    targets_all = torch.cat(targets_all, dim=0).cpu()
-
-    if aleatoric:
-        aleatoric_all = torch.cat(aleatoric_all, dim=0).cpu()
-        return outputs_all, targets_all, aleatoric_all
-
-    return outputs_all, targets_all, None
+def mc_predict(model, test_loader, num_mc_samples=100, device=DEVICE):
+    # model.train()  # Enable dropout
+    outputs_all, aleatoric_all = [], []  # targets_all  []
+    for _ in range(num_mc_samples):  # Multiple forward passes
+        model.eval()
+        enable_dropout(model)
+        outputs, targets, alea = predict(
+            model, test_loader, device=device, set_on_eval=False
+        )
+        outputs_all.append(outputs)
+        aleatoric_all.append(alea)
+    # stack on dim 2
+    outputs_all = torch.stack(outputs_all, dim=2)
+    aleatoric_all = torch.stack(aleatoric_all, dim=2)
+    return outputs_all.cpu(), targets.cpu(), aleatoric_all.cpu()
 
 
 def run_mcdropout(config=None):
     if config is None:
         config = get_model_config(
-            "mcdropout", split_type="random"
-        )  # * Defaulting to random split_type *
+            "mcdropout", split_type="random", activity_type="xc50"
+        )  # * Defaulting to random split_type and xc50 activity_type *
+    num_mc_samples = config.get("num_mc_samples", 100)
     # best_model, dataloaders, config, logger, _ = train_model_e2e(
     best_model, config, _, _ = train_model_e2e(
         config,
@@ -202,27 +57,22 @@ def run_mcdropout(config=None):
         logger=LOGGER,
     )
     dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
-    aleatoric = config.get("aleatoric", False)
-    num_mc_samples = config.get("num_mc_samples", 100)
+    # aleatoric = config.get("aleatoric", False)
 
     preds, labels, alea_vars = mc_predict(
         best_model,
         dataloaders["test"],
-        aleatoric=aleatoric,
         num_mc_samples=num_mc_samples,
         device=DEVICE,
     )
-
     # Then comes the predict metrics part
     metrics, plots, uct_logger = evaluate_predictions(
         config, preds, labels, alea_vars, "mcdropout", LOGGER
     )
-
     # RECALIBRATION
     preds_val, labels_val, alea_vars_val = mc_predict(
         best_model,
         dataloaders["val"],
-        aleatoric=aleatoric,
         num_mc_samples=num_mc_samples,
         device=DEVICE,
     )
@@ -236,10 +86,8 @@ def run_mcdropout(config=None):
         config=config,
         uct_logger=uct_logger,
     )
-
     uct_logger.wandb_log()
     wandb.finish()
-
     return best_model, iso_recal_model, metrics, plots
 
 
@@ -247,10 +95,7 @@ def run_mcdropout_wrapper(**kwargs):
     global LOGGER
     LOGGER = create_logger(name="mcdropout", file_level="debug", stream_level="info")
     config = get_model_config(model_type="mcdropout", **kwargs)
-
     return run_mcdropout(config)
-    # best_model, metrics, plots = run_mcdropout(config)
-    # return best_model, metrics, plots
 
 
 def run_mcdropout_hyperparm(**kwargs):
@@ -271,22 +116,32 @@ def run_mcdropout_hyperparm(**kwargs):
     wandb.agent(sweep_id, function=run_mcdropout, count=sweep_count)
 
 
-# if __name__ == "__main__":
-#     run_mcdropout_wrapper(
-#         data_name="papyrus",
-#         activity_type="xc50",
-#         n_targets=-1,
-#         descriptor_protein="ankh-large",
-#         descriptor_chemical="ecfp2048",
-#         median_scaling=False,
-#         split_type="scaffold_cluster",
-#         ext="pkl",
-#         task_type="regression",
-#         wandb_project_name=f"mcdp-test",
-#         epochs=3000,
-#         num_mc_samples=10,
-#     )
+if __name__ == "__main__":
+    run_mcdropout_wrapper(
+        data_name="papyrus",
+        activity_type="xc50",
+        n_targets=-1,
+        descriptor_protein="ankh-large",
+        descriptor_chemical="ecfp2048",
+        median_scaling=False,
+        split_type="random",
+        ext="pkl",
+        task_type="regression",
+        wandb_project_name=f"mcdp-test",
+        epochs=5,
+        num_mc_samples=5,
+    )
 # #
+# Here we need to selectively set batchnorm layers to eval mode
+# for m in model.modules():
+#     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+#         m.eval()
+# network.train()
+# # put bachnorm in eval mode
+# for m in network.modules():
+#     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+#         m.eval()
+# with torch.no_grad():
 # def main():
 #     parser = argparse.ArgumentParser(description="Run MC Dropout Model")
 #     parser.add_argument(
@@ -527,3 +382,206 @@ def run_mcdropout_hyperparm(**kwargs):
 #
 # if __name__ == "__main__":
 #     run_mcdropout(wandb_project_name="mtl-mcdropout-test")
+
+# def _mc_predict(model, test_loader, aleatoric=False, num_mc_samples=100, device=DEVICE):
+#     model.train()  # Enable dropout
+#     outputs_all = []
+#     targets_all = []
+#     aleatoric_all = []
+#     # Here we need to selectively set batchnorm layers to eval mode
+#     for m in model.modules():
+#         if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+#             m.eval()
+#     # network.train()
+#     # # put bachnorm in eval mode
+#     # for m in network.modules():
+#     #     if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+#     #         m.eval()
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#             test_loader, total=len(test_loader), desc="MC prediction"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             output_samples, alea_samples = [], []
+#             for _ in range(num_mc_samples):  # Multiple forward passes
+#                 if aleatoric:
+#                     outputs, vars_ = model(inputs)
+#                     # vars_ = torch.exp(logvars)
+#                     output_samples.append(outputs)
+#                     alea_samples.append(vars_)
+#                 else:
+#                     outputs = model(inputs)
+#                     output_samples.append(outputs)
+#
+#             outputs = torch.stack(output_samples, dim=2)
+#             if aleatoric:
+#                 vars_ = torch.stack(alea_samples, dim=2)
+#                 aleatoric_all.append(vars_)
+#             outputs_all.append(outputs)
+#             targets_all.append(targets)
+#
+#     model.eval()  # Disable dropout
+#     outputs_all = torch.cat(outputs_all, dim=0).cpu()
+#     targets_all = torch.cat(targets_all, dim=0).cpu()
+#
+#     if aleatoric:
+#         aleatoric_all = torch.cat(aleatoric_all, dim=0).cpu()
+#         return outputs_all, targets_all, aleatoric_all
+#
+#     return outputs_all, targets_all, None
+
+#
+#
+#
+#
+# import os
+# import sys
+#
+# sys.path.append(
+#     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# )
+# from datetime import date
+# import torch
+# import matplotlib.pyplot as plt
+# from tqdm import tqdm
+# from uqdd.models.models_utils import set_seed, get_model_config, get_datasets, get_tasks
+# from uqdd.models.models_utils import (
+#     build_loader,
+#     build_optimizer,
+#     MultiTaskLoss,
+#     save_models,
+# )
+# from uqdd.models.models_utils import UCTMetricsTable, process_preds
+# from uqdd.models.baseline import train_model
+#
+# from functools import partial
+# import numpy as np
+# import torch.nn as nn
+# import wandb
+# from torch.optim.lr_scheduler import ReduceLROnPlateau
+#
+# today = date.today()
+# today = today.strftime("%Y%m%d")
+#
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# print("Device: " + str(device))
+# print(torch.version.cuda) if device == "cuda" else None
+#
+# LOG_DIR = os.environ.get("LOG_DIR")
+# DATA_DIR = os.environ.get("DATA_DIR")
+# DATASET_DIR = os.path.join(DATA_DIR, "dataset")
+# CONFIG_DIR = os.environ.get("CONFIG_DIR")
+# FIGS_DIR = os.environ.get("FIGS_DIR")
+#
+# # wandb_dir = '../logs/'
+# wandb_mode = "online"  # 'offline')))))
+
+
+# def mc_predict(
+#     model,
+#     test_loader,
+#     aleatoric=False,
+#     num_samples=100,
+#     device=DEVICE
+# ):
+#     model.train()  # Enable dropout
+#     outputs_all = []
+#     targets_all = []
+#     vars_all = []
+#
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(test_loader, total=len(test_loader), desc="MC prediction"):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             output_samples, vars_samples = [], []
+#             for _ in range(num_samples): # Multiple forward passes
+#                 if aleatoric:
+#                     outputs, logvars = model(inputs)
+#                     vars_ = torch.exp(logvars)
+#                     output_samples.append(outputs)
+#                     vars_samples.append(vars_)
+#                 else:
+#                     outputs = model(inputs)
+#                     output_samples.append(outputs)
+#
+#             outputs = torch.stack(output_samples, dim=2)
+#             if aleatoric:
+#                 vars_ = torch.stack(vars_samples, dim=2)
+#                 vars_all.append(vars_)
+#             outputs_all.append(outputs)
+#             targets_all.append(targets)
+#
+#     model.eval()  # Disable dropout
+#     outputs_all = torch.cat(outputs_all, dim=0).cpu()
+#     targets_all = torch.cat(targets_all, dim=0).cpu()
+#
+#     if aleatoric:
+#         vars_all = torch.cat(vars_all, dim=0).cpu()
+#         return outputs_all, targets_all, vars_all
+#
+#     return outputs_all, targets_all, None
+# if return_targets:
+#     targets_all = torch.cat(targets_all, dim=0)
+#     return outputs_all, targets_all
+# return outputs_all
+
+
+# def mc_uncertainty_estimate(outputs):
+#     outputs = outputs.cpu().detach()
+#     y_mean = outputs.mean(dim=2).numpy()
+#     y_std = outputs.std(dim=2).numpy()
+#     # y_var = outputs.var(dim=0)
+#     # y_std = torch.sqrt(y_var)
+#
+#     return y_mean, y_std # , y_var
+
+
+# def plot_predictions(y_true, y_pred, y_std):
+#     plt.figure(figsize=(12, 6))
+#     plt.errorbar(y_true, y_pred, yerr=y_std, fmt="o")
+#     plt.xlabel("True values")
+#     plt.ylabel("Predicted values")
+#     plt.grid()
+#     plt.show()
+#
+#
+# def plot_uncertainty_distribution(y_std):
+#     plt.figure(figsize=(12, 6))
+#     plt.hist(y_std, bins=50)
+#     plt.xlabel("Uncertainty")
+#     plt.ylabel("Frequency")
+#     plt.grid()
+#     plt.show()
+
+#
+#         for inputs, targets in tqdm(
+#             test_loader, total=len(test_loader), desc="MC prediction"
+#         ):
+#
+#             inputs = tuple(x.to(device) for x in inputs)
+#         output_samples, alea_samples = [], []
+#         for _ in range(num_mc_samples):  # Multiple forward passes
+#             if aleatoric:
+#                 outputs, vars_ = model(inputs)
+#                 # vars_ = torch.exp(logvars)
+#                 output_samples.append(outputs)
+#                 alea_samples.append(vars_)
+#             else:
+#                 outputs = model(inputs)
+#                 output_samples.append(outputs)
+#
+#         outputs = torch.stack(output_samples, dim=2)
+#         if aleatoric:
+#             vars_ = torch.stack(alea_samples, dim=2)
+#             aleatoric_all.append(vars_)
+#         outputs_all.append(outputs)
+#         targets_all.append(targets)
+#
+# model.eval()  # Disable dropout
+# outputs_all = torch.cat(outputs_all, dim=0).cpu()
+# targets_all = torch.cat(targets_all, dim=0).cpu()
+#
+# if aleatoric:
+#     aleatoric_all = torch.cat(aleatoric_all, dim=0).cpu()
+#     return outputs_all, targets_all, aleatoric_all
+#
+# return outputs_all, targets_all, None
