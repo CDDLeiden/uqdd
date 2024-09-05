@@ -54,15 +54,13 @@ __all__ = [
 ]
 
 __author__ = "Bola Khalil"
-__supervisor__ = "Kajetan Schweighofer"
-__contributor__ = "Natalia Dyubankova"
-__copyright__ = (
-    "Copyright 2023-2024, Johnson & Johnson and Johannes-Kepler Universität Linz"
+__contributors__ = (
+    "Kajetan Schweighofer, Natalia Dyubankova, Günter Klambauer, Sepp Hochreiter, "
+    "Gerard van Westen*, Herman van Vlijmen*"
 )
-__license__ = (
-    "All rights reserved, Johnson & Johnson & Johannes-Kepler Universität Linz"
-)
-__version__ = "0.0.3"
+__copyright__ = "Copyright 2023-2024, Johnson & Johnson, Johannes-Kepler Universität Linz, Leiden University"
+__license__ = "All rights reserved, Johnson & Johnson, Johannes-Kepler Universität Linz, Leiden University"
+__version__ = "0.0.4"
 __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"
