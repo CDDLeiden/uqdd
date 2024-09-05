@@ -323,12 +323,9 @@ def evaluate(
     return total_loss
 
 
-def predict(
-    model,
-    dataloader,
-    device=DEVICE,
-):
-    model.eval()
+def predict(model, dataloader, device=DEVICE, set_on_eval=True):
+    if set_on_eval:
+        model.eval()
     outputs_all = []
     targets_all = []
     vars_all = []
@@ -699,7 +696,7 @@ def train_model(
         random_num = np.random.randint(0, 10000000000)
 
         # create ckpting path here
-
+        i = 0
         for epoch in tqdm(range(config.get("epochs", 10)), desc="Epochs"):
             # for epoch in range(config.epochs + 1):
             try:
@@ -728,6 +725,10 @@ def train_model(
                     best_val_loss = vloss
                     early_stop_counter = 0
                     config = ckpt(model, config)
+                    # if tracker is wandb we want to update the wandb config with the ckpt path and name
+                    # if tracker.lower() == "wandb" and i == 0:
+                    #     wandb.config.update(config)
+                    #     i += 1
                     # best_model = model
                     # save the best model state dict to var
                     # torch.save(model.state_dict(), MODELS_DIR / "best_model_ckpt.pth")
