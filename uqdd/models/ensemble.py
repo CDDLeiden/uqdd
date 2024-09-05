@@ -1,8 +1,3 @@
-import argparse
-import logging
-from multiprocessing import Pool, Manager, Queue, Lock
-import time
-
 import numpy as np
 import wandb
 import torch
@@ -11,7 +6,7 @@ import torch.multiprocessing as mp
 
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, DATASET_DIR
 from uqdd.models.baseline import BaselineDNN
-from uqdd.utils import create_logger, parse_list, save_pickle, split_list_by_sizes
+from uqdd.utils import create_logger, save_pickle
 
 from uqdd.models.utils_train import (
     train_model_e2e,
@@ -152,7 +147,7 @@ def fill_to_max_epochs(array, max_epochs):
     return filled_array
 
 
-def process_results_arrs(result_arrs, test_arrs, config, logger):
+def process_results_arrs(result_arrs, test_arrs, config, logger, model_type="ensemble"):
     try:
         # get the maximum number of epochs
         max_epochs = max([results_arr.shape[0] for results_arr in result_arrs])
@@ -168,7 +163,7 @@ def process_results_arrs(result_arrs, test_arrs, config, logger):
         # Take average across model metrics
         # results_tensor_avg = result_arrs.nanmean(2)
         results_tensor_avg = np.nanmean(result_arrs, 2)
-        print(f"{results_tensor_avg.shape=}")
+        # print(f"{results_tensor_avg.shape=}")
         # HERE we should report to wandb
         log_wandb_ensemble(results_tensor_avg, config)
 
@@ -186,178 +181,12 @@ def process_results_arrs(result_arrs, test_arrs, config, logger):
         # Here we want to save a pkl file with the results tensor
         save_pickle(
             result_arrs,
-            DATASET_DIR / config.get("data_specific_path") / "ensemble_results.pkl",
+            DATASET_DIR
+            / config.get("data_specific_path")
+            / f"{model_type}_results.pkl",
         )
 
     return result_arrs
-
-
-# def gpu_manager(gpu_id, available_gpus, lock):
-#     with lock:
-#         gpu = available_gpus[gpu_id % len(available_gpus)]
-#         while gpu in gpu_id:
-#             gpu_id += 1
-#             gpu = available_gpus[gpu_id % len(available_gpus)]
-#         return gpu
-# def gpu_manager(available_gpus, gpu_status, lock):
-#     with lock:
-#         for idx, gpu in enumerate(available_gpus):
-#             if not gpu_status[idx]:  # If the GPU is not busy
-#                 gpu_status[idx] = True
-#                 return gpu, idx
-#         return None, -1  # No GPU available
-#
-#
-# def release_gpu(gpu_idx, gpu_status, lock):
-#     with lock:
-#         gpu_status[gpu_idx] = False
-
-# def train_worker(rank, config, seed, results, device, logger, lock):
-# # def train_worker(rank, config, seed, results, available_gpus, lock, logger):
-#     # seed += rank
-#     # device = gpu_manager(rank, available_gpus, lock)
-#     with lock:
-#         torch.cuda.set_device(device)
-#
-#         best_model, config_, results_arr = train_model_e2e(
-#             config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
-#         )
-#         # print(rank)
-#         results[rank] = (best_model.cpu(), config_, results_arr)
-#         # clear memory cache on GPU
-#         torch.cuda.empty_cache()
-#
-#
-# def train_on_device(args):
-#     # rank, config, results, available_gpus, lock, logger = args
-#     # seed = config.get("seed", 42)
-#     # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
-#     # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
-#     rank, config, results, device, logger, seed, lock, max_retries = args
-#     # seed = config.get("seed", 42)
-#     # device = available_gpus[rank % num_gpus]
-#     # print(f"{device=}")
-#     retries = 0
-#     while retries < max_retries:
-#         try:
-#             train_worker(rank, config, seed, results, device, logger, lock)
-#             break
-#         except Exception as e:
-#             logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
-#             time.sleep(5)
-#             retries += 1
-#     # try:
-#     #     train_worker(rank, config, seed + rank, results, device, logger, lock)
-#     # except Exception as e:
-#     #     logger.exception(f"Process {rank} failed with error: {e}. Retrying in 5 seconds...")
-#     #     time.sleep(5)
-#     #     train_on_device(args)
-#
-#
-# def train_on_device_(args):
-#     # rank, config, results, available_gpus, lock, logger = args
-#     # seed = config.get("seed", 42)
-#     # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
-#     # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
-#     seq, config, results, device, logger, seed, max_retries = args
-#
-#     torch.cuda.set_device(device)
-#     for i, rank in enumerate(range(seq)):
-#         retries = 0
-#         while retries < max_retries:
-#             try:
-#                 best_model, config_, results_arr = train_model_e2e(
-#                     config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
-#                 )
-#                 # print(rank)
-#                 results[rank] = (best_model.cpu(), config_, results_arr)
-#     # clear memory cache on GPU
-#     torch.cuda.empty_cache()
-#
-#     retries = 0
-#     while retries < max_retries:
-#         try:
-#             train_worker(rank, config, seed, results, device, logger, lock)
-#             break
-#         except Exception as e:
-#             logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
-#             time.sleep(5)
-#             retries += 1
-
-
-# def parallel_train_ensemble(ensemble_size, config, logger):
-#     best_models = []
-#     result_arrs = []
-#     if torch.cuda.is_available():
-#         logger.info("Parallel training on several GPUs")
-#         # Get the available GPUs
-#         available_devices = list(range(torch.cuda.device_count()))
-#         num_processes = len(available_devices)
-#         logger.info(f"Number of Available GPUs: {num_processes} GPUs")
-#
-#     else:
-#         logger.info("Parallel training on several CPUs")
-#         num_processes = mp.cpu_count()
-#         # available_devices = list(range(num_processes))
-#         available_devices = num_processes * ['cpu']
-#         logger.info(f"Number of Available CPUs: {num_processes} CPUs")
-#
-#     # how many models to run on each gpu
-#     seq_models = [ensemble_size // num_processes] * num_processes
-#
-#     for i in range(ensemble_size % num_processes):
-#         seq_models[i] += 1
-#
-#     manager = Manager()
-#     results = manager.dict()
-#     # args_queue = Queue()
-#     # lock = manager.Lock()
-#     # for i in range(num_processes):
-#     #     args_queue.put(i)
-#     args = []
-#     seed = config.get("seed", 42)
-#
-#     seedings = list(range(seed, seed + ensemble_size))
-#     rankings = list(range(ensemble_size))
-#     rank_seed = list(zip(rankings, seedings))
-#     model_per_device = split_list_by_sizes(rank_seed, seq_models)
-#
-#     max_retries = 3
-#     for i, s in enumerate(seq_models):
-#         device = available_devices[i]
-#         args.append((s, config, results, device, logger, seed, max_retries))
-#         seed += s
-#         config["seed"] = seed
-#
-#     # # chunking
-#     # chunk_size = ensemble_size // num_processes * [num_processes]
-#     # chunk_size.append(ensemble_size % num_processes)
-#     # for rank in range(ensemble_size):
-#     #     print(seed)
-#     #     device = args_queue.get()
-#     #     # device = available_devices[rank % num_processes]
-#     #     args.append((rank, config, results, device, logger, seed, lock, max_retries))
-#     #     # args_queue.put(device)
-#     #     seed += 1
-#     #     config["seed"] = seed
-#
-#     with Pool(processes=num_processes) as pool:
-#         pool.map(train_on_device, args)
-#         pool.map(train_on_device_, args)
-#
-#     for rank in range(ensemble_size):
-#         # best_model, dataloaders, config_, results_arr = results[rank]
-#         best_model, config_, results_arr = results[rank]
-#         best_models.append(best_model)
-#         result_arrs.append(results_arr)
-#     if len(best_models) < ensemble_size:
-#         # get how many are left
-#         num_models_left = ensemble_size - len(best_models)
-#         b_models_left, res_arrs_left, config_ = parallel_train_ensemble(num_models_left, config, logger)
-#         best_models.extend(b_models_left)
-#         result_arrs.extend(res_arrs_left)
-#
-#     return best_models, result_arrs, config_
 
 
 def run_ensemble(config=None):
@@ -420,7 +249,7 @@ def run_ensemble(config=None):
         write_model=True,
     )
     # logging config model_name to wandb
-    run.config.update(config_)
+    # run.config.update(config_)
 
     dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
 
@@ -490,15 +319,16 @@ def run_ensemble_hyperparm(**kwargs):
     wandb.agent(sweep_id, function=run_ensemble, count=sweep_count)
 
 
+#
 # if __name__ == "__main__":
-#     ensemble_model, iso_recal_model, std_recal, metrics, plots = run_ensemble_wrapper(
+#     ensemble_model, iso_recal_model, metrics, plots = run_ensemble_wrapper(
 #         data_name="papyrus",
-#         activity_type="xc50",
+#         activity_type="kx",
 #         n_targets=-1,
 #         descriptor_protein="ankh-large",
 #         descriptor_chemical="ecfp2048",
 #         median_scaling=False,
-#         split_type="random",
+#         split_type="time",
 #         ext="pkl",
 #         task_type="regression",
 #         wandb_project_name="ensemble-test",
@@ -1314,3 +1144,170 @@ def run_ensemble_hyperparm(**kwargs):
 #     logger.info(f"Ensemble - duration: {datetime.now() - start_time}")
 #     return test_loss, ensemble_preds, metrics, plots
 #
+
+# def gpu_manager(gpu_id, available_gpus, lock):
+#     with lock:
+#         gpu = available_gpus[gpu_id % len(available_gpus)]
+#         while gpu in gpu_id:
+#             gpu_id += 1
+#             gpu = available_gpus[gpu_id % len(available_gpus)]
+#         return gpu
+# def gpu_manager(available_gpus, gpu_status, lock):
+#     with lock:
+#         for idx, gpu in enumerate(available_gpus):
+#             if not gpu_status[idx]:  # If the GPU is not busy
+#                 gpu_status[idx] = True
+#                 return gpu, idx
+#         return None, -1  # No GPU available
+#
+#
+# def release_gpu(gpu_idx, gpu_status, lock):
+#     with lock:
+#         gpu_status[gpu_idx] = False
+
+# def train_worker(rank, config, seed, results, device, logger, lock):
+# # def train_worker(rank, config, seed, results, available_gpus, lock, logger):
+#     # seed += rank
+#     # device = gpu_manager(rank, available_gpus, lock)
+#     with lock:
+#         torch.cuda.set_device(device)
+#
+#         best_model, config_, results_arr = train_model_e2e(
+#             config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
+#         )
+#         # print(rank)
+#         results[rank] = (best_model.cpu(), config_, results_arr)
+#         # clear memory cache on GPU
+#         torch.cuda.empty_cache()
+#
+#
+# def train_on_device(args):
+#     # rank, config, results, available_gpus, lock, logger = args
+#     # seed = config.get("seed", 42)
+#     # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
+#     # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
+#     rank, config, results, device, logger, seed, lock, max_retries = args
+#     # seed = config.get("seed", 42)
+#     # device = available_gpus[rank % num_gpus]
+#     # print(f"{device=}")
+#     retries = 0
+#     while retries < max_retries:
+#         try:
+#             train_worker(rank, config, seed, results, device, logger, lock)
+#             break
+#         except Exception as e:
+#             logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
+#             time.sleep(5)
+#             retries += 1
+#     # try:
+#     #     train_worker(rank, config, seed + rank, results, device, logger, lock)
+#     # except Exception as e:
+#     #     logger.exception(f"Process {rank} failed with error: {e}. Retrying in 5 seconds...")
+#     #     time.sleep(5)
+#     #     train_on_device(args)
+#
+#
+# def train_on_device_(args):
+#     # rank, config, results, available_gpus, lock, logger = args
+#     # seed = config.get("seed", 42)
+#     # train_worker(rank, config, seed + rank, results, available_gpus, lock, logger)
+#     # rank, config, results, available_gpus, num_gpus, ens_size, logger = args
+#     seq, config, results, device, logger, seed, max_retries = args
+#
+#     torch.cuda.set_device(device)
+#     for i, rank in enumerate(range(seq)):
+#         retries = 0
+#         while retries < max_retries:
+#             try:
+#                 best_model, config_, results_arr = train_model_e2e(
+#                     config, model=BaselineDNN, model_type="baseline", logger=logger, seed=seed, device=device, tracker="tensor"
+#                 )
+#                 # print(rank)
+#                 results[rank] = (best_model.cpu(), config_, results_arr)
+#     # clear memory cache on GPU
+#     torch.cuda.empty_cache()
+#
+#     retries = 0
+#     while retries < max_retries:
+#         try:
+#             train_worker(rank, config, seed, results, device, logger, lock)
+#             break
+#         except Exception as e:
+#             logger.exception(f"Process {rank} failed with error: {e}. Retrying {retries}/{max_retries}...")
+#             time.sleep(5)
+#             retries += 1
+
+
+# def parallel_train_ensemble(ensemble_size, config, logger):
+#     best_models = []
+#     result_arrs = []
+#     if torch.cuda.is_available():
+#         logger.info("Parallel training on several GPUs")
+#         # Get the available GPUs
+#         available_devices = list(range(torch.cuda.device_count()))
+#         num_processes = len(available_devices)
+#         logger.info(f"Number of Available GPUs: {num_processes} GPUs")
+#
+#     else:
+#         logger.info("Parallel training on several CPUs")
+#         num_processes = mp.cpu_count()
+#         # available_devices = list(range(num_processes))
+#         available_devices = num_processes * ['cpu']
+#         logger.info(f"Number of Available CPUs: {num_processes} CPUs")
+#
+#     # how many models to run on each gpu
+#     seq_models = [ensemble_size // num_processes] * num_processes
+#
+#     for i in range(ensemble_size % num_processes):
+#         seq_models[i] += 1
+#
+#     manager = Manager()
+#     results = manager.dict()
+#     # args_queue = Queue()
+#     # lock = manager.Lock()
+#     # for i in range(num_processes):
+#     #     args_queue.put(i)
+#     args = []
+#     seed = config.get("seed", 42)
+#
+#     seedings = list(range(seed, seed + ensemble_size))
+#     rankings = list(range(ensemble_size))
+#     rank_seed = list(zip(rankings, seedings))
+#     model_per_device = split_list_by_sizes(rank_seed, seq_models)
+#
+#     max_retries = 3
+#     for i, s in enumerate(seq_models):
+#         device = available_devices[i]
+#         args.append((s, config, results, device, logger, seed, max_retries))
+#         seed += s
+#         config["seed"] = seed
+#
+#     # # chunking
+#     # chunk_size = ensemble_size // num_processes * [num_processes]
+#     # chunk_size.append(ensemble_size % num_processes)
+#     # for rank in range(ensemble_size):
+#     #     print(seed)
+#     #     device = args_queue.get()
+#     #     # device = available_devices[rank % num_processes]
+#     #     args.append((rank, config, results, device, logger, seed, lock, max_retries))
+#     #     # args_queue.put(device)
+#     #     seed += 1
+#     #     config["seed"] = seed
+#
+#     with Pool(processes=num_processes) as pool:
+#         pool.map(train_on_device, args)
+#         pool.map(train_on_device_, args)
+#
+#     for rank in range(ensemble_size):
+#         # best_model, dataloaders, config_, results_arr = results[rank]
+#         best_model, config_, results_arr = results[rank]
+#         best_models.append(best_model)
+#         result_arrs.append(results_arr)
+#     if len(best_models) < ensemble_size:
+#         # get how many are left
+#         num_models_left = ensemble_size - len(best_models)
+#         b_models_left, res_arrs_left, config_ = parallel_train_ensemble(num_models_left, config, logger)
+#         best_models.extend(b_models_left)
+#         result_arrs.extend(res_arrs_left)
+#
+#     return best_models, result_arrs, config_
