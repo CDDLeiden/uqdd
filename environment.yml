@@ -21,6 +21,7 @@ dependencies:
   - pytorch-cuda=11.7
   - tqdm=4.65.0
   - rdkit=2023.3.1
+  - mapie=0.8.6
   - pip:
       - chembl_webresource_client
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
