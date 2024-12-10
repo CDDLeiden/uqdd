@@ -1,2 +1,3 @@
-# Uncertainty Estimation for bioactivity prediction tasks of 20 targets from Papyrus dataset 
-Application of Uncertainty Estimation methods
+# Uncertainty Estimation for proteochemometric bioactivity prediction models using Deep Learning 
+
+This repo represents a comparative study, applying and comparing various Uncertainty Estimation methods

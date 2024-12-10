@@ -42,10 +42,10 @@ import wandb
 
 from gauche.dataloader import MolPropLoader
 from gauche.dataloader.data_utils import transform_data
-from uqdd.models.baselines import BaselineDNN
+from uqdd.models.baseline import MTBaselineDNN
 from uqdd.models.models_utils import (
     get_datasets,
-    get_config,
+    get_model_config,
     get_sweep_config,
     build_loader,
     build_optimizer,
@@ -55,7 +55,7 @@ from uqdd.models.models_utils import (
     MultiTaskLoss,
 )
 
-from uqdd.models.models_utils import set_seed, get_config, get_datasets, get_tasks
+from uqdd.models.models_utils import set_seed, get_model_config, get_datasets, get_tasks
 from uqdd.models.models_utils import (
     build_loader,
     build_optimizer,
@@ -63,7 +63,7 @@ from uqdd.models.models_utils import (
     save_models,
 )
 from uqdd.models.models_utils import UCTMetricsTable, process_preds
-from uqdd.models.baselines import train_model
+from uqdd.models.baseline import train_model
 
 num_tasks = 20  # number of tasks i.e. labels
 # rank = 1 # increasing the rank hyperparameter allows the model to learn more expressive
@@ -172,7 +172,7 @@ class BaselineDNNwithGP(nn.Module):
         # TODO: make sure hidden_dims have the correct length
 
         # Define the DNN part
-        baseline_dnn = BaselineDNN(
+        baseline_dnn = MTBaselineDNN(
             input_dim=input_dim,
             hidden_dim_1=hidden_dims[0],
             hidden_dim_2=hidden_dims[1],
@@ -553,7 +553,7 @@ def run_gp_model(
     **kwargs,
 ):
     # Load the config
-    config = get_config(
+    config = get_model_config(
         config=config,
         activity=activity,
         split=split,
@@ -661,7 +661,7 @@ def _train_gp_model(
     **kwargs,
 ):
     # Load the config
-    config = get_config(
+    config = get_model_config(
         config=config,
         activity=activity,
         split=split,
