@@ -134,69 +134,80 @@ class EvidentialDNN(BaselineDNN):
 
 
 def run_evidential(config=None):
-    if config is None:
-        config = get_model_config("evidential")
-
-    task_type = config.get("task_type", "regression")
-    loss = config.get("loss", "evidential_regression")
-    # Enforce loss type :
-    if task_type == "regression" and loss != "evidential_regression":
-        raise ValueError(f"Evidential regression loss should be evidence regression")
-    elif task_type == "classification" and loss != "evidential_classification":
-        raise ValueError(
-            f"Evidential classification loss should be evidence classification"
-        )
+    # if config is None:
+    #     config = get_model_config("evidential")
+    # task_type = config.get("task_type", "regression")
+    # loss = config.get("loss", "evidential_regression")
+    # # Enforce loss type : # We have to stop this for the sweeper :(
+    # if task_type == "regression" and loss != "evidential_regression":
+    #     raise ValueError(f"Evidential regression loss should be evidence regression")
+    # elif task_type == "classification" and loss != "evidential_classification":
+    #     raise ValueError(
+    #         f"Evidential classification loss should be evidence classification"
+    #     )
 
     # Temporary turning off aleatoric for training
     # aleat_ = config.get("aleatoric", False)
     # config["aleatoric"] = False
-
+    # print("BEFORE")
+    # skeys = wandb.run.summary.keys()
+    # for sk in skeys:
+    #     print(f"{sk}: {wandb.run.summary[sk]}")
     # best_model, dataloaders, config, logger, _ = train_model_e2e(
+    # device = config.get("device", DEVICE)
+    device = DEVICE
     best_model, config, _, _ = train_model_e2e(
         config,
         model=EvidentialDNN,
         model_type="evidential",
         logger=LOGGER,
+        device=device,
     )
-    dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
+    # print("AFTER")
+    # skeys = wandb.run.summary.keys()
+    # for sk in skeys:
+    #     print(f"{sk}: {wandb.run.summary[sk]}")
 
-    preds, labels, alea_vars, epi_vars = ev_predict(
-        best_model, dataloaders["test"], device=DEVICE
-    )
+    sweep = config.get("sweep", False)
 
-    # Then comes the predict metrics part
-    metrics, plots, uct_logger = evaluate_predictions(
-        config,
-        preds,
-        labels,
-        alea_vars,
-        "evidential",
-        logger=LOGGER,
-        epi_vars=epi_vars,
-        wandb_push=False,
-    )
-
-    # RECALIBRATION
-    preds_val, labels_val, alea_vars_val, epi_vars_vals = ev_predict(
-        best_model, dataloaders["val"], device=DEVICE
-    )
-
-    iso_recal_model = recalibrate_model(
-        preds_val,
-        labels_val,
-        alea_vars_val,
-        preds,
-        labels,
-        alea_vars,
-        config,
-        epi_val=epi_vars_vals,
-        epi_test=epi_vars,
-        uct_logger=uct_logger,
-    )
-
-    uct_logger.wandb_log()
-    wandb.finish()
-
+    if not sweep:
+        #
+        dataloaders = get_dataloader(config, device=device, logger=LOGGER)
+        preds, labels, alea_vars, epi_vars = ev_predict(
+            best_model, dataloaders["test"], device=device
+        )
+        # Then comes the predict metrics part
+        metrics, plots, uct_logger = evaluate_predictions(
+            config,
+            preds,
+            labels,
+            alea_vars,
+            "evidential",
+            logger=LOGGER,
+            epi_vars=epi_vars,
+            wandb_push=False,
+        )
+        # RECALIBRATION
+        preds_val, labels_val, alea_vars_val, epi_vars_vals = ev_predict(
+            best_model, dataloaders["val"], device=DEVICE
+        )
+        iso_recal_model = recalibrate_model(
+            preds_val,
+            labels_val,
+            alea_vars_val,
+            preds,
+            labels,
+            alea_vars,
+            config,
+            epi_val=epi_vars_vals,
+            epi_test=epi_vars,
+            uct_logger=uct_logger,
+        )
+        uct_logger.wandb_log()
+    else:
+        # we need to calculate val metrics with lambda = 1.0
+        metrics, plots, iso_recal_model = None, None, None
+    # wandb.finish()
     return best_model, iso_recal_model, metrics, plots
 
     #
@@ -212,14 +223,46 @@ def run_evidential_wrapper(**kwargs):
     global LOGGER
     LOGGER = create_logger(name="evidential", file_level="debug", stream_level="info")
     config = get_model_config(model_type="evidential", **kwargs)
-
     return run_evidential(config)
 
 
-#
-# #
+def run_evidential_hyperparam(**kwargs):
+    global LOGGER
+    LOGGER = create_logger(
+        name="evidential-sweep", file_level="debug", stream_level="info"
+    )
+    sweep_count = kwargs.pop("sweep_count")
+    wandb_project_name = kwargs.pop("wandb_project_name")
+    sweep_config = get_sweep_config(
+        "evidential", **kwargs, wandb_project_name=wandb_project_name
+    )
+    # print(f"{sweep_config=}")
+    sweep_config["project"] = wandb_project_name
+
+    sweep_id = wandb.sweep(sweep_config, project=wandb_project_name)
+    print(f"Running sweep with SWEEP_ID: {sweep_id}")
+
+    wandb.agent(sweep_id, function=run_evidential, count=sweep_count)
+
+
 # if __name__ == "__main__":
 #     run_evidential_wrapper(
+#         data_name="papyrus",
+#         n_targets=-1,
+#         task_type="regression",
+#         activity_type="xc50",
+#         split_type="random",
+#         descriptor_protein="ankh-large",
+#         descriptor_chemical="ecfp2048",
+#         median_scaling=False,
+#         ext="pkl",
+#         wandb_project_name="evidential-test",
+#         # epochs=5,
+#         seed=42,
+#         # device="cuda:1",
+#     )
+#     pass
+#     run_evidential_hyperparam(
 #         data_name="papyrus",
 #         n_targets=-1,
 #         task_type="regression",
@@ -233,8 +276,7 @@ def run_evidential_wrapper(**kwargs):
 #         epochs=5,
 #         seed=50,
 #     )
-#     pass
-
+#     print("Done")
 # def main():
 #     parser = argparse.ArgumentParser(description="Run Ensemble Model")
 #     parser.add_argument(

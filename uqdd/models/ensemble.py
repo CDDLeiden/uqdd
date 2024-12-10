@@ -1,3 +1,6 @@
+import concurrent.futures
+import os
+
 import numpy as np
 import wandb
 import torch
@@ -189,6 +192,38 @@ def process_results_arrs(result_arrs, test_arrs, config, logger, model_type="ens
     return result_arrs
 
 
+# Function to train one model on a specific GPU
+def train_one_ensemble_member(config, gpu_id, model_idx, logger):
+
+    # Set environment variable to specify which GPU to use
+    # os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    # Set the appropriate device
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+    config["device"] = device
+    try:
+        # Use a different seed for each ensemble model
+        config["seed"] += model_idx
+
+        # Train the model on the specified GPU
+        best_model, config_, results_arr, test_arr = train_model_e2e(
+            config,
+            model=BaselineDNN,
+            model_type="ensemble",
+            logger=logger,
+            tracker="tensor",
+            write_model=False,
+            device=device,
+        )
+        # Ensure GPU operations are completed
+        torch.cuda.synchronize(device)
+        print(f"Model {model_idx} training completed on GPU {gpu_id} - {device}")
+        return best_model, results_arr, test_arr, config_
+
+    finally:
+        # Ensure that GPU memory is cleaned up
+        torch.cuda.empty_cache()
+
+
 def run_ensemble(config=None):
     ensemble_size = config.get("ensemble_size", 100)
     # parallelize = config.get("parallelize", False)
@@ -209,7 +244,27 @@ def run_ensemble(config=None):
 
     assign_wandb_tags(run, config)
 
-    # if not parallelize:
+    # # Number of available GPUs (customize this according to your system)
+    # available_gpus = torch.cuda.device_count()
+    # print(f"Number of Available GPUs: {available_gpus} GPUs")
+    #
+    # # Parallelize model training using concurrent futures
+    # with concurrent.futures.ProcessPoolExecutor(max_workers=available_gpus) as executor:
+    #     # Submit tasks to train models on different GPUs
+    #     gpu_list = list(range(available_gpus)) * (ensemble_size // available_gpus + 1)
+    #     future_to_model = {
+    #         executor.submit(train_one_ensemble_member, config, gpu_id, idx, logger): idx
+    #         for idx, gpu_id in enumerate(gpu_list[:ensemble_size])
+    #     }
+    #
+    #     # Collect results as models finish training
+    #     for future in concurrent.futures.as_completed(future_to_model):
+    #         best_model, results_arr, test_arr, config_ = future.result()
+    #         best_models.append(best_model)
+    #         result_arrs.append(results_arr)
+    #         test_arrs.append(test_arr)
+    #
+    # # if not parallelize:
     for _ in range(ensemble_size):
         # best_model, dataloaders, config_, logger, results_arr = train_model_e2e(
         # For debugging of different sizes results
@@ -319,7 +374,6 @@ def run_ensemble_hyperparm(**kwargs):
     wandb.agent(sweep_id, function=run_ensemble, count=sweep_count)
 
 
-#
 # if __name__ == "__main__":
 #     ensemble_model, iso_recal_model, metrics, plots = run_ensemble_wrapper(
 #         data_name="papyrus",

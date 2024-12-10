@@ -159,23 +159,24 @@ def run_eoe_wrapper(**kwargs):
     return run_eoe(config=config)
 
 
-if __name__ == "__main__":
-    # vars
-    eoe_model, iso_recal_model, metrics, plots = run_eoe_wrapper(
-        data_name="papyrus",
-        activity_type="kx",
-        n_targets=-1,
-        descriptor_protein="ankh-large",
-        descriptor_chemical="ecfp2048",
-        median_scaling=False,
-        split_type="time",
-        ext="pkl",
-        task_type="regression",
-        wandb_project_name="eoe-test",
-        ensemble_size=5,
-        epochs=5,
-        seed=42,
-    )
+#
+# if __name__ == "__main__":
+#     # vars
+#     eoe_model, iso_recal_model, metrics, plots = run_eoe_wrapper(
+#         data_name="papyrus",
+#         activity_type="kx",
+#         n_targets=-1,
+#         descriptor_protein="ankh-large",
+#         descriptor_chemical="ecfp2048",
+#         median_scaling=False,
+#         split_type="time",
+#         ext="pkl",
+#         task_type="regression",
+#         wandb_project_name="eoe-test",
+#         ensemble_size=5,
+#         epochs=5,
+#         seed=42,
+#     )
 
 # outputs = torch.stack(outputs, dim=2)
 # return outputs

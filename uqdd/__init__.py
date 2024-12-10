@@ -2,6 +2,15 @@ from pathlib import Path
 from datetime import date
 import torch
 
+import wandb
+import os
+
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
+# Add requirement for wandb core
+wandb.sdk.require("core")
+wandb.require("core")
+
 # Define the global device setting
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device: " + str(DEVICE))
@@ -24,6 +33,7 @@ TODAY = date.today().strftime("%Y%m%d")
 
 WANDB_DIR = LOGS_DIR / "wandb"
 WANDB_MODE = "online"  # 'offline'
+# WANDB_MODE = "offline"
 
 # create DIRs if they do not exist
 for dir in [
@@ -60,7 +70,7 @@ __contributors__ = (
 )
 __copyright__ = "Copyright 2023-2024, Johnson & Johnson, Johannes-Kepler Universität Linz, Leiden University"
 __license__ = "All rights reserved, Johnson & Johnson, Johannes-Kepler Universität Linz, Leiden University"
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 __maintainer__ = "Bola Khalil"
 __email__ = "bkhalil@its.jnj.com"
 __status__ = "Development"

@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import argparse
 
 import glob
 from uqdd import DEVICE, MODELS_DIR
@@ -60,19 +61,21 @@ def preprocess_runs(
     runs_df.rename(columns={"Name": "run_name"}, inplace=True)
 
     # DEALING WITH MODEL_NAME IF DOESN'T EXIST
-    runs_df["model_name"] = runs_df.apply(
-        lambda row: (
-            f"{data_name}_{activity_type}_{row['model_type']}_{row['split_type']}_{descriptor_protein}_{descriptor_chemical}_{row['run_name']}"
-            if pd.isna(row["model_name"])
-            else row["model_name"]
-        ),
-        axis=1,
-    )
+    # runs_df["model_name"] = runs_df.apply(
+    #     lambda row: (
+    #         f"{data_name}_{activity_type}_{row['model_type']}_{row['split_type']}_{descriptor_protein}_{descriptor_chemical}_{row['run_name']}"
+    #         if pd.isna(row["model_name"])
+    #         else row["model_name"]
+    #     ),
+    #     axis=1,
+    # )
 
     i = 1
     # Update and match model_name with model saved files
     for index, row in runs_df.iterrows():
-        model_name = row["model_name"]
+        model_name = (
+            row["model_name"] if not pd.isna(row["model_name"]) else row["run_name"]
+        )
         model_file_pattern = os.path.join(models_dir, f"*{model_name}.pt")
         model_files = glob.glob(model_file_pattern)
         if model_files:
@@ -97,6 +100,7 @@ def preprocess_runs(
     runs_df["chem_input_dim"] = chem_input_dim
     runs_df["prot_input_dim"] = prot_input_dim
     runs_df["data_specific_path"] = data_specific_path
+    runs_df["MT"] = runs_df["n_targets"].apply(lambda x: True if x > 1 else False)
 
     return runs_df
 
@@ -271,13 +275,38 @@ def reassess_metrics(
 
 
 if __name__ == "__main__":
-    data_name = "papyrus"
-    activity_type = "xc50"
-    type_n_targets = "all"
-    project_name = "2024-06-25-all-models-100"
-    # activity_type = "kx"
-    # project_name = "2024-07-22-all-models-100-kx"
+    # Set up argument parser
+    parser = argparse.ArgumentParser(
+        description="Process input parameters for the script."
+    )
+    parser.add_argument(
+        "--activity_type",
+        type=str,
+        required=True,
+        help="The type of activity (e.g., 'kx', 'xc50').",
+    )
+    parser.add_argument(
+        "--runs_file_name",
+        type=str,
+        required=True,
+        help="The name of the runs file (without path).",
+    )
+    parser.add_argument(
+        "--project_name", type=str, required=True, help="The name of the project."
+    )
 
+    args = parser.parse_args()
+
+    activity_type = args.activity_type
+    project_name = args.project_name
+    runs_file_name = args.runs_file_name
+    ### Testing
+    # activity_type = "xc50"
+    # project_name = "runs_evidential_xc50"
+    # runs_file_name = "runs_evidential_xc50.csv"
+
+    data_name = "papyrus"
+    type_n_targets = "all"
     project_out_name = f"reassess-{project_name}"
     data_specific_path = f"{data_name}/{activity_type}/{type_n_targets}"
     # DESCRIPTORS
@@ -290,16 +319,21 @@ if __name__ == "__main__":
     preds_dirpath = (
         f"/users/home/bkhalil/Repos/uqdd/uqdd/data/predictions/{data_specific_path}/"
     )
-    models_dir = (
-        f"/users/home/bkhalil/Repos/uqdd/uqdd/models/saved_models/{data_specific_path}/"
-    )
-    runs_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_name}/runs.csv"
+    # models_dir = (
+    #     f"/users/home/bkhalil/Repos/uqdd/uqdd/models/saved_models/{data_specific_path}/"
+    # )
+    models_dir = f"/projects/system/bkhalil/BACKUPS_DO_NOT_DELETE/uqdd/models/saved_models/{data_specific_path}/"
+    runs_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/data/runs/{runs_file_name}"
+
+    # runs_path = (
+    #     f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/kx-all.csv"
+    # )
 
     # FIGS OUT PATH
     figs_out_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}/"
 
     csv_out_path = figs_out_path + "metrics.csv"
-
+    # csv_out_path = figs_out_path + "evidential-metrics-reassess-ensemble-time.csv"
     # check if the runs_path exists
     if not os.path.exists(runs_path):
         raise FileNotFoundError(f"File {runs_path} not found")
@@ -393,3 +427,17 @@ if __name__ == "__main__":
     #         # Log the metrics to the CSV file
     #         uct_logger.csv_log()
     #         # break
+    # activity_type = "xc50"
+    # activity_type = "kx"
+
+    # # project_name = "2024-06-25-all-models-100"
+    # # project_name = "evidential-models"
+    # # project_name = "kx-all"
+    # # activity_type = "kx"
+    # # project_name = "2024-07-22-all-models-100-kx"
+    # project_name = f""
+
+    # runs_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_name}/runs.csv"
+    # runs_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/evidential-runs.csv"
+    # runs_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/emc-eoe-runs.csv"
+    # runs_path = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/ensemble-time-runs.csv"

@@ -1,18 +1,28 @@
 {
-  "program": "evidential.py",
+  "program": "model_parser.py",
   "entity": "bolak92",
   "method": "bayes",
   "metric": {
     "goal": "minimize",
-    "name": "val/rmse"
+    "name": "val/loss"
   },
   "parameters": {
+    "sweep": {
+      "value": true
+    },
+    "model": {
+      "value": "evidential"
+    },
+    "lamb": {
+      "value": 1.0
+    },
     "aleatoric": {
-      "value": false
+      "value": true
     },
     "chem_layers": {
       "values": [
         [1024,512,256],
+        [1024,512],
         [1024,256],
         [1024],
         [512],
@@ -21,9 +31,11 @@
     },
     "prot_layers": {
       "values": [
-        [768,512,256],
+        [1536, 1024, 512, 256],
+        [1024,512,256],
         [512,256,128],
         [512,128],
+        [512,256],
         [512],
         [256]
       ]
@@ -44,7 +56,7 @@
       "values": [128,256,512]
     },
     "epochs": {
-      "value": 5000
+      "value": 3000
     },
     "early_stop": {
       "value": 100
@@ -67,14 +79,8 @@
     "lr_scheduler": {
       "value": null
     },
-    "model_type": {
-      "value": "evidential"
-    },
-    "lamb": {
-      "values": [1.0, 0.01, 0.001]
-    },
     "max_norm": {
-      "values": [null, 10.0]
+      "values": [null,50.0,100.0]
     }
   }
 }

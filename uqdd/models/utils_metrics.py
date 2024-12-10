@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from typing import Tuple, Dict, Union
 
@@ -165,7 +166,8 @@ def calc_regr_metrics(targets, outputs, metrics_per_task=False):
         r2 = r2_score(targets, outputs)
         evs = explained_variance_score(targets, outputs)
 
-    return rmse, r2, evs
+    # return rmse, r2, evs
+    return float(rmse), float(r2), float(evs)
     # Detect multitask learning scenario
     # is_multitask = targets.shape[1] > 1
 
@@ -799,6 +801,70 @@ def plot_sharpness(
     if ax is None:
         fig, ax = plt.subplots()
     uct_viz.plot_sharpness(y_std=y_std, n_subset=n_subset, ax=ax)
+
+
+def get_calib_props(
+    y_pred: np.ndarray,
+    y_std: np.ndarray,
+    y_true: np.ndarray,
+    vectorized: bool = True,
+    prop_type: str = "interval",
+    output_folder: Path = None,
+) -> pd.DataFrame:
+    """
+    Compute the expected and observed proportions for a calibration plot. Optionally save the data.
+
+    Args:
+        y_pred: 1D array of the predicted means for the held out dataset.
+        y_std: 1D array of the predicted standard deviations for the held out dataset.
+        y_true: 1D array of the true labels in the held out dataset.
+        vectorized: plot using get_proportion_lists_vectorized.
+        prop_type: "interval" to measure observed proportions for centered prediction intervals,
+                   and "quantile" for observed proportions below a predicted quantile.
+                   Ignored if exp_props and obs_props are provided as inputs.
+        output_folder: Path to the folder where the calibration plot data will be saved.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the expected and observed proportions.
+    """
+
+    # # Optionally select a subset
+    # if n_subset is not None:
+    #     [y_pred, y_std, y_true] = uct_viz.filter_subset([y_pred, y_std, y_true], n_subset)
+
+    # if (exp_props is None) or (obs_props is None):
+    # Compute exp_proportions and obs_proportions
+    if vectorized:
+        (
+            exp_proportions,
+            obs_proportions,
+        ) = uct_viz.get_proportion_lists_vectorized(
+            y_pred, y_std, y_true, prop_type=prop_type
+        )
+    else:
+        (exp_proportions, obs_proportions) = uct_viz.get_proportion_lists(
+            y_pred, y_std, y_true, prop_type=prop_type
+        )
+
+    # Create a DataFrame for the calibration plot
+    calib_df = pd.DataFrame(
+        {
+            "Expected Proportion": exp_proportions,
+            "Observed Proportion": obs_proportions,
+        }
+    )
+
+    # Save the calibration plot data
+    if output_folder is not None:
+        calib_df.to_csv(
+            os.path.join(output_folder, "calibration_plot_data.csv"), index=False
+        )
+
+    return calib_df
+
+
+def plot_calibration_from_props():
+    raise NotImplementedError("This function is not implemented yet.")
 
 
 def make_uct_plots(
@@ -1736,7 +1802,8 @@ class MetricsTable:
         # if self.aleatoric:
         cols.extend(["aleatoric_uct_mean", "epistemic_uct_mean", "total_uct_mean"])
         self.table = wandb.Table(columns=cols)
-        self.plot_table = pd.DataFrame(columns=self.plot_cols)
+        if add_plots_to_table:
+            self.plot_table = pd.DataFrame(columns=self.plot_cols)
         # TODO save this to a one table specific to the data_specific_path
         if csv_path:
             self.df_path = Path(csv_path)
@@ -2076,6 +2143,7 @@ class MetricsTable:
         """
         self.csv_log()  # TODO to be replaced with excel_log when we figure out how to add the images.
         # self.excel_log(df, self.df_path)
+        # TODO Due to the size of the table, we will only log it to a csv file
         wandb.log(
             {
                 f"Uncertainty Metrics Table - {self.model_type} - {wandb.run.name}": self.table

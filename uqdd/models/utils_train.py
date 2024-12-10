@@ -14,6 +14,7 @@ from uqdd.models.utils_metrics import (
     create_df_preds,
     calc_alea_epi_mean_var_notnan,
     recalibrate,
+    get_calib_props,
 )
 from uqdd.models.utils_models import (
     build_loader,
@@ -49,7 +50,7 @@ def evidential_processing(outputs):  # , alea_all, epi_all
     # return outputs, alea_all
 
 
-def model_forward(model, inputs, targets, lossfname="EvidentialRegression"):
+def model_forward(model, inputs, targets, lossfname="evidential_regression"):
     if lossfname.lower() == "evidential_regression":
         outputs = model(inputs)
         alea_vars, epi_vars = evidential_processing(outputs)
@@ -74,7 +75,7 @@ def train(
     device=DEVICE,
     epoch=0,
     max_norm=None,
-    lossfname="EvidenceRegressionLoss",
+    lossfname="evidential_regression",
     tracker="wandb",  # pbar=None,
     subset="train",
 ):
@@ -202,7 +203,7 @@ def evaluate(
     metrics_per_task=False,
     subset="val",  # can be "train", "val" or "test"
     epoch: int | None = 0,
-    lossfname="EvidenceRegressionLoss",
+    lossfname="evidential_regression",
     tracker="wandb",
 ):
     model.eval()
@@ -404,8 +405,8 @@ def evaluate_predictions(
         model_name,
         logger,
     )
+    # * calculate metrics for all the datapoints * #
     task_name = f"All {n_targets} Targets" if n_targets > 1 else "PCM"
-    # * note here we use only the epistemic part * #
     metrics, plots = uct_metrics_logger(
         y_pred=y_pred,
         y_std=y_alea,
@@ -415,6 +416,16 @@ def evaluate_predictions(
         y_eps=y_eps,
         task_name=task_name,
         figpath=figpath,
+    )
+
+    # getting calibration props
+    props_df = get_calib_props(
+        y_pred=y_pred,
+        y_std=y_alea,
+        y_true=y_true,
+        vectorized=True,
+        prop_type="interval",
+        output_folder=figpath,
     )
 
     # * calculate metrics for a subset of the datapoints * #

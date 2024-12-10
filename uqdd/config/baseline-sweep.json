@@ -7,6 +7,9 @@
     "name": "val/loss"
   },
   "parameters": {
+    "sweep": {
+      "value": true
+    },
     "model": {
       "value": "baseline"
     },
@@ -25,7 +28,7 @@
     },
     "prot_layers": {
       "values": [
-        [1536, 1024, 512, 256],
+        [1536,1024,512,256],
         [1024,512,256],
         [512,256,128],
         [512,128],

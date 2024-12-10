@@ -201,8 +201,11 @@ def run_baseline_hyperparam(**kwargs):
 
     sweep_count = kwargs.pop("sweep_count")
     wandb_project_name = kwargs.pop("wandb_project_name")
-    config = get_sweep_config("baseline", **kwargs)
+    config = get_sweep_config(
+        "baseline", **kwargs, wandb_project_name=wandb_project_name
+    )
     config["project"] = wandb_project_name
+
     sweep_id = wandb.sweep(
         config,
         project=wandb_project_name,

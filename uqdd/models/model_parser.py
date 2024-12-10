@@ -3,10 +3,16 @@ import argparse
 from uqdd.models.baseline import run_baseline_wrapper, run_baseline_hyperparam
 from uqdd.models.ensemble import run_ensemble_wrapper, run_ensemble_hyperparm
 from uqdd.models.mcdropout import run_mcdropout_wrapper, run_mcdropout_hyperparm
-from uqdd.models.evidential import run_evidential_wrapper  # , run_evidential_hyperparam
+from uqdd.models.evidential import run_evidential_wrapper, run_evidential_hyperparam
 from uqdd.models.eoe import run_eoe_wrapper
 from uqdd.models.emc import run_emc_wrapper
 from uqdd.utils import float_or_none, parse_list
+
+import wandb
+
+# Add requirement for wandb core
+wandb.sdk.require("core")
+wandb.require("core")
 
 query_dict = {
     "baseline": run_baseline_wrapper,
@@ -16,12 +22,14 @@ query_dict = {
     "mcdropout": run_mcdropout_wrapper,
     "mcdropout_hyperparam": run_mcdropout_hyperparm,
     "evidential": run_evidential_wrapper,
+    "evidential_hyperparam": run_evidential_hyperparam,
     "eoe": run_eoe_wrapper,
     "emc": run_emc_wrapper,
 }
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Model parser")
 
     # * DATA arguments * #
@@ -123,6 +131,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="baseline",
+        # default="evidential",
         choices=["baseline", "ensemble", "mcdropout", "evidential", "eoe", "emc"],
         help="Model name argument",
     )
@@ -133,15 +142,24 @@ if __name__ == "__main__":
         help="Number of sequential repeats of runs",
     )
     parser.add_argument(
-        "--wandb-project-name",
+        "--wandb_project_name",
         type=str,
         default="model-test",
+        # default="evidential-test",
         help="Wandb project name argument",
     )
     parser.add_argument(
-        "--sweep-count",
+        "--sweep",
+        type=bool,
+        # default=False,
+        default=True,
+        help="Sweep argument",
+    )
+    parser.add_argument(
+        "--sweep_count",
         type=int,
         default=None,
+        # default=5,
         help="Sweep count argument",
     )
 
@@ -167,7 +185,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--early_stop", type=int, default=None, help="Early stopping patience"
     )
-    parser.add_argument("--loss", type=str, default=None, help="Loss function")
+    parser.add_argument(
+        "--loss",
+        type=str,
+        default=None,
+        # default="evidential_regression",
+        # default="gaussnll",
+        help="Loss function",
+    )
     parser.add_argument(
         "--loss_reduction", type=str, default=None, help="Loss reduction method"
     )
@@ -211,6 +236,7 @@ if __name__ == "__main__":
         "--ensemble_size",
         type=int,
         default=100,
+        # default=10,
         help="Size of the ensemble",
     )
 
@@ -219,11 +245,14 @@ if __name__ == "__main__":
         "--num_mc_samples",
         type=int,
         default=100,
+        # default=10,
         help="Number of MC dropout samples",
     )
 
     # * Evidential args * #
-    parser.add_argument("--lamb", type=float, default=None, help="Lambda value")
+    parser.add_argument(
+        "--lamb", type=float, default=None, help="Lambda value for evidential loss"
+    )
     parser.add_argument("--tags", type=str, default=None, help="Extra Tags for wandb")
     parser.add_argument(
         "--seed",
@@ -243,11 +272,15 @@ if __name__ == "__main__":
     seed = args.seed
 
     if sweep_count is not None:
-        if args.model in ["baseline", "ensemble", "mcdropout"]:
+        # if args.model in ["baseline", "ensemble", "mcdropout", "evidential"]:
+        if args.model in ["baseline", "evidential"]:
+            print("HEREEEEEEEEEEEEE")
+            # print(kwargs)
             query_dict[f"{args.model}_hyperparam"](**kwargs)
         else:
             print(
-                "Sweep count only supported for baseline, ensemble, and mcdropout models."
+                "Sweep count only supported for baseline and evidential models."
+                # "Sweep count only supported for baseline, ensemble, evidential and mcdropout models."
             )
     else:
         if repeats > 1:
@@ -255,7 +288,15 @@ if __name__ == "__main__":
                 kwargs["seed"] = seed
                 print(f"Run {i+1}/{repeats}")
                 query_dict[args.model](**kwargs)
-                seed += 1 if args.model != "ensemble" else int(args.ensemble_size)
+                seed += (
+                    1
+                    if args.model not in ["ensemble", "eoe"]
+                    else int(args.ensemble_size)
+                )
 
         else:
             query_dict[args.model](**kwargs)
+
+
+if __name__ == "__main__":
+    main()

@@ -30,7 +30,7 @@ task_type="regression"
 wandb_project="baseline-test" #"${today}-baseline" # "2024-04-30-baseline" #"${today}-baseline" #"2024-04-16-baseline"
 logname="${wandb_project}-baseline.txt"
 
-python model_parser.py --model baseline --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb-project-name $wandb_project #--sweep-count "$sweep_count" #2>&1 | tee ../logs/"${logname}"
+python model_parser.py --model baseline --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb_project_name $wandb_project #--sweep-count "$sweep_count" #2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"

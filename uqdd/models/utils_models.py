@@ -768,8 +768,9 @@ def get_model_name(config, run=None):
         split_type = config.get("split_type", "random")
         model_type = config.get("model_type", "baseline")
         multitask = config.get("MT", False)
+        seed = config.get("seed", 42)
 
-        model_name = f"{TODAY}-{data_name}_{activity_type}_{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}"
+        model_name = f"{TODAY}-{data_name}_{activity_type}_{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}_{seed}"
         model_name += "_MT" if multitask else ""
 
     # check if run and the name doesnt end with run.name already

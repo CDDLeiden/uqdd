@@ -18,8 +18,7 @@ from uqdd.models.utils_train import (
     post_training_save_model,
 )
 
-from uqdd.models.utils_models import get_model_config, set_seed, calculate_means
-from tqdm import tqdm
+from uqdd.models.utils_models import get_model_config, calculate_means
 
 
 def emc_predict(ev_model, dataloader, num_mc_samples=10, device=DEVICE):

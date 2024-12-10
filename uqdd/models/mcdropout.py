@@ -1,10 +1,8 @@
-import argparse
-from tqdm import tqdm
 import wandb
 import torch
 from uqdd import DEVICE
 from uqdd.models.baseline import BaselineDNN
-from uqdd.utils import create_logger, parse_list
+from uqdd.utils import create_logger
 
 from uqdd.models.utils_train import (
     train_model_e2e,
