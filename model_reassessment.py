@@ -189,7 +189,9 @@ def reassess_metrics(
         model_path = row["model_path"]
         model_name = row["model_name"]
         # activity_type = row["activity_type"]
-
+        run_name = row["run_name"]
+        if run_name.startswith("vivid"):
+            pass
         # print(type(model_path))
         rowkwargs = row.to_dict()
         # popping the model_type
@@ -303,7 +305,9 @@ if __name__ == "__main__":
     ### Testing
     # activity_type = "xc50"
     # project_name = "runs_evidential_xc50"
+    # project_name = "runs_ensemble_mcdp_xc50"
     # runs_file_name = "runs_evidential_xc50.csv"
+    # runs_file_name = "runs_ensemble_mcdp_xc50.csv"
 
     data_name = "papyrus"
     type_n_targets = "all"
