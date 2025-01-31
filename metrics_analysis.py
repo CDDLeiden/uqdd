@@ -2,11 +2,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import itertools
 import os
+import argparse
 
-# import plotly.graph_objects as go
 import numpy as np
-
-# from plotly.offline import init_notebook_mode, iplot
 
 import shutil
 
@@ -31,6 +29,7 @@ group_cols = [
     "desc_chem",
     "dropout",
 ]
+
 numeric_cols = [
     "RMSE",
     "R2",
@@ -66,24 +65,10 @@ numeric_cols = [
     "epistemic_uct_mean",
     "total_uct_mean",
 ]
+
 string_cols = ["wandb project", "wandb run", "model name"]
+
 order_by = ["Split", "Model type"]
-
-
-mc_group_order = [
-    "stratified_dropout0.1",
-    "stratified_dropout0.2",
-    "scaffold_cluster_dropout0.1",
-    "scaffold_cluster_dropout0.2",
-    "time_dropout0.1",
-    "time_dropout0.2",
-]
-mc_group_order_no_time = [
-    "stratified_dropout0.1",
-    "stratified_dropout0.2",
-    "scaffold_cluster_dropout0.1",
-    "scaffold_cluster_dropout0.2",
-]
 
 group_order = [
     "stratified_ensemble",
@@ -102,6 +87,7 @@ group_order = [
     "time_emc",
     "time_mcdropout",
 ]
+
 group_order_no_time = [
     "stratified_ensemble",
     "stratified_eoe",
@@ -114,10 +100,10 @@ group_order_no_time = [
     "scaffold_cluster_emc",
     "scaffold_cluster_mcdropout",
 ]
+
 hatches_dict = {
     "stratified": "\\\\",
     "scaffold_cluster": "",
-    # "time": "....",
     "time": "///",
 }
 
@@ -125,6 +111,220 @@ hatches_dict_no_time = {
     "stratified": "\\\\",
     "scaffold_cluster": "",
 }
+
+accmetrics = ["RMSE", "R2", "MAE", "MDAE", "MARPD", "PCC"]
+
+accmetrics2 = ["RMSE", "R2", "PCC"]
+
+uctmetrics = [
+    "RMS Calibration",
+    "MA Calibration",
+    "Miscalibration Area",
+    "Sharpness",
+    "CRPS",
+    "Check",
+    "NLL",
+    "Interval",
+]
+
+uctmetrics2 = ["Miscalibration Area", "Sharpness", "CRPS", "NLL", "Interval"]
+
+all_cmaps = [
+    "Accent",
+    "Accent_r",
+    "Blues",
+    "Blues_r",
+    "BrBG",
+    "BrBG_r",
+    "BuGn",
+    "BuGn_r",
+    "BuPu",
+    "BuPu_r",
+    "CMRmap",
+    "CMRmap_r",
+    "Dark2",
+    "Dark2_r",
+    "GnBu",
+    "GnBu_r",
+    "Grays",
+    "Greens",
+    "Greens_r",
+    "Greys",
+    "Greys_r",
+    "OrRd",
+    "OrRd_r",
+    "Oranges",
+    "Oranges_r",
+    "PRGn",
+    "PRGn_r",
+    "Paired",
+    "Paired_r",
+    "Pastel1",
+    "Pastel1_r",
+    "Pastel2",
+    "Pastel2_r",
+    "PiYG",
+    "PiYG_r",
+    "PuBu",
+    "PuBuGn",
+    "PuBuGn_r",
+    "PuBu_r",
+    "PuOr",
+    "PuOr_r",
+    "PuRd",
+    "PuRd_r",
+    "Purples",
+    "Purples_r",
+    "RdBu",
+    "RdBu_r",
+    "RdGy",
+    "RdGy_r",
+    "RdPu",
+    "RdPu_r",
+    "RdYlBu",
+    "RdYlBu_r",
+    "RdYlGn",
+    "RdYlGn_r",
+    "Reds",
+    "Reds_r",
+    "Set1",
+    "Set1_r",
+    "Set2",
+    "Set2_r",
+    "Set3",
+    "Set3_r",
+    "Spectral",
+    "Spectral_r",
+    "Wistia",
+    "Wistia_r",
+    "YlGn",
+    "YlGnBu",
+    "YlGnBu_r",
+    "YlGn_r",
+    "YlOrBr",
+    "YlOrBr_r",
+    "YlOrRd",
+    "YlOrRd_r",
+    "afmhot",
+    "afmhot_r",
+    "autumn",
+    "autumn_r",
+    "binary",
+    "binary_r",
+    "bone",
+    "bone_r",
+    "brg",
+    "brg_r",
+    "bwr",
+    "bwr_r",
+    "cividis",
+    "cividis_r",
+    "cool",
+    "cool_r",
+    "coolwarm",
+    "coolwarm_r",
+    "copper",
+    "copper_r",
+    "crest",
+    "crest_r",
+    "cubehelix",
+    "cubehelix_r",
+    "flag",
+    "flag_r",
+    "flare",
+    "flare_r",
+    "gist_earth",
+    "gist_earth_r",
+    "gist_gray",
+    "gist_gray_r",
+    "gist_grey",
+    "gist_heat",
+    "gist_heat_r",
+    "gist_ncar",
+    "gist_ncar_r",
+    "gist_rainbow",
+    "gist_rainbow_r",
+    "gist_stern",
+    "gist_stern_r",
+    "gist_yarg",
+    "gist_yarg_r",
+    "gist_yerg",
+    "gnuplot",
+    "gnuplot2",
+    "gnuplot2_r",
+    "gnuplot_r",
+    "gray",
+    "gray_r",
+    "grey",
+    "hot",
+    "hot_r",
+    "hsv",
+    "hsv_r",
+    "icefire",
+    "icefire_r",
+    "inferno",
+    "inferno_r",
+    "jet",
+    "jet_r",
+    "magma",
+    "magma_r",
+    "mako",
+    "mako_r",
+    "nipy_spectral",
+    "nipy_spectral_r",
+    "ocean",
+    "ocean_r",
+    "pink",
+    "pink_r",
+    "plasma",
+    "plasma_r",
+    "prism",
+    "prism_r",
+    "rainbow",
+    "rainbow_r",
+    "rocket",
+    "rocket_r",
+    "seismic",
+    "seismic_r",
+    "spring",
+    "spring_r",
+    "summer",
+    "summer_r",
+    "tab10",
+    "tab10_r",
+    "tab20",
+    "tab20_r",
+    "tab20b",
+    "tab20b_r",
+    "tab20c",
+    "tab20c_r",
+    "terrain",
+    "terrain_r",
+    "turbo",
+    "turbo_r",
+    "twilight",
+    "twilight_r",
+    "twilight_shifted",
+    "twilight_shifted_r",
+    "viridis",
+    "viridis_r",
+    "vlag",
+    "vlag_r",
+    "winter",
+    "winter_r",
+]
+subset_cmaps = [
+    "Accent",
+    "Paired",
+    "Set1",
+    "Set1_r",
+    "tab10",
+    "tab10_r",
+    "tab20b",
+    "tab20b_r",
+    "turbo",
+    "turbo_r",
+]
 
 
 # RESULTS AGGREGATION TO CREATE THE FINAL RESULTS TABLE
@@ -756,9 +956,13 @@ def plot_calibration_data(
     if group_order is None:
         group_order = list(df_aggregated["Group"].unique())
 
-    color_map = colormaps.get_cmap(color_name, len(group_order))
-    # color_map = plt.cm.get_cmap(color_name, len(group_order))
-    color_dict = {group: color_map(i) for i, group in enumerate(group_order)}
+    # colormap = colormaps[color_name]
+    # colors = [colormap(i / len(group_order)) for i in range(len(group_order))]
+    # color_dict = {group: colors[i] for i, group in enumerate(group_order)}
+
+    scalar_mappable = ScalarMappable(cmap=color_name)
+    colors = scalar_mappable.to_rgba(range(len(group_order)))
+    color_dict = {group: color for group, color in zip(group_order, colors)}
 
     # color_map = plt.cm.get_cmap(
     #     color_name, len(df_aggregated)
@@ -884,6 +1088,7 @@ def move_model_folders(df, search_dirs, output_dir, overwrite=False):
 
 def load_predictions(model_path):
     preds_path = os.path.join(model_path, "preds.pkl")
+
     return pd.read_pickle(preds_path)
 
 
@@ -923,7 +1128,9 @@ def calculate_rmse_rejection_curve(
 
     max_rejection_index = int(len(preds) * max_rejection_ratio)
     rejection_steps = np.arange(0, max_rejection_index, step=int(len(preds) * 0.01))
+    # print(f"{len(preds)=}")
     rejection_rates = rejection_steps / len(preds)
+    # print(len(rejection_rates))
     rmses = []
 
     initial_rmse = mean_squared_error(
@@ -947,170 +1154,180 @@ def calculate_rmse_rejection_curve(
     return rejection_rates, rmses, auc_arc
 
 
+def calculate_rejection_curve(
+    df,
+    model_paths,
+    unc_col,
+    random_rejection=False,
+    normalize_rmse=False,
+    max_rejection_ratio=0.95,
+):
+    """
+    Calculate RMSE rejection curves for given model paths.
+    """
+    aggregated_rmses = []
+    auc_values = []
+    rejection_rates = None
+
+    for model_path in model_paths:
+        preds = load_predictions(model_path)
+        # check if preds were correctly loaded or not
+        if preds.empty:
+            print(f"P")
+            continue
+
+            # break
+        rejection_rates, rmses, auc_arc = calculate_rmse_rejection_curve(
+            preds,
+            uncertainty_col=unc_col,
+            random_rejection=random_rejection,
+            normalize_rmse=normalize_rmse,
+            max_rejection_ratio=max_rejection_ratio,
+        )
+
+        aggregated_rmses.append(rmses)
+        auc_values.append(auc_arc)
+
+    mean_rmses = np.mean(aggregated_rmses, axis=0)
+    std_rmses = np.std(aggregated_rmses, axis=0)
+    mean_auc = np.mean(auc_values)
+    std_auc = np.std(auc_values)
+
+    return rejection_rates, mean_rmses, std_rmses, mean_auc, std_auc
+
+
+def get_handles_labels(ax, group_order):
+    # Custom legend order
+    handles, labels = ax.get_legend_handles_labels()
+    ordered_handles = []
+    ordered_labels = []
+
+    for group in group_order:
+        for label, handle in zip(labels, handles):
+            if label.startswith(group):
+                ordered_handles.append(handle)
+                ordered_labels.append(label)
+
+    return ordered_handles, ordered_labels
+
+
 def plot_rmse_rejection_curves(
-    df_pcm,
+    df,
     base_dir,
-    cmap="crest_r",
+    cmap="tab10",
     save_dir_plot=None,
     add_to_title="",
     normalize_rmse=False,
     unc_type="aleatoric",
     max_rejection_ratio=0.95,
+    group_order=None,
 ):
-    assert unc_type in [
-        "aleatoric",
-        "epistemic",
-        "both",
-    ], "unc_type should be either 'aleatoric' or 'epistemic' or 'both'"
+    """
+    Plot RMSE rejection curves for different groups and splits.
+    """
+    assert unc_type in ["aleatoric", "epistemic", "both"], "Invalid unc_type"
     unc_col = "y_alea" if unc_type == "aleatoric" else "y_eps"
-    stats_dfs = []
-    model_types = ["ensemble", "eoe", "evidential", "emc", "mcdropout"]
-    splits = df_pcm["Split"].unique()
-    # print(splits)
-    df_pcm["model_path"] = df_pcm["project_model"].apply(
+
+    # Use group_order for consistent coloring and legend order
+    if group_order is None:
+        group_order = list(df["Group"].unique())
+
+    scalar_mappable = ScalarMappable(cmap=cmap)
+    colors = scalar_mappable.to_rgba(range(len(group_order)))
+    color_dict = {group: color for group, color in zip(group_order, colors)}
+
+    # Update paths for models
+    df["model_path"] = df["project_model"].apply(
         lambda x: (
             str(os.path.join(base_dir, x)) if not str(x).startswith(base_dir) else x
         )
     )
 
-    scalar_mappable = ScalarMappable(cmap=cmap)
-    color_dict = {
-        m: c
-        for m, c in zip(
-            model_types,
-            scalar_mappable.to_rgba(range(len(model_types)), alpha=1).tolist(),
-        )
-    }
-
+    # Plot RMSE-Rejection curves
     fig, ax = plt.subplots(figsize=(12, 8))
+    stats_dfs = []
+    included_groups = df["Group"].unique()
 
-    for model_type in model_types:
-        for split in splits:
-            model_names = df_pcm[
-                (df_pcm["Model type"] == model_type) & (df_pcm["Split"] == split)
-            ]["model name"].unique()
-            model_paths = df_pcm[
-                (df_pcm["Model type"] == model_type) & (df_pcm["Split"] == split)
-            ]["model_path"].unique()
-            aggregated_rmses = []
-            auc_values = []
-            # print(len(model_names))
-            # print(len(model_paths))
-            for model_name, model_path in zip(model_names, model_paths):
-                # print(df_pcm[df_pcm['model name'] == model_name]['project_model']
-                # model_path = os.path.join(base_dir, df_pcm[df_pcm['model name'] == model_name]['project_model'].iloc[0])
-                # print(df_pcm[df_pcm['model name'] == model_name])
-                # print(model_name)
-                # print(model_path)
-                preds = load_predictions(model_path)
-                # print(preds.shape)
-                rejection_rates, rmses, auc_arc = calculate_rmse_rejection_curve(
-                    preds,
-                    uncertainty_col=unc_col,
-                    normalize_rmse=normalize_rmse,
-                    max_rejection_ratio=max_rejection_ratio,
-                )
+    for group in included_groups:
+        group_data = df[df["Group"] == group]
+        model_paths = group_data["model_path"].unique()
 
-                aggregated_rmses.append(rmses)
-                auc_values.append(auc_arc)
-
-            # Average RMSE values across models
-            # print(aggregated_rmses)
-            mean_rmses = np.mean(aggregated_rmses, axis=0)
-            std_rmses = np.std(aggregated_rmses, axis=0)
-
-            mean_auc = np.mean(auc_values)
-            std_auc = np.std(auc_values)
-
-            # print(rejection_rates.shape)
-            # print(rejection_rates)
-            # print(mean_rmses.shape)
-            # print(mean_rmses)
-
-            # Plot the aggregated RMSE-Rejection curve
-            ax.plot(
-                rejection_rates,
-                mean_rmses,
-                label=f"{model_type}-{split} (AUC-RRC:{mean_auc:.3f} ($\sigma${std_auc:.3f}))",
-                color=color_dict[model_type],
+        rejection_rates, mean_rmses, std_rmses, mean_auc, std_auc = (
+            calculate_rejection_curve(
+                df,
+                model_paths,
+                unc_col,
+                normalize_rmse=normalize_rmse,
+                max_rejection_ratio=max_rejection_ratio,
             )
-            ax.fill_between(
-                rejection_rates,
-                mean_rmses - std_rmses,
-                mean_rmses + std_rmses,
-                color=color_dict[model_type],
-                alpha=0.2,
-            )
-
-            # Store aggregated AUC values
-            stats_dfs.append(
-                {
-                    "Model type": model_type,
-                    "Split": split,
-                    "AUC-RRC_mean": mean_auc,
-                    "AUC-RRC_std": std_auc,
-                }
-            )
-
-    # Plot the baseline random rejection curve
-    for split in splits:
-        model_names = df_pcm[df_pcm["Split"] == split]["model name"].unique()
-        model_paths = df_pcm[df_pcm["Split"] == split]["model_path"].unique()
-        aggregated_rmses_random = []
-        auc_values_random = []
-        # for model_name in df_pcm["model name"].unique():
-        for model_name, model_path in zip(model_names, model_paths):
-            # model_path = os.path.join(base_dir, df_pcm[df_pcm['model name'] == model_name]['project_model'].iloc[0])
-            preds = load_predictions(model_path)
-            # print(preds.shape)
-            rejection_rates, rmses_random, auc_rrc_random = (
-                calculate_rmse_rejection_curve(
-                    preds,
-                    uncertainty_col=unc_col,
-                    random_rejection=True,
-                    normalize_rmse=normalize_rmse,
-                    max_rejection_ratio=max_rejection_ratio,
-                )
-            )
-
-            aggregated_rmses_random.append(rmses_random)
-            auc_values_random.append(auc_rrc_random)
-
-        mean_rmses_random = np.mean(aggregated_rmses_random, axis=0)
-        std_rmses_random = np.std(aggregated_rmses_random, axis=0)
-
-        mean_auc_random = np.mean(auc_values_random)
-        std_auc_random = np.std(auc_values_random)
-
-        # print(rejection_rates.shape)
-        # print(rejection_rates)
-        # print(mean_rmses_random.shape)
-        # print(mean_rmses_random)
+        )
 
         ax.plot(
             rejection_rates,
-            mean_rmses_random,
-            label=f"random-reject-{split} (AUC-RRC:{mean_auc_random:.3f} ($\sigma${std_auc_random:.3f}))",
+            mean_rmses,
+            label=f"{group} (AUC-RRC: {mean_auc:.3f} ± {std_auc:.3f})",
+            color=color_dict[group],
+        )
+        ax.fill_between(
+            rejection_rates,
+            mean_rmses - std_rmses,
+            mean_rmses + std_rmses,
+            color=color_dict[group],
+            alpha=0.2,
+        )
+
+        stats_dfs.append(
+            {
+                "Model type": group.rsplit("_", 1)[1],
+                "Split": group.rsplit("_", 1)[0],
+                "Group": group,
+                "AUC-RRC_mean": mean_auc,
+                "AUC-RRC_std": std_auc,
+            }
+        )
+
+    # Add baseline random rejection curves
+    for split in df["Split"].unique():
+        split_data = df[df["Split"] == split]
+        model_paths = split_data["model_path"].unique()
+
+        rejection_rates, mean_rmses, std_rmses, mean_auc, std_auc = (
+            calculate_rejection_curve(
+                df,
+                model_paths,
+                unc_col,
+                random_rejection=True,
+                normalize_rmse=normalize_rmse,
+                max_rejection_ratio=max_rejection_ratio,
+            )
+        )
+
+        ax.plot(
+            rejection_rates,
+            mean_rmses,
+            label=f"random reject - {split} (AUC-RRC: {mean_auc:.3f} ± {std_auc:.3f})",
             color="black",
             linestyle="--",
         )
         ax.fill_between(
             rejection_rates,
-            mean_rmses_random - std_rmses_random,
-            mean_rmses_random + std_rmses_random,
+            mean_rmses - std_rmses,
+            mean_rmses + std_rmses,
             color="grey",
             alpha=0.2,
         )
 
         stats_dfs.append(
             {
-                "Model type": "random",
+                "Model type": "random reject",
                 "Split": split,
-                "AUC-RRC_mean": mean_auc_random,
-                "AUC-RRC_std": std_auc_random,
+                "Group": f"random reject - {split}",
+                "AUC-RRC_mean": mean_auc,
+                "AUC-RRC_std": std_auc,
             }
         )
 
+    # Plot settings
     ax.set_xlabel("Rejection Rate")
     ax.set_ylabel("RMSE" if not normalize_rmse else "Normalized RMSE")
     ax.set_title(
@@ -1118,40 +1335,22 @@ def plot_rmse_rejection_curves(
         if not normalize_rmse
         else "Normalized RMSE-Rejection Curves"
     )
-    ax.set_ylim(0.75, 1.05) if normalize_rmse else None
-    ax.set_xlim(0, max_rejection_ratio)  # Rejection rate from 0 to 1
-    ax.set_xticks(
-        np.append(np.arange(0, max_rejection_ratio + 0.05, 0.1), max_rejection_ratio)
-    )
-    # ax.set_yticks(np.arange(0.75, 1.05, 0.05))
-    # Custom legend order
-    # handles, labels = ax.get_legend_handles_labels()
-    # stratified_handles = [h for h, l in zip(handles, labels) if 'stratified' in l]
-    # scaffold_handles = [h for h, l in zip(handles, labels) if 'scaffold_cluster' in l]
-    # ordered_handles = [item for pair in zip(stratified_handles, scaffold_handles) for item in pair]
-    # ordered_handles += [h for h, l in zip(handles, labels) if 'Random' in l]  # Add random baseline last
-    #
-    # ax.legend(
-    #     ordered_handles,
-    #     bbox_to_anchor=(0, 0),  # Place the legend inside the plot area, bottom-left corner
-    #     loc='lower left',       # Align the legend to the lower left
-    #     borderaxespad=0,        # No padding between legend and axes
-    #     frameon=False,          # No frame around the legend
-    #     fontsize='small',       # Adjust font size
-    #     # ncol=2                  # Number of columns in the legend
-    # )
-    # Custom legend order
-    handles, labels = ax.get_legend_handles_labels()
-    ordered_labels = [f"{model_type}-" for model_type in model_types + ["random"]]
-    ordered_handles = [
-        handles[labels.index(label)]
-        for label in labels
-        if any(label.startswith(ol) for ol in ordered_labels)
-    ]
-    ax.legend(handles=ordered_handles, loc="lower left")
+    ax.set_xlim(0, max_rejection_ratio)
+    ax.grid(True)
 
-    plot_name = "rmse_rejection_curve"
-    plot_name += f"_{add_to_title}" if add_to_title else ""
+    ordered_handles, ordered_labels = get_handles_labels(ax, group_order)
+
+    ax.legend(
+        handles=ordered_handles,
+        loc="lower left",
+    )
+
+    # Save the plot
+    plot_name = (
+        f"rmse_rejection_curve_{add_to_title}"
+        if add_to_title
+        else "rmse_rejection_curve"
+    )
     save_plot(fig, save_dir_plot, plot_name, tighten=True)
 
     plt.show()
@@ -1160,87 +1359,120 @@ def plot_rmse_rejection_curves(
 
 
 def plot_auc_comparison(
-    stats_df, cmap="crest_r", save_dir=None, add_to_title="", min_y_axis=0.5
+    stats_df,
+    cmap="crest_r",
+    save_dir=None,
+    add_to_title="",
+    min_y_axis=0.5,
+    hatches_dict=None,
+    group_order=None,
 ):
-    model_types = [
-        "ensemble",
-        "eoe",
-        "evidential",
-        "emc",
-        "mcdropout",
-        "random",
-    ]  # Ordered model types including Random
-    # model_types = ["ensemble", "evidential", "mcdropout", "random"]  # Ordered model types including Random
+    """
+    Plots AUC-RRC comparison bar plot with colors by Model type and hatches by Split.
+    """
+    if group_order is None:
+        group_order = list(stats_df["Group"].unique())
 
-    splits = stats_df["Split"].unique()
+    if hatches_dict is None:
+        hatches_dict = {"stratified": "\\\\", "scaffold_cluster": "", "time": "///"}
 
+    # Create color mapping for Model type
     scalar_mappable = ScalarMappable(cmap=cmap)
-    color_dict = {
-        m: c
-        for m, c in zip(
-            model_types,
-            scalar_mappable.to_rgba(range(len(model_types)), alpha=1).tolist(),
-        )
-    }
-    color_dict["random"] = "black"  # Color for Random baseline
 
-    fig, ax = plt.subplots(figsize=(12, 8))
-    bar_width = 0.35
+    # unique_model_types = stats_df["Model type"].unique().pop('random reject')
+    unique_model_types = stats_df.loc[
+        stats_df["Model type"] != "random reject", "Model type"
+    ].unique()
+
+    colors = scalar_mappable.to_rgba(range(len(unique_model_types)))
+    color_dict = {model: color for model, color in zip(unique_model_types, colors)}
+    color_dict["random reject"] = "black"  # Color for Random baseline
+
+    unique_model_types = np.append(unique_model_types, "random reject")
+    # Calculate figure parameters
+    splits = stats_df["Split"].unique()
+    bar_width = 0.12
     group_spacing = 0.6
-    num_bars = len(model_types)
-    positions = []
+    fig, ax = plt.subplots(figsize=(12, 8))
+
     tick_positions = []
     tick_labels = []
 
+    # Plot bars for each split and group
     for i, split in enumerate(splits):
         split_data = stats_df[stats_df["Split"] == split]
-        for j, model_type in enumerate(model_types):
-            model_data = split_data[split_data["Model type"] == model_type]
-            position = i * (num_bars * bar_width + group_spacing) + j * bar_width
-            positions.append(position)
-            height = model_data["AUC-RRC_mean"].values[0]
-            yerr = model_data["AUC-RRC_std"].values[0]
+        split_data["Group"] = pd.Categorical(
+            split_data["Group"], categories=group_order, ordered=True
+        )
+        split_data = split_data.sort_values("Group").reset_index(drop=True)
+
+        for j, (_, row) in enumerate(split_data.iterrows()):
+            position = (
+                i * (len(unique_model_types) * bar_width + group_spacing)
+                + j * bar_width
+            )
+
+            # Plot bar
             ax.bar(
                 position,
-                height=height,
-                yerr=yerr,
-                color=color_dict[model_type],
+                height=row["AUC-RRC_mean"],
+                yerr=row["AUC-RRC_std"],
+                color=color_dict[row["Model type"]],
+                edgecolor="white" if row["Model type"] == "random reject" else "black",
+                hatch=hatches_dict[row["Split"]],
                 width=bar_width,
-                label=model_type if i == 0 else "",
+                label=(
+                    f"{row['Split']} {row['Model type']}"
+                    if position not in tick_positions
+                    else ""
+                ),
             )
-            # Add tick positions and labels
-            if j == len(model_types) - 1:
-                center_position = (i * (num_bars * bar_width + group_spacing)) + (
-                    num_bars * bar_width - bar_width / 2
-                ) / 2
-                tick_positions.append(center_position)
-                tick_labels.append(f"{split}")
 
-    def create_stats_legend(color_dict):
+        # Add center position for tick labels
+        center_position = (
+            i * (len(unique_model_types) * bar_width + group_spacing)
+            + (len(unique_model_types) * bar_width) / 2
+        )
+        tick_positions.append(center_position)
+        tick_labels.append(split)
+
+    # Create legend
+    def create_stats_legend(color_dict, hatches_dict, splits, model_types):
         patches = []
-        for label, color in color_dict.items():
-            patches.append(
-                mpatches.Patch(facecolor=color, edgecolor="black", label=label)
-            )
+        for split in splits:
+            for model in model_types:
+                label = f"{split} {model}"
+                hatch_color = "white" if model == "random reject" else "black"
+                patch = mpatches.Patch(
+                    facecolor=color_dict[model],
+                    hatch=hatches_dict[split],
+                    edgecolor=hatch_color,
+                    label=label,
+                )
+                patches.append(patch)
         return patches
 
-    legend_elements = create_stats_legend(color_dict)
+    legend_elements = create_stats_legend(
+        color_dict, hatches_dict, splits, unique_model_types
+    )
 
     ax.legend(
         handles=legend_elements,
-        bbox_to_anchor=(1.0, 1.0),
+        bbox_to_anchor=(1.05, 1),
         loc="upper left",
         borderaxespad=0,
         frameon=False,
+        # title="Legend",
     )
+
+    # Axes settings
     ax.set_xticks(tick_positions)
-    ax.set_xticklabels(
-        tick_labels, rotation=45, ha="right", rotation_mode="anchor", fontsize=9
-    )
+    ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=9)
     ax.set_xlabel("Splits")
     ax.set_ylabel("AUC-RRC")
     ax.set_ylim(min_y_axis, 1.0)
 
+    # Save and show plot
     plot_name = f"auc_comparison_barplot_{cmap}"
     plot_name += f"_{add_to_title}" if add_to_title else ""
     save_plot(fig, save_dir, plot_name, tighten=True)
@@ -1248,61 +1480,354 @@ def plot_auc_comparison(
     plt.close()
 
 
-# def plot_auc_comparison(stats_df, cmap="crest_r", save_dir=None, add_to_title=""):
-#     # model_types = stats_df["Model type"].unique()
-#     model_types = ["ensemble", "evidential", "mcdropout"]  # Ordered model types
-#
-#     splits = stats_df["Split"].unique()
-#
-#     scalar_mappable = ScalarMappable(cmap=cmap)
-#     color_dict = {m: c for m, c in zip(model_types, scalar_mappable.to_rgba(range(len(model_types)), alpha=1).tolist())}
-#
-#     fig, ax = plt.subplots(figsize=(12, 8))
-#     bar_width = 0.35
-#     group_spacing = 0.6
-#     num_bars = len(model_types)
-#     positions = []
-#     tick_positions = []
-#     tick_labels = []
-#
-#     for i, split in enumerate(splits):
-#         split_data = stats_df[stats_df['Split'] == split]
-#         for j, model_type in enumerate(model_types):
-#             model_data = split_data[split_data['Model type'] == model_type]
-#             position = i * (num_bars * bar_width + group_spacing) + j * bar_width
-#             positions.append(position)
-#             height = model_data['AUC-RRC_mean'].values[0]
-#             yerr = model_data['AUC-RRC_std'].values[0]
-#             ax.bar(
-#                 position,
-#                 height=height,
-#                 yerr=yerr,
-#                 color=color_dict[model_type],
-#                 width=bar_width,
-#                 label=model_type if i == 0 else ""
-#             )
-#             # Add tick positions and labels
-#             if j == len(model_types) - 1:
-#                 # center_position = (i * (num_bars * bar_width + group_spacing)) + (num_bars * bar_width) / 2
-#                 center_position = (i * (num_bars * bar_width + group_spacing)) + (num_bars * bar_width - bar_width / 2) / 2
-#                 tick_positions.append(center_position)
-#                 tick_labels.append(f"{split}")
-#
-#     def create_stats_legend(color_dict):
-#         patches = []
-#         for label, color in color_dict.items():
-#             patches.append(mpatches.Patch(facecolor=color, edgecolor='black', label=label))
-#         return patches
-#
-#     legend_elements = create_stats_legend(color_dict)
-#
-#     ax.legend(handles=legend_elements, bbox_to_anchor=(1.0, 1.0), loc="upper left", borderaxespad=0, frameon=False)
-#     ax.set_xticks(tick_positions)
-#     ax.set_xticklabels(tick_labels, rotation=45, ha="right", rotation_mode="anchor", fontsize=9)
-#     ax.set_xlabel("Splits")
-#     ax.set_ylabel("AUC-RRC")
-#     plot_name = f"auc_comparison_barplot_{cmap}"
-#     plot_name += f"_{add_to_title}" if add_to_title else ""
-#     save_plot(fig, save_dir, plot_name, tighten=True)
-#     plt.show()
-#     plt.close()
+# we want to create a function to save stats_df to a csv file
+def save_stats_df(stats_df, save_dir, add_to_title=""):
+    stats_df.to_csv(os.path.join(save_dir, f"stats_df_{add_to_title}.csv"), index=False)
+
+
+def load_stats_df(save_dir, add_to_title=""):
+    return pd.read_csv(os.path.join(save_dir, f"stats_df_{add_to_title}.csv"))
+
+
+# lets run this file
+if __name__ == "__main__":
+    plt.style.use("tableau-colorblind10")
+
+    # Set up argument parser
+    parser = argparse.ArgumentParser(
+        description="Process input parameters for the script."
+    )
+    parser.add_argument(
+        "--data_name",
+        type=str,
+        default="papyrus",
+    )
+    parser.add_argument(
+        "--activity_type",
+        type=str,
+        required=True,
+        help="The type of activity (e.g., 'kx', 'xc50').",
+    )
+    parser.add_argument(
+        "--project_name",
+        type=str,
+        required=True,
+        # default='2025-01-30-kx-all',
+        help="The name of the project.",
+    )
+
+    parser.add_argument(
+        "--color", type=str, default="tab10_r", help="name of the color map"
+    )
+
+    parser.add_argument(
+        "--corr_color", type=str, default="YlGnBu", help="name of the color map"
+    )
+
+    args = parser.parse_args()
+    data_name = "papyrus"
+    type_n_targets = "all"
+    activity_type = args.activity_type
+    project_name = args.project_name
+    color_map = args.color
+    corr_cmap = args.corr_color
+    ############################## Testing ################################
+    # color_map = None
+    # color_map = 'tableau-colorblind10'
+    # activity_type = 'kx'
+    # type_n_targets = 'all'
+    # project_name = '2025-01-08-xc50-all'
+    # project_name = '2025-01-30-kx-all'
+    ############################## Testing ################################
+
+    project_out_name = project_name
+
+    data_specific_path = f"{data_name}/{activity_type}/{type_n_targets}"
+
+    file_1 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_ensemble_mcdp_{activity_type}/metrics.csv"
+    file_2 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_evidential_{activity_type}/metrics.csv"
+
+    save_dir = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}/{color_map}/"
+    save_dir_no_time = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}-no-time/{color_map}/"
+    base_path = "/users/home/bkhalil/Repos/uqdd/uqdd/figures/"
+
+    df_1 = pd.read_csv(file_1, header=0)
+    df_2 = pd.read_csv(file_2, header=0)
+    df_main = pd.concat([df_1, df_2])
+
+    # # replace random with stratified for the random split
+    df_main["Split"] = df_main["Split"].apply(
+        lambda x: "stratified" if x == "random" else x
+    )
+
+    df_merged = df_main.copy()
+
+    # Remove some rows where MCDP experiment was run
+    df_merged = df_merged[
+        ~(
+            (df_merged["Model type"] == "mcdropout")
+            & (df_merged["Split"] == "scaffold_cluster")
+            & (df_merged["dropout"] == 0.2)
+        )
+    ]
+    df_merged = df_merged[
+        ~(
+            (df_merged["Model type"] == "mcdropout")
+            & (df_merged["Split"] == "stratified")
+            & (df_merged["dropout"] == 0.1)
+        )
+    ]
+    df_merged = df_merged[
+        ~(
+            (df_merged["Model type"] == "mcdropout")
+            & (df_merged["Split"] == "time")
+            & (df_merged["dropout"] == 0.1)
+        )
+    ]
+
+    df_merged["Group"] = df_merged.apply(
+        lambda row: f"{row['Split']}_{row['Model type']}", axis=1
+    )
+
+    # Extracting the necessary parts for plotting and make copies to avoid SettingWithCopyWarning
+    # df_pcm with exact match of task pcm
+    df_pcm = df_merged[df_merged["Task"] == "PCM"].copy()
+    df_before_calib = df_merged[df_merged["Task"] == "PCM_before_calibration"].copy()
+    df_before_calib["Calibration"] = "Before Calibration"
+
+    df_after_calib = df_merged[
+        df_merged["Task"] == "PCM_after_calibration_with_isotonic_regression"
+    ].copy()
+    df_after_calib["Calibration"] = "After Calibration"
+
+    df_calib = pd.concat([df_before_calib, df_after_calib])
+    df_calib_no_time = df_calib.copy()[df_calib["Split"] != "time"]
+    # SUBSET 100
+    subdf_pcm = df_merged[df_merged["Task"] == "PCM_subset100"].copy()
+    subdf_before_calib = df_merged[
+        df_merged["Task"] == "PCM_before_calibration_subset100"
+    ].copy()
+    subdf_before_calib["Calibration"] = "Before Calibration"
+
+    subdf_after_calib = df_merged[
+        df_merged["Task"] == "PCM_after_calibration_with_isotonic_regression_subset100"
+    ].copy()
+    subdf_after_calib["Calibration"] = "After Calibration"
+
+    subdf_calib = pd.concat([subdf_before_calib, subdf_after_calib])
+    subdf_calib_no_time = subdf_calib.copy()[subdf_calib["Split"] != "time"]
+
+    os.makedirs(save_dir, exist_ok=True)
+    output_file_path = os.path.join(save_dir, "final_aggregated.csv")
+    df_no_time = df_pcm.copy()[df_pcm["Split"] != "time"]
+
+    print(f"{df_pcm.shape=}")
+    print(f"{df_no_time.shape=}")
+
+    final_aggregated = aggregate_results_csv(
+        df_pcm, group_cols, numeric_cols, string_cols, order_by, output_file_path
+    )
+    final_aggregated["Group"] = final_aggregated.apply(
+        lambda row: f"{row['Split']}_{row['Model type']}", axis=1
+    )
+
+    os.makedirs(save_dir_no_time, exist_ok=True)
+    output_file_path_no_time = os.path.join(
+        save_dir_no_time, "final_aggregated_no_time.csv"
+    )
+    final_aggregated_no_time = aggregate_results_csv(
+        df_no_time,
+        group_cols,
+        numeric_cols,
+        string_cols,
+        order_by,
+        output_file_path_no_time,
+    )
+    final_aggregated_no_time["Group"] = final_aggregated_no_time.apply(
+        lambda row: f"{row['Split']}_{row['Model type']}", axis=1
+    )
+
+    df_pcm.to_csv(os.path.join(save_dir, "final.csv"), index=False)
+    df_no_time.to_csv(os.path.join(save_dir_no_time, "final_no_time.csv"), index=False)
+
+    highly_correlated_metrics = find_highly_correlated_metrics(
+        df_pcm, accmetrics, threshold=0.9, save_dir=save_dir, cmap=corr_cmap
+    )
+    highly_correlated_metrics_no_time = find_highly_correlated_metrics(
+        df_no_time, accmetrics, threshold=0.9, save_dir=save_dir_no_time, cmap=corr_cmap
+    )
+    highly_correlated_uctmetrics = find_highly_correlated_metrics(
+        df_pcm, uctmetrics, threshold=0.9, save_dir=save_dir, cmap=corr_cmap
+    )
+    highly_correlated_uctmetrics_no_time = find_highly_correlated_metrics(
+        df_no_time, uctmetrics, threshold=0.9, save_dir=save_dir_no_time, cmap=corr_cmap
+    )
+    uctmetrics_uncorr = ["Miscalibration Area", "Sharpness", "CRPS", "NLL", "Interval"]
+    highly_correlated_uctmetrics_uncorr = find_highly_correlated_metrics(
+        df_pcm, uctmetrics_uncorr, threshold=0.9, save_dir=save_dir, cmap=corr_cmap
+    )
+    highly_correlated_uctmetrics_uncorr_no_time = find_highly_correlated_metrics(
+        df_no_time,
+        uctmetrics_uncorr,
+        threshold=0.9,
+        save_dir=save_dir_no_time,
+        cmap=corr_cmap,
+    )
+
+    # plot_metrics(df_pcm, accmetrics, cmap="crest_r", save_dir=save_dir_no_time, hatches_dict=hatches_dict_no_time, group_order=group_order_no_time)
+    plot_metrics(
+        df_no_time,
+        accmetrics,
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        hatches_dict=hatches_dict_no_time,
+        group_order=group_order_no_time,
+    )
+
+    # plot_metrics(df_pcm, accmetrics2, cmap=color_map, save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+    plot_metrics(
+        df_no_time,
+        accmetrics2,
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        hatches_dict=hatches_dict_no_time,
+        group_order=group_order_no_time,
+    )
+
+    # plot_metrics(df_pcm, uctmetrics_uncorr, cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+    plot_metrics(
+        df_no_time,
+        uctmetrics_uncorr,
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        hatches_dict=hatches_dict_no_time,
+        group_order=group_order_no_time,
+    )
+
+    for m in accmetrics2:
+        # plot_metrics(df_pcm, [m], cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+        plot_metrics(
+            df_no_time,
+            [m],
+            cmap=color_map,
+            save_dir=save_dir_no_time,
+            hatches_dict=hatches_dict_no_time,
+            group_order=group_order_no_time,
+        )
+
+    for m in uctmetrics_uncorr:
+        # plot_metrics(df_pcm, [m], cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+        plot_metrics(
+            df_no_time,
+            [m],
+            cmap=color_map,
+            save_dir=save_dir_no_time,
+            hatches_dict=hatches_dict_no_time,
+            group_order=group_order_no_time,
+        )
+
+    # plot_comparison_metrics(df_pcm, uctmetrics_uncorr, cmap=color_map, save_dir=save_dir)
+    plot_comparison_metrics(
+        df_calib_no_time, uctmetrics_uncorr, cmap=color_map, save_dir=save_dir_no_time
+    )
+
+    mc_list = ["RMS Calibration", "MA Calibration", "Miscalibration Area"]
+    # plot_comparison_metrics(df_pcm, mc_list, cmap=color_map, save_dir=save_dir)
+    plot_comparison_metrics(
+        df_calib_no_time, mc_list, cmap=color_map, save_dir=save_dir_no_time
+    )
+
+    for mc in mc_list:
+        # plot_comparison_metrics(df_calib, ['Miscalibration Area'], cmap="crest_r", save_dir=save_dir)
+        plot_comparison_metrics(
+            df_calib_no_time, [mc], cmap=color_map, save_dir=save_dir_no_time
+        )
+
+    plot_calibration_data(
+        final_aggregated_no_time,
+        base_path,
+        save_dir_no_time,
+        title="Calibration Curves for Models",
+        color_name=color_map,
+        group_order=group_order_no_time,
+    )
+
+    df_pcm_stratified = df_pcm[df_pcm["Split"] == "stratified"]
+    df_pcm_scaffold = df_pcm[df_pcm["Split"] == "scaffold_cluster"]
+    df_pcm_time = df_pcm[df_pcm["Split"] == "time"]
+    print(df_pcm_stratified.shape, df_pcm_scaffold.shape, df_pcm_time.shape)
+
+    save_dir_plot = os.path.join(save_dir_no_time, "rrcs")
+    # save_dir_no_time_rrcs_plot = os.path.join(save_dir_no_time, "rrcs")
+
+    # make dir if not exist
+    os.makedirs(save_dir_plot, exist_ok=True)
+    # os.makedirs(save_dir_no_time_rrcs_plot, exist_ok=True)
+
+    uct_types = ["aleatoric", "epistemic", "both"]
+    for uct_t in uct_types:
+        for normalize_rmse in [True, False]:
+            add_to_title = "-normalized" if normalize_rmse else ""
+            add_to_title += "-" + uct_t
+            stats_df = plot_rmse_rejection_curves(
+                df_no_time,
+                base_path,
+                cmap=color_map,
+                save_dir_plot=save_dir_plot,
+                add_to_title="all" + add_to_title,
+                normalize_rmse=normalize_rmse,
+                unc_type=uct_t,
+                max_rejection_ratio=0.95,
+                group_order=group_order_no_time,
+            )
+
+            plot_auc_comparison(
+                stats_df,
+                cmap=color_map,
+                save_dir=save_dir_plot,
+                add_to_title="all" + add_to_title,
+                hatches_dict=hatches_dict_no_time,
+                group_order=group_order_no_time,
+            )
+
+            save_stats_df(stats_df, save_dir_plot, add_to_title="all" + add_to_title)
+
+            for name, df in zip(
+                ["stratified", "scaffold"], [df_pcm_stratified, df_pcm_scaffold]
+            ):
+                stats_df = plot_rmse_rejection_curves(
+                    df,
+                    base_path,
+                    cmap=color_map,
+                    save_dir_plot=save_dir_plot,
+                    add_to_title=name + add_to_title,
+                    normalize_rmse=normalize_rmse,
+                    unc_type=uct_t,
+                    max_rejection_ratio=0.95,
+                    group_order=group_order_no_time,
+                )
+                plot_auc_comparison(
+                    stats_df,
+                    cmap=color_map,
+                    save_dir=save_dir_plot,
+                    add_to_title=name + add_to_title,
+                    hatches_dict=hatches_dict_no_time,
+                    group_order=group_order_no_time,
+                )
+
+                save_stats_df(stats_df, save_dir_plot, add_to_title=name + add_to_title)
+
+    plot_pairplot(
+        df_no_time,
+        "Pairplot for Accuracy Metrics",
+        accmetrics,
+        save_dir=save_dir_no_time,
+        cmap=color_map,
+    )
+    plot_pairplot(
+        df_no_time,
+        "Pairplot for Uncertainty Metrics",
+        uctmetrics,
+        save_dir=save_dir_no_time,
+        cmap=color_map,
+    )
