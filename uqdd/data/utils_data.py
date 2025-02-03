@@ -11,7 +11,7 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split
 from scipy.spatial.distance import jensenshannon
 
-from uqdd import DATASET_DIR, FIGS_DIR, TODAY
+from uqdd import DATASET_DIR
 from uqdd.utils import load_pickle, save_df, load_df, save_pickle
 from uqdd.utils_chem import merge_scaffolds, clustering
 
