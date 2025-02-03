@@ -429,7 +429,7 @@ def save_npy_file(array_data: np.ndarray, filepath: str) -> None:
     np.save(filepath, array_data)
 
 
-def load_npy_file(filepath: str) -> np.ndarray:
+def load_npy_file(filepath: Union[str, Path]) -> np.ndarray:
     """
     Loads a .npy file into a numpy array.
 
@@ -447,7 +447,7 @@ def load_npy_file(filepath: str) -> np.ndarray:
     return np.load(filepath)
 
 
-def save_pickle(data: Any, file_path: str) -> None:
+def save_pickle(data: Any, file_path: Union[str, Path]) -> None:
     """
     Saves data to a pickle file.
 
@@ -467,7 +467,7 @@ def save_pickle(data: Any, file_path: str) -> None:
         pickle.dump(data, file)
 
 
-def load_pickle(filepath: str) -> Any:
+def load_pickle(filepath: Union[str, Path]) -> Any:
     """
     Loads data from a pickle file.
 
