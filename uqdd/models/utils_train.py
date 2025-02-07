@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Union, Callable, Any, Type
+from typing import Tuple, Optional, Dict, Union, Callable, Any, Type, List
 
 import numpy as np
 import wandb
@@ -1259,50 +1259,50 @@ def train_model_e2e(
 
 
 def recalibrate_model(
-    preds_val: np.ndarray,
-    labels_val: np.ndarray,
-    alea_vars_val: np.ndarray,
-    preds_test: np.ndarray,
-    labels_test: np.ndarray,
-    alea_vars_test: np.ndarray,
+    preds_val: Union[np.ndarray, torch.Tensor, List[float]],
+    labels_val: Union[np.ndarray, torch.Tensor, List[float]],
+    alea_vars_val: Union[np.ndarray, torch.Tensor, List[float]],
+    preds_test: Union[np.ndarray, torch.Tensor, List[float]],
+    labels_test: Union[np.ndarray, torch.Tensor, List[float]],
+    alea_vars_test: Union[np.ndarray, torch.Tensor, List[float]],
     config: Dict[str, Any],
-    epi_val: Optional[np.ndarray] = None,
-    epi_test: Optional[np.ndarray] = None,
+    epi_val: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
+    epi_test: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
     uct_logger: Optional[Any] = None,
     figpath: Optional[Union[str, Path]] = None,
 ) -> Any:
     """
-    Recalibrates the uncertainty estimates using isotonic regression.
+    Recalibrates uncertainty estimates using validation and test predictions.
 
-    Parameters:
-    -----------
-    preds_val : np.ndarray
-        Predicted values for the validation set.
-    labels_val : np.ndarray
+    Parameters
+    ----------
+    preds_val : Union[np.ndarray, torch.Tensor, List[float]]
+        Predictions on the validation set.
+    labels_val : Union[np.ndarray, torch.Tensor, List[float]]
         True labels for the validation set.
-    alea_vars_val : np.ndarray
-        Aleatoric uncertainty estimates for the validation set.
-    preds_test : np.ndarray
-        Predicted values for the test set.
-    labels_test : np.ndarray
+    alea_vars_val : Union[np.ndarray, torch.Tensor, List[float]]
+        Aleatoric uncertainties for validation predictions.
+    preds_test : Union[np.ndarray, torch.Tensor, List[float]]
+        Predictions on the test set.
+    labels_test : Union[np.ndarray, torch.Tensor, List[float]]
         True labels for the test set.
-    alea_vars_test : np.ndarray
-        Aleatoric uncertainty estimates for the test set.
+    alea_vars_test : Union[np.ndarray, torch.Tensor, List[float]]
+        Aleatoric uncertainties for test predictions.
     config : Dict[str, Any]
-        Configuration dictionary containing model and training parameters.
-    epi_val : Optional[np.ndarray], optional
-        Epistemic uncertainty estimates for the validation set, by default None.
-    epi_test : Optional[np.ndarray], optional
-        Epistemic uncertainty estimates for the test set, by default None.
+        Configuration dictionary containing model and dataset settings.
+    epi_val : Optional[Union[np.ndarray, torch.Tensor, List[float]]], optional
+        Epistemic uncertainties for validation predictions, by default None.
+    epi_test : Optional[Union[np.ndarray, torch.Tensor, List[float]]], optional
+        Epistemic uncertainties for test predictions, by default None.
     uct_logger : Optional[Any], optional
-        Logger instance for uncertainty calibration, by default None.
+        Logger for uncertainty quantification metrics, by default None.
     figpath : Optional[Union[str, Path]], optional
         Path to save calibration plots, by default None.
 
-    Returns:
-    --------
+    Returns
+    -------
     Any
-        Recalibration model instance after applying isotonic regression.
+        The recalibration model used for adjusting uncertainty estimates.
     """
     model_name = config.get("model_name", "ensemble")
     data_specific_path = config.get("data_specific_path", None)

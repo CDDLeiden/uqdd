@@ -165,34 +165,37 @@ def calc_regr_metrics(
 
 
 def process_preds(
-    predictions: torch.Tensor,
-    targets: torch.Tensor,
-    alea_vars: torch.Tensor = None,
-    epi_vars: torch.Tensor = None,
-    task_idx: Union[int, None] = None,
-):
+    predictions: Union[torch.Tensor, np.ndarray],
+    targets: Union[torch.Tensor, np.ndarray],
+    alea_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+    epi_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+    task_idx: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Process predictions to extract mean, standard deviation, and align with targets,
+    Process predictions to extract mean, standard deviation, align with targets,
     and compute the absolute error between predictions and targets.
 
     Parameters
     ----------
-    predictions : torch.Tensor
+    predictions : Union[torch.Tensor, np.ndarray]
         The model predictions with dimensions [samples, tasks, ensemble members].
-    targets : torch.Tensor
+    targets : Union[torch.Tensor, np.ndarray]
         The true target values.
-    alea_vars :  torch.Tensor, optional
-        Aleatoric part of uncertainty
-    epi_vars : torch.Tensor, optional
-        Epistemic part of uncertainty - if calculated by probabilistic model (Evidential model)
-    task_idx : int, optional
-        Index of the specific task to process in a multi-task learning setting.
+    alea_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+        Aleatoric uncertainty estimates, by default None.
+    epi_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+        Epistemic uncertainty estimates (from probabilistic models like Evidential Learning), by default None.
+    task_idx : Optional[int], optional
+        Index of the specific task to process in a multi-task learning setting, by default None.
 
     Returns
     -------
-    tuple
-        A tuple containing arrays for predictions mean, standard deviation, targets,
-        and absolute error, filtered to exclude NaN values.
+    Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        - `y_true` : The filtered true target values.
+        - `y_pred` : The processed predictions (mean for ensembles).
+        - `y_std` : The computed standard deviations for predictions.
+        - `y_err` : The absolute errors between predictions and targets.
+        - `alea_vars` : The processed aleatoric uncertainties.
     """
     if alea_vars is None:
         vars_ = torch.zeros_like(targets)
