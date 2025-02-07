@@ -71,25 +71,14 @@ class Papyrus:
         self.desc_prots = [
             "ankh-base",
             "ankh-large",
-            # "esm1_t12",
             "esm1_t34",
-            # "esm1_t6",
-            # "esm_msa1",
-            # "esm_msa1b",
-            # "esm1v",
             "protbert",
-            # "protbert_bfd",
             "unirep",
-            # "esm1b",
         ]
         self.desc_chems = [
-            # "ecfp1024",
             "ecfp2048",
-            # "mold2",
             "mordred",
             "cddd",
-            # "fingerprint",
-            # "moldesc",
         ]
         self.MT = None  # placeholder for multitask learning
 

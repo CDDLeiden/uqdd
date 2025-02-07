@@ -1755,7 +1755,7 @@ if __name__ == "__main__":
     df_pcm_stratified = df_pcm[df_pcm["Split"] == "stratified"]
     df_pcm_scaffold = df_pcm[df_pcm["Split"] == "scaffold_cluster"]
     df_pcm_time = df_pcm[df_pcm["Split"] == "time"]
-    print(df_pcm_stratified.shape, df_pcm_scaffold.shape, df_pcm_time.shape)
+    # print(df_pcm_stratified.shape, df_pcm_scaffold.shape, df_pcm_time.shape)
 
     save_dir_plot = os.path.join(save_dir_no_time, "rrcs")
     # save_dir_no_time_rrcs_plot = os.path.join(save_dir_no_time, "rrcs")

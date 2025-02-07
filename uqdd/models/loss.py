@@ -1,17 +1,43 @@
 import logging
+from typing import Optional, Callable, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from uqdd.models.utils_metrics import calc_nanaware_metrics
-
 
 # Normal Inverse Gamma Negative Log-Likelihood
-# from https://arxiv.org/abs/1910.02600:
+# Adopted and Modified from https://arxiv.org/abs/1910.02600:
 # > we denote the loss, L^NLL_i as the negative logarithm of model
 # > evidence ...
-def nig_nll(gamma, v, alpha, beta, y):
+def nig_nll(
+    gamma: torch.Tensor,
+    v: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+    y: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes the Negative Log-Likelihood (NLL) loss for a Normal Inverse Gamma distribution.
+
+    Parameters
+    ----------
+    gamma : torch.Tensor
+        Mean prediction.
+    v : torch.Tensor
+        Variance scaling factor.
+    alpha : torch.Tensor
+        Shape parameter for inverse gamma distribution.
+    beta : torch.Tensor
+        Scale parameter for inverse gamma distribution.
+    y : torch.Tensor
+        Target values.
+
+    Returns
+    -------
+    torch.Tensor
+        Mean negative log-likelihood loss.
+    """
     two_beta_lambda = 2 * beta * (1 + v)
     t1 = 0.5 * (torch.pi / v).log()
     t2 = alpha * two_beta_lambda.log()
@@ -26,7 +52,34 @@ def nig_nll(gamma, v, alpha, beta, y):
 # from https://arxiv.org/abs/1910.02600:
 # > we formulate a novel evidence regularizer, L^R_i
 # > scaled on the error of the i-th prediction
-def nig_reg(gamma, v, alpha, _beta, y):
+def nig_reg(
+    gamma: torch.Tensor,
+    v: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+    y: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes the regularization term for evidential regression.
+
+    Parameters
+    ----------
+    gamma : torch.Tensor
+        Mean prediction.
+    v : torch.Tensor
+        Variance scaling factor.
+    alpha : torch.Tensor
+        Shape parameter for inverse gamma distribution.
+    beta : torch.Tensor
+        Scale parameter for inverse gamma distribution.
+    y : torch.Tensor
+        Target values.
+
+    Returns
+    -------
+    torch.Tensor
+        Mean evidential regularization loss.
+    """
     reg = (y - gamma).abs() * (2 * v + alpha)
     return reg.mean()
 
@@ -35,7 +88,22 @@ def nig_reg(gamma, v, alpha, _beta, y):
 # from https://arxiv.org/abs/1806.01768
 # code based on:
 # https://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
-def dirichlet_reg(alpha, y):
+def dirichlet_reg(alpha: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the KL divergence from a uniform Dirichlet distribution.
+
+    Parameters
+    ----------
+    alpha : torch.Tensor
+        Dirichlet concentration parameters.
+    y : torch.Tensor
+        Target labels.
+
+    Returns
+    -------
+    torch.Tensor
+        KL divergence regularization term.
+    """
     # dirichlet parameters after removal of non-misleading evidence (from the label)
     alpha = y + (1 - y) * alpha
 
@@ -56,7 +124,23 @@ def dirichlet_reg(alpha, y):
 
 # Eq. (5) from https://arxiv.org/abs/1806.01768:
 # Sum of squares loss
-def dirichlet_mse(alpha, y):
+
+def dirichlet_mse(alpha: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the sum-of-squares loss for evidential classification.
+
+    Parameters
+    ----------
+    alpha : torch.Tensor
+        Dirichlet concentration parameters.
+    y : torch.Tensor
+        Target labels.
+
+    Returns
+    -------
+    torch.Tensor
+        Mean squared error loss.
+    """
     sum_alpha = alpha.sum(-1, keepdims=True)
     p = alpha / sum_alpha
     t1 = (y - p).pow(2).sum(-1)
@@ -65,60 +149,37 @@ def dirichlet_mse(alpha, y):
     return mse.mean()
 
 
-#
-# def evidential_classification(alpha, y, lamb=1.0):
-#     """
-#     Evidential Classification Loss Function
-#     Parameters
-#     ----------
-#     alpha : torch.Tensor
-#         Dirichlet parameters
-#     y : torch.Tensor
-#         Target values
-#     lamb: float
-#         Regularization parameter (default: 1.0)
-#
-#     Returns
-#     -------
-#     torch.Tensor
-#         Evidential Classification Loss
-#     """
-#     num_classes = alpha.shape[-1]
-#     y = F.one_hot(y, num_classes)
-#     return dirichlet_mse(alpha, y) + lamb * dirichlet_reg(alpha, y)
-#
-#
-# def evidential_regression(dist_params, y, lamb=1.0):
-#     return nig_nll(*dist_params, y) + lamb * nig_reg(*dist_params, y)
 
-
-def calc_loss_notnan(outputs, targets, alea_vars, loss_fn, reduction='mean'):
+def calc_loss_notnan(
+    outputs: torch.Tensor,
+    targets: torch.Tensor,
+    alea_vars: Optional[torch.Tensor],
+    loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    reduction: str = "mean"
+) -> torch.Tensor:
     """
     Calculates the loss for non-NaN values between outputs and targets using a given loss function,
-    and aggregates it per task.
+    aggregating per task.
 
     Parameters
     ----------
     outputs : torch.Tensor
-        Predicted outputs from the model, shape [batch_size, num_tasks, num_models]
+        Model predictions with shape [batch_size, num_tasks, num_models].
     targets : torch.Tensor
-        True target values, shape [batch_size, num_tasks, 1] after unsqueezing
-    alea_vars : torch.Tensor or None
-        Predicted aleatoric variances from the model, same shape as outputs.
+        Ground truth labels with shape [batch_size, num_tasks, 1].
+    alea_vars : torch.Tensor, optional
+        Aleatoric variances, same shape as outputs.
     loss_fn : Callable
-        A loss function compatible with torch.Tensors and supports 'none' reduction.
-    reduction : str
-        The method for reducing the loss across the batch ('mean', 'sum', or 'none').
+        Loss function to compute the loss.
+    reduction : str, optional
+        Reduction method ('mean', 'sum', or 'none'), by default 'mean'.
 
     Returns
     -------
     torch.Tensor
-        The aggregated loss value excluding NaNs, shape [num_tasks, 1] or scalar if reduction='mean'.
+        Aggregated loss value.
     """
     assert outputs.dim() == 3, "Outputs should be [batch_size, num_tasks, num_models]"
-    # if targets.dim() < outputs.dim():
-    #     targets =
-    # assert targets.dim() == 3, "Targets should be [batch_size, num_tasks, 1] after unsqueezing"
 
     # Mask out NaN values in targets
     nan_mask = torch.isnan(targets)
@@ -161,53 +222,23 @@ def calc_loss_notnan(outputs, targets, alea_vars, loss_fn, reduction='mean'):
     return task_losses  # Return losses per task as a tensor
 
 
-# def _calc_loss_notnan(outputs, targets, alea_vars, loss_fn, reduction='mean'):
-#     """
-#     Calculates the loss for non-NaN values between outputs and targets using a given loss function.
-#
-#     Parameters
-#     ----------
-#     outputs : torch.Tensor
-#         Predicted outputs from the model.
-#     targets : torch.Tensor
-#         True target values.
-#     loss_fn : Callable or function
-#         A loss function compatible with torch.Tensors and supports 'none' reduction.
-#     reduction : str
-#         The method for reducing the loss across the batch ('mean', 'sum', or 'none').
-#
-#     Returns
-#     -------
-#     torch.Tensor
-#         The aggregated loss value excluding NaNs.
-#     """
-#     # Shapes fix
-#     if outputs.dim() > targets.dim():
-#         targets = targets.unsqueeze(-1)
-#
-#     nan_mask = torch.isnan(targets)
-#     valid_targets = torch.where(
-#         ~nan_mask, targets, torch.tensor(0.0, device=targets.device)
-#     )
-#     valid_outputs = torch.where(
-#         ~nan_mask, outputs, torch.tensor(0.0, device=outputs.device)
-#     )
-#
-#     if alea_vars is not None:
-#         valid_alea_vars = torch.where(
-#             ~nan_mask, alea_vars, torch.tensor(0.0, device=alea_vars.device)
-#         )
-#         loss_per_task = loss_fn(valid_outputs, valid_targets, valid_alea_vars)
-#     else:
-#         loss_per_task = loss_fn(valid_outputs, valid_targets)
-#     loss = calc_nanaware_metrics(loss_per_task, nan_mask, all_tasks_agg="sum")
-#
-#     return loss
-
-
-### Custom Loss Functions ###
 class MultiTaskLoss(nn.Module):
-    def __init__(self, loss_type="huber", reduction="mean", lamb=1e-2, **kwargs):
+    """
+    Multi-task learning loss function that computes losses across multiple tasks.
+
+    Parameters
+    ----------
+    loss_type : str, optional
+        Type of loss function to use, by default "huber".
+    reduction : str, optional
+        Reduction method ('mean', 'sum', or 'none'), by default 'mean'.
+    lamb : float, optional
+        Regularization weight, by default 1e-2.
+    """
+
+    def __init__(
+            self, loss_type: str = "huber", reduction: str = "mean", lamb: float = 1e-2, **kwargs
+    ) -> None:
         super(MultiTaskLoss, self).__init__()
         self.loss_type = loss_type
         self.loss_fn = build_loss(
@@ -215,42 +246,58 @@ class MultiTaskLoss(nn.Module):
         )
         self.reduction = reduction
 
-    def forward(self, outputs, targets, alea_vars):
-        # loss
-        loss = calc_loss_notnan(outputs, targets, alea_vars, self.loss_fn, self.reduction)  # "mean"
-        # loss = loss.mean()
-        return loss
-
-    # def prepare_mt_args(self, outputs, targets, alea_vars):
-    #     if outputs.dim() > targets.dim():
-
-
-class EvidentialClassLoss(nn.Module):
-    def __init__(self, lamb=1.0):
+    def forward(
+        self, outputs: torch.Tensor, targets: torch.Tensor, alea_vars: Optional[torch.Tensor]
+    ) -> torch.Tensor:
         """
-        Evidential Classification Loss Function
+        Computes the loss across tasks.
+
         Parameters
         ----------
-        lamb: float
-            Regularization parameter (default: 1.0)
-        """
-        super(EvidentialClassLoss, self).__init__()
-        self.lamb = lamb
-
-    def forward(self, alpha, y):
-        """
-        Forward pass of the loss function for evidential classification model
-        Parameters
-        ----------
-        alpha : torch.Tensor
-            Dirichlet parameters
-        y : torch.Tensor
-            Target values
+        outputs : torch.Tensor
+            Model predictions.
+        targets : torch.Tensor
+            Ground truth labels.
+        alea_vars : torch.Tensor, optional
+            Aleatoric variances.
 
         Returns
         -------
         torch.Tensor
-            Evidential Classification Loss
+            Computed loss.
+        """
+        loss = calc_loss_notnan(outputs, targets, alea_vars, self.loss_fn, self.reduction)
+        return loss
+
+
+class EvidentialClassLoss(nn.Module):
+    """
+    Evidential classification loss function.
+
+    Parameters
+    ----------
+    lamb : float, optional
+        Regularization weight, by default 1.0.
+    """
+    def __init__(self, lamb: float = 1.0) -> None:
+        super(EvidentialClassLoss, self).__init__()
+        self.lamb = lamb
+
+    def forward(self, alpha: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the evidential classification loss.
+
+        Parameters
+        ----------
+        alpha : torch.Tensor
+            Dirichlet distribution parameters.
+        y : torch.Tensor
+            Target values.
+
+        Returns
+        -------
+        torch.Tensor
+            Computed loss.
         """
         num_classes = alpha.shape[-1]
         y = F.one_hot(y, num_classes)
@@ -259,49 +306,65 @@ class EvidentialClassLoss(nn.Module):
 
 
 class EvidenceRegressionLoss(nn.Module):
-    def __init__(self, lamb=1.0):
-        """
-        Evidential Regression Loss Function
-        Parameters
-        ----------
-        lamb: float
-            Regularization parameter (default: 1.0)
-        """
+    """
+    Evidential regression loss function.
+
+    Parameters
+    ----------
+    lamb : float, optional
+        Regularization weight, by default 1.0.
+    """
+    def __init__(self, lamb: float = 1.0) -> None:
         super(EvidenceRegressionLoss, self).__init__()
         self.lamb = lamb
 
-    def forward(self, dist_params, y):
+    def forward(self, dist_params: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass of the loss function for evidential regression model
+        Computes the evidential regression loss.
+
         Parameters
         ----------
-        dist_params : tuple
-            Tuple of parameters of the Normal Inverse Gamma distribution
-        y: torch.Tensor
-            Target values for the regression task
+        dist_params : Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Normal Inverse Gamma distribution parameters.
+        y : torch.Tensor
+            Target values.
 
         Returns
         -------
         torch.Tensor
-            Evidential Regression Loss
+            Computed loss.
         """
         loss = nig_nll(*dist_params, y) + self.lamb * nig_reg(*dist_params, y)
         return loss
 
 
 def build_loss(
-    loss,
-    reduction="none",
-    lamb=1e-2,
-    mt=False,
-    **kwargs,
-):
+    loss: str,
+    reduction: str = "none",
+    lamb: float = 1e-2,
+    mt: bool = False,
+    **kwargs
+) -> nn.Module:
+    """
+    Constructs and returns the specified loss function.
+
+    Parameters
+    ----------
+    loss : str
+        Type of loss function.
+    reduction : str, optional
+        Reduction method ('none', 'mean', 'sum'), by default 'none'.
+    lamb : float, optional
+        Regularization weight, by default 1e-2.
+    mt : bool, optional
+        Whether to use multi-task loss, by default False.
+
+    Returns
+    -------
+    nn.Module
+        Instantiated loss function.
+    """
     if mt:
-        # if reduction != "none":
-        #     logger.warning(
-        #         f"reduction should only be none with multitask learning to be able to calculate loss per each task. {reduction=} is provided instead"
-        #     )
-        #     reduction = "none"
         return MultiTaskLoss(loss_type=loss, reduction=reduction, lamb=lamb, **kwargs)
 
     if loss.lower() in ["mse", "l2"]:
@@ -319,7 +382,6 @@ def build_loss(
     elif loss.lower() == "gaussnll":
         loss_fn = nn.GaussianNLLLoss(reduction=reduction, **kwargs)
     elif loss.lower() == "evidential_regression":
-        # TODO how to deal with reduction here on this one?
         loss_fn = EvidenceRegressionLoss(lamb=lamb)
     elif loss.lower() == "evidential_classification":
         loss_fn = EvidentialClassLoss(lamb=lamb)

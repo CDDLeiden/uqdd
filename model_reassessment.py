@@ -30,11 +30,26 @@ from uqdd.models.utils_metrics import process_preds, create_df_preds
 import ast
 
 
+# # Function to convert string representation of list to actual list of integers
+# def convert_to_list(val):
+#     if isinstance(val, str):
+#         return ast.literal_eval(val)
+#     return val
+
+
 # Function to convert string representation of list to actual list of integers
 def convert_to_list(val):
     if isinstance(val, str):
-        return ast.literal_eval(val)
-    return val
+        try:
+            parsed_val = ast.literal_eval(val)
+            if isinstance(parsed_val, list):  # Ensure the parsed value is a list
+                return parsed_val
+            else:
+                return []  # Return an empty list if not properly formatted
+        except (SyntaxError, ValueError):
+            print(f"Warning: Unable to parse value {val}, returning empty list.")
+            return []  # Return an empty list if parsing fails
+    return val  # Return as is if already a list
 
 
 # RUNS preprocessing
@@ -52,6 +67,7 @@ def preprocess_runs(
     # Load csv runs and model names file
     runs_df = load_df(
         runs_path,
+        # delimiter=",",
         converters={
             "chem_layers": convert_to_list,
             "prot_layers": convert_to_list,
@@ -190,8 +206,8 @@ def reassess_metrics(
         model_name = row["model_name"]
         # activity_type = row["activity_type"]
         run_name = row["run_name"]
-        if run_name.startswith("vivid"):
-            pass
+        # if run_name.startswith("vivid"):
+        #     pass
         # print(type(model_path))
         rowkwargs = row.to_dict()
         # popping the model_type
@@ -302,13 +318,15 @@ if __name__ == "__main__":
     activity_type = args.activity_type
     project_name = args.project_name
     runs_file_name = args.runs_file_name
-    ### Testing
-    # activity_type = "xc50"
-    # project_name = "runs_evidential_xc50"
-    # project_name = "runs_ensemble_mcdp_xc50"
-    # runs_file_name = "runs_evidential_xc50.csv"
-    # runs_file_name = "runs_ensemble_mcdp_xc50.csv"
 
+    ############################## Testing ################################
+    # activity_type = "kx"
+    # project_name = "runs_evidential_old_kx"
+    # # project_name = "runs_ensemble_mcdp_xc50"
+    # runs_file_name = "runs_evidential_old_kx.csv"
+    # # runs_file_name = "runs_ensemble_mcdp_xc50.csv"
+    # "/users/home/bkhalil/Repos/uqdd/uqdd/data/runs/runs_evidential_old_kx.csv"
+    #######################################################################
     data_name = "papyrus"
     type_n_targets = "all"
     project_out_name = f"reassess-{project_name}"
