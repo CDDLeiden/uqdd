@@ -1,3 +1,6 @@
+import logging
+from typing import Optional, Tuple, List
+
 import wandb
 import torch
 import torch.nn as nn
@@ -12,13 +15,54 @@ from uqdd.models.utils_train import (
 
 
 class BaselineDNN(nn.Module):
+    """
+    A baseline deep neural network (DNN) for regression or classification tasks using
+    chemical and (optionally) protein descriptors as input.
+
+    Parameters
+    ----------
+    config : dict, optional
+        Configuration dictionary containing model hyperparameters.
+    logger : logging.Logger, optional
+        Logger instance for debugging and info logging.
+    aleavar_layer_included : bool, optional
+        Whether to include an aleatoric uncertainty estimation layer (default: True).
+    **kwargs : dict
+        Additional keyword arguments for model configuration.
+
+    Attributes
+    ----------
+    config : dict
+        Stores model hyperparameters.
+    task_type : str
+        Type of task ('regression' or 'classification').
+    output_dim : int
+        Dimension of the model's output layer.
+    aleatoric : bool
+        Whether aleatoric uncertainty estimation is enabled.
+    chem_feature_extractor : nn.Sequential
+        MLP feature extractor for chemical descriptors.
+    prot_feature_extractor : Optional[nn.Sequential]
+        MLP feature extractor for protein descriptors (only for single-task learning).
+    regressor_or_classifier : nn.Sequential
+        MLP layers for regression or classification.
+    aleavar_layer : Optional[nn.Sequential]
+        Layer to estimate aleatoric uncertainty (if enabled).
+    output_layer : nn.Linear
+        Final layer mapping to output predictions.
+
+    Methods
+    -------
+    forward(inputs: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        Performs forward pass through the model.
+    """
     def __init__(
-        self,
-        config=None,
-        logger=None,
-        aleavar_layer_included=True,
-        **kwargs,
-    ):
+            self,
+            config: Optional[dict] = None,
+            logger: Optional[logging.Logger] = None,
+            aleavar_layer_included: bool = True,
+            **kwargs,
+    ) -> None:
         super(BaselineDNN, self).__init__()
         if config is None:
             config = get_model_config(model_type="baseline", **kwargs)
@@ -61,21 +105,42 @@ class BaselineDNN(nn.Module):
         self.apply(self.init_wt)
 
     @staticmethod
-    def init_wt(module):
+    def init_wt(module: nn.Module) -> None:
+        """
+        Initializes the weights of the given module using Xavier normal initialization.
+
+        Parameters
+        ----------
+        module : nn.Module
+            The module whose weights need to be initialized.
+        """
         if isinstance(module, nn.Linear):
             nn.init.xavier_normal_(module.weight, gain=nn.init.calculate_gain("relu"))
 
-    def forward(self, inputs):
+    def forward(
+        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Forward pass of the model.
+
+        Parameters
+        ----------
+        inputs : tuple of torch.Tensor
+            Tuple containing protein and chemical descriptors as tensors.
+
+        Returns
+        -------
+        output : torch.Tensor
+            Model predictions (e.g., activity scores or class logits).
+        var_ : torch.Tensor or None
+            Aleatoric uncertainty estimates (if enabled), otherwise None.
+        """
         prot_input, chem_input = inputs
         chem_features = self.chem_feature_extractor(chem_input)
         if not self.MT:
-            # prot_input, chem_input = inputs
-            # chem_features = self.chem_feature_extractor(chem_input)
             prot_features = self.prot_feature_extractor(prot_input)
             combined_features = torch.cat((chem_features, prot_features), dim=1)
         else:
-            # chem_input = inputs
-            # combined_features = self.chem_feature_extractor(chem_input)
             combined_features = chem_features
 
         _output = self.regressor_or_classifier(combined_features)
@@ -87,18 +152,28 @@ class BaselineDNN(nn.Module):
         )
 
         return output, var_
-        # if self.aleatoric:
-        #     output = self.output_layer(_output)
-        #     logvar = self.logvar_layer(_output)
-        #     return output, logvar
-        # else:
-        #     output = self.output_layer(_output)
-        # # TODO : check this with classification if necessary:
-        # # self.output_layer(_output)
-        # return output
 
     @staticmethod
-    def create_mlp(input_dim, layer_dims, dropout):  # , output_dim=None
+    def create_mlp(
+            input_dim: int, layer_dims: List[int], dropout: float
+    ) -> nn.Sequential:
+        """
+        Creates a multi-layer perceptron (MLP) with ReLU activations and dropout.
+
+        Parameters
+        ----------
+        input_dim : int
+            Input feature dimension.
+        layer_dims : list of int
+            List of layer dimensions.
+        dropout : float
+            Dropout rate.
+
+        Returns
+        -------
+        nn.Sequential
+            A PyTorch sequential model.
+        """
         modules = []
         for i in range(len(layer_dims)):
             if i == 0:
@@ -109,11 +184,25 @@ class BaselineDNN(nn.Module):
             modules.append(nn.ReLU())
             if dropout > 0:
                 modules.append(nn.Dropout(dropout))
-        # if output_dim:
-        #     modules.append(nn.Linear(layer_dims[-1], output_dim))
         return nn.Sequential(*modules)  # , layer_dims[-1]
 
-    def init_layers(self, config, chem_input_dim, prot_input_dim, output_dim):
+    def init_layers(
+        self, config: dict, chem_input_dim: Optional[int], prot_input_dim: Optional[int], output_dim: int
+    ) -> None:
+        """
+        Initializes the feature extractors and regressor/classifier layers.
+
+        Parameters
+        ----------
+        config : dict
+            Model configuration dictionary.
+        chem_input_dim : Optional[int]
+            Input dimension for chemical features.
+        prot_input_dim : Optional[int]
+            Input dimension for protein features (None for multitask learning).
+        output_dim : int
+            Output dimension for the model.
+        """
         # Chemical feature extractor
         chem_layers = config["chem_layers"]
         self.chem_feature_extractor = self.create_mlp(
@@ -156,36 +245,46 @@ class BaselineDNN(nn.Module):
                 nn.Linear(regressor_layers[-1], output_dim),
                 nn.Softplus(),  # TODO questionable
             )
-        # if self.aleatoric:
-        #     self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
-        #     self.logvar_layer = nn.Sequential(
-        #         nn.Linear(regressor_layers[-1], output_dim),
-        #         nn.Softplus()
-        #     )
-        #
-        # else:
-        #     self.output_layer = nn.Linear(regressor_layers[-1], output_dim)
-        # self.logger.debug(f"Output dimension: {output_dim}")
 
 
-def run_baseline(config=None):
-    # if config is None and wandb.config is not None:
-    #     config = wandb.config
-    # best_model, _, _, _, _ = train_model_e2e(
+def run_baseline(config: Optional[dict] = None) -> nn.Module:
+    """
+    Runs training for the baseline model and returns the trained model.
+
+    Parameters
+    ----------
+    config : Optional[dict], optional
+        Configuration dictionary for model training, by default None.
+
+    Returns
+    -------
+    nn.Module
+        Trained baseline DNN model.
+    """
     best_model, _, _, _ = train_model_e2e(
         config,
         model=BaselineDNN,
         model_type="baseline",
         logger=LOGGER,
-        # tracker="none-test",
     )
 
     return best_model
 
 
-def run_baseline_wrapper(
-    **kwargs,
-):
+def run_baseline_wrapper(**kwargs) -> nn.Module:
+    """
+    Wrapper function for running the baseline model with logging.
+
+    Parameters
+    ----------
+    **kwargs : dict
+        Keyword arguments for model configuration.
+
+    Returns
+    -------
+    nn.Module
+        Trained baseline model.
+    """
     global LOGGER
     LOGGER = create_logger("baseline", file_level="debug", stream_level="info")
 
@@ -193,7 +292,21 @@ def run_baseline_wrapper(
     return run_baseline(config=config)
 
 
-def run_baseline_hyperparam(**kwargs):
+def run_baseline_hyperparam(**kwargs) -> None:
+    """
+    Runs a hyperparameter sweep for the baseline model using Weights & Biases.
+
+    Parameters
+    ----------
+    **kwargs : dict
+        Keyword arguments including:
+        - `sweep_count` (int): Number of sweep runs.
+        - `wandb_project_name` (str): Name of the Weights & Biases project.
+
+    Returns
+    -------
+    None
+    """
     global LOGGER
     LOGGER = create_logger(
         name="baseline-sweep", file_level="debug", stream_level="info"
@@ -215,7 +328,6 @@ def run_baseline_hyperparam(**kwargs):
     wandb.agent(sweep_id, function=run_baseline, count=sweep_count)
 
 
-#
 # if __name__ == "__main__":
 #     data_name = "papyrus"
 #     n_targets = -1
@@ -263,545 +375,3 @@ def run_baseline_hyperparam(**kwargs):
 #         wandb_project_name=wandb_project_name,
 #     )
 #     print("Done")
-
-
-#
-# def _run_baseline_sweeper(
-#     sweep_config=None,
-#     sweep_count=1,
-#     data_name="papyrus",
-#     activity_type="xc50",
-#     n_targets=-1,
-#     descriptor_protein=None,
-#     descriptor_chemical=None,
-#     median_scaling=False,
-#     split_type="random",
-#     ext="pkl",
-#     task_type="regression",
-#     wandb_project_name=f"{TODAY}-baseline-sweep",
-#     **kwargs,
-# ):
-#     logger = create_logger(
-#         name="baseline-sweep", file_level="debug", stream_level="info"
-#     )
-#     sweep_config = (
-#         get_sweep_config("baseline", **kwargs) if not sweep_config else sweep_config
-#     )
-#     wandb.init(dir=WANDB_DIR, mode=WANDB_MODE)
-#     sweep_id = wandb.sweep(
-#         sweep_config,
-#         project=wandb_project_name,
-#     )
-#     wandb_train_func = partial(
-#         run_baseline,
-#         # config=sweep_config,
-#         data_name=data_name,
-#         activity_type=activity_type,
-#         n_targets=n_targets,
-#         descriptor_protein=descriptor_protein,
-#         descriptor_chemical=descriptor_chemical,
-#         median_scaling=median_scaling,
-#         # label_scaling_func=label_scaling_func,
-#         split_type=split_type,
-#         ext=ext,
-#         task_type=task_type,
-#         wandb_project_name=wandb_project_name,
-#         logger=logger,
-#     )
-#
-#     wandb.agent(sweep_id, function=wandb_train_func, count=sweep_count)
-#     # wandb.agent(sweep_id, function=run_baseline, count=sweep_count,  )
-#
-#     wandb.finish()
-
-#
-# def main():
-#     parser = argparse.ArgumentParser(description="Baseline Model Running")
-#     parser.add_argument(
-#         "--aleatoric",
-#         type=bool,
-#         default=True,
-#         help="Aleatoric inference"
-#     )
-#     parser.add_argument(
-#         "--data_name",
-#         type=str,
-#         default="papyrus",
-#         choices=["papyrus", "tdc", "other"],
-#         help="Data name argument",
-#     )
-#     parser.add_argument(
-#         "--activity_type",
-#         type=str,
-#         default="xc50",
-#         choices=["xc50", "kx"],
-#         help="Activity argument",
-#     )
-#     parser.add_argument(
-#         "--n_targets",
-#         type=int,
-#         default=-1,
-#         help="Number of targets argument (default=-1 for all targets)",
-#     )
-#     parser.add_argument(
-#         "--descriptor_protein",
-#         type=str,
-#         default=None,
-#         choices=[
-#             None,
-#             "ankh-base",
-#             "ankh-large",
-#             "unirep",
-#             "protbert",
-#             "protbert_bfd",
-#             "esm1_t34",
-#             "esm1_t12",
-#             "esm1_t6",
-#             "esm1b",
-#             "esm_msa1",
-#             "esm_msa1b",
-#             "esm1v",
-#         ],
-#         help="Protein descriptor argument",
-#     )
-#     parser.add_argument(
-#         "--descriptor_chemical",
-#         type=str,
-#         default="ecfp2048",
-#         choices=[
-#             "ecfp1024",
-#             "ecfp2048",
-#             "mold2",
-#             "mordred",
-#             "cddd",
-#             "fingerprint",  # "moldesc"
-#         ],
-#         help="Chemical descriptor argument",
-#     )
-#     parser.add_argument(
-#         "--median_scaling",
-#         type=bool,
-#         default=False,
-#         help="Label Median scaling function argument",
-#     )
-#     # parser.add_argument(
-#     #     "--label-scaling-func",
-#     #     type=str,
-#     #     default=None,
-#     #     choices=[None, "median", "standard", "minmax", "robust"],
-#     #     help="Label scaling function argument",
-#     # )
-#     parser.add_argument(
-#         "--split_type",
-#         type=str,
-#         default="random",
-#         choices=["random", "scaffold", "time", "scaffold_cluster"],
-#         help="Split argument",
-#     )
-#     parser.add_argument(
-#         "--ext",
-#         type=str,
-#         default="pkl",
-#         choices=["pkl", "parquet", "csv", "feather"],
-#         help="File extension argument",
-#     )
-#     parser.add_argument(
-#         "--task_type",
-#         type=str,
-#         default="regression",
-#         choices=["regression", "classification"],
-#         help="Task type argument",
-#     )
-#     parser.add_argument(
-#         "--wandb-project-name",
-#         type=str,
-#         default="baseline-test",
-#         help="Wandb project name argument",
-#     )
-#     parser.add_argument(
-#         "--sweep-count",
-#         type=int,
-#         default=None,
-#         help="Sweep count argument",
-#     )
-#     # take chem layers as list input
-#     parser.add_argument(
-#         "--chem_layers",
-#         type=parse_list,
-#         default=None,
-#         help="Chem layers sizes",
-#     )
-#     parser.add_argument(
-#         "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
-#     )
-#     parser.add_argument(
-#         "--regressor_layers",
-#         type=parse_list,
-#         default=None,
-#         help="Regressor layers sizes",
-#     )
-#     parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
-#     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
-#     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
-#     parser.add_argument(
-#         "--early_stop", type=int, default=None, help="Early stopping patience"
-#     )
-#     parser.add_argument("--loss", type=str, default=None, help="Loss function")
-#     parser.add_argument(
-#         "--loss_reduction", type=str, default=None, help="Loss reduction method"
-#     )
-#     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
-#     parser.add_argument("--lr", type=float_or_none, default=None, help="Learning rate")
-#     parser.add_argument(
-#         "--weight_decay", type=float_or_none, default=None, help="Weight decay rate"
-#     )
-#     parser.add_argument(
-#         "--lr_scheduler", type=str, default=None, help="LR scheduler type"
-#     )
-#     parser.add_argument(
-#         "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
-#     )
-#     parser.add_argument(
-#         "--lr_scheduler_factor", type=float_or_none, default=None, help="LR scheduler factor",
-#     )
-#     parser.add_argument(
-#         "--max_norm", type=float_or_none, default=None, help="Max norm for gradient clipping" #, choices=[None, 10.0, 50.0]
-#     )
-#
-#     args = parser.parse_args()
-#     # Construct kwargs, excluding arguments that were not provided
-#     kwargs = {k: v for k, v in vars(args).items() if v is not None}
-#
-#     sweep_count = args.sweep_count
-#     if sweep_count is not None and sweep_count > 0:
-#         run_baseline_hyperparam(
-#             **kwargs,
-#         )
-#
-#     else:
-#         run_baseline_wrapper(
-#             **kwargs,
-#         )
-#
-#
-
-
-# def _run_baseline(
-#     datasets=None,
-#     config=None,
-#     activity="xc50",
-#     split="random",
-#     wandb_project_name=f"{TODAY}-baseline",
-#     seed=42,
-#     **kwargs,
-# ):
-#     set_seed(seed)
-#     # Load config
-#     config = get_model_config(config=config, activity=activity, split=split, **kwargs)
-#
-#     if datasets is None:
-#         # TODO fix this
-#         datasets = get_datasets(activity=activity, split=split)
-#
-#     with wandb.init(
-#         dir=LOGS_DIR, mode=WANDB_MODE, project=wandb_project_name, config=config
-#     ):
-#         config = wandb.config
-#         # Load the dataset
-#         train_loader, val_loader, test_loader = build_loader(
-#             datasets, config.batch_size, config.input_dim
-#         )
-#
-#         # Train the model
-#         best_model, loss_fn = train_model(
-#             train_loader, val_loader, config=config, seed=seed
-#         )
-#
-#         # Testing metrics on the best model
-#         test_loss, test_rmse, test_r2, test_evs = evaluate(
-#             best_model, test_loader, loss_fn
-#         )
-#
-#
-# def _run_baseline_hyperparam(
-#     config=None,
-#     activity="xc50",
-#     split="random",
-#     wandb_project_name=f"{TODAY}-baseline-hyperparam",
-#     sweep_count=1,
-#     seed=42,
-#     **kwargs,
-# ):
-#     set_seed(seed)
-#     datasets = get_datasets(activity=activity, split=split)
-#     sweep_config = get_sweep_config(
-#         config=config, activity=activity, split=split, **kwargs
-#     )
-#
-#     sweep_id = wandb.sweep(
-#         sweep_config,
-#         project=wandb_project_name,
-#     )
-#
-#     wandb_train_func = partial(
-#         run_baseline,
-#         datasets=datasets,
-#         activity=activity,
-#         split=split,
-#         config=sweep_config,
-#         wandb_project_name=wandb_project_name,
-#         seed=42,
-#     )
-#     wandb.agent(sweep_id, function=wandb_train_func, count=sweep_count)
-#
-#
-# if __name__ == "__main__":
-#     test_loss = run_baseline()
-
-# if data_name == "papyrus":
-#     from uqdd.data.data_papyrus import get_datasets
-# elif data_name == "tdc":
-#     from uqdd.data.data_tdc import get_datasets
-# elif data_name == "other":
-#     raise NotImplementedError
-# else:
-#     raise ValueError("Invalid data_name")
-
-# class MTBaselineDNN(nn.Module):
-#     def __init__(self, config, **kwargs):
-#         super(MTBaselineDNN, self).__init__()
-#         input_dim = config["input_dim"]
-#         layers = config["model_config"]["layers"]
-#         dropout = config["model_config"]["dropout"]
-#         num_tasks = config["num_tasks"]
-#
-#         modules = [nn.Linear(input_dim, layers[0]), nn.ReLU()]
-#         for i in range(len(layers) - 1):
-#             modules.append(nn.Linear(layers[i], layers[i + 1]))
-#             modules.append(nn.ReLU())
-#             if dropout > 0:
-#                 modules.append(nn.Dropout(dropout))
-#
-#         self.feature_extractor = nn.Sequential(*modules)
-#         self.task_specific = nn.Linear(layers[-1], num_tasks)
-#         self.apply(self.init_wt)
-#
-#     @staticmethod
-#     def init_wt(module):
-#         if isinstance(module, nn.Linear):
-#             nn.init.xavier_normal_(module.weight, gain=nn.init.calculate_gain("relu"))
-#
-#     def forward(self, x):
-#         features = self.feature_extractor(x)
-#         outputs = self.task_specific(features)
-#         return outputs
-
-
-# class BaselineDNN(nn.Module):
-#     def __init__(
-#         self,
-#         chem_input_dim=None,
-#         prot_input_dim=None,
-#         task_type="regression",
-#         n_targets=-1,
-#         **kwargs,
-#     ):
-#         super(BaselineDNN, self).__init__()
-#         assert task_type in [
-#             "regression",
-#             "classification",
-#         ], "task_type must be either 'regression' or 'classification'"
-#         self.task_type = task_type
-#         self.MT = n_targets > 0
-#         self.feature_extractors = {}
-#
-#         self.log = create_logger(
-#             name="baseline", file_level="debug", stream_level="info"
-#         )
-#         config = get_config("baseline", **kwargs)
-#
-#         # Initialize feature extractors
-#         self.init_feature_extractors(config, chem_input_dim, prot_input_dim)
-#
-#         # Initialize regressor or classifier
-#         self.init_regressor_or_classifier(config, n_targets)
-#
-#         # Unpack configuration for chemical and protein branches
-#         chem_input_dim = (
-#             config["chem_input_dim"] if not chem_input_dim else chem_input_dim
-#         )
-#         chem_layers = config["chem_model_config"]["layers"]
-#
-#         prot_input_dim = (
-#             config["prot_input_dim"] if not prot_input_dim else prot_input_dim
-#         )
-#         prot_layers = config["prot_model_config"]["layers"]
-#         dropout = config["model_config"]["dropout"]
-#         regressor_layers = config["regressor_config"]["layers"]
-#
-#         # Chemical compound feature extractor
-#         chem_modules = [nn.Linear(chem_input_dim, chem_layers[0]), nn.ReLU()]
-#         for i in range(len(chem_layers) - 1):
-#             chem_modules.append(nn.Linear(chem_layers[i], chem_layers[i + 1]))
-#             chem_modules.append(nn.ReLU())
-#             if dropout > 0:
-#                 chem_modules.append(nn.Dropout(dropout))
-#         self.chem_feature_extractor = nn.Sequential(*chem_modules)
-#         self.log.debug(f"Chemical feature extractor: {chem_input_dim} -> {chem_layers}")
-#
-#         if not self.MT:
-#             # Protein feature extractor
-#             prot_modules = [nn.Linear(prot_input_dim, prot_layers[0]), nn.ReLU()]
-#             for i in range(len(prot_layers) - 1):
-#                 prot_modules.append(nn.Linear(prot_layers[i], prot_layers[i + 1]))
-#                 prot_modules.append(nn.ReLU())
-#                 if dropout > 0:
-#                     prot_modules.append(nn.Dropout(dropout))
-#             self.prot_feature_extractor = nn.Sequential(*prot_modules)
-#
-#             # Regressor construction
-#             combined_input_dim = chem_layers[-1] + prot_layers[-1]
-#             output_dim = 1 if task_type == "regression" else 2
-#             regressor_modules = [
-#                 nn.Linear(combined_input_dim, regressor_layers[0]),
-#                 nn.ReLU(),
-#             ]
-#             for i in range(len(regressor_layers) - 1):
-#                 regressor_modules.append(
-#                     nn.Linear(regressor_layers[i], regressor_layers[i + 1])
-#                 )
-#                 regressor_modules.append(nn.ReLU())
-#                 if (
-#                     dropout > 0 and i < len(regressor_layers) - 2
-#                 ):  # No dropout before final layer
-#                     regressor_modules.append(nn.Dropout(dropout))
-#
-#             # Final layer
-#             regressor_modules.append(nn.Linear(regressor_layers[-1], output_dim))
-#
-#             self.regressor = nn.Sequential(*regressor_modules)
-#
-#         else:
-#             self.regressor = nn.Linear(chem_layers[-1], n_targets)
-#
-#         self.apply(self.init_wt)
-#
-#     @staticmethod
-#     def init_wt(module):
-#         if isinstance(module, nn.Linear):
-#             nn.init.xavier_normal_(module.weight, gain=nn.init.calculate_gain("relu"))
-#
-#     def forward(self, chem_input, prot_input):
-#         chem_features = self.chem_feature_extractor(chem_input)
-#         if not self.MT:
-#             prot_features = self.prot_feature_extractor(prot_input)
-#             combined_features = torch.cat((chem_features, prot_features), dim=1)
-#         else:
-#             combined_features = chem_features
-#         output = self.regressor(combined_features)
-#         return output
-#
-#     @staticmethod
-#     def create_feature_extractor(input_dim, layer_dims, dropout):
-#         modules = [nn.Linear(input_dim, layer_dims[0]), nn.ReLU()]
-#         for i in range(len(layer_dims) - 1):
-#             modules += [nn.Linear(layer_dims[i], layer_dims[i + 1]), nn.ReLU()]
-#             if dropout > 0:
-#                 modules.append(nn.Dropout(dropout))
-#         return nn.Sequential(*modules)
-#
-#     def init_feature_extractors(self, config, chem_input_dim, prot_input_dim):
-#         # Chemical feature extractor
-#         chem_layers = config["chem_model_config"]["layers"]
-#         self.feature_extractors["chem"] = self.create_feature_extractor(
-#             chem_input_dim, chem_layers, config["model_config"]["dropout"]
-#         )
-#
-#         if not self.MT:
-#             # Protein feature extractor (only for single-task learning)
-#             prot_layers = config["prot_model_config"]["layers"]
-#             self.feature_extractors["prot"] = self.create_feature_extractor(
-#                 prot_input_dim, prot_layers, config["model_config"]["dropout"]
-#             )
-#
-#     def init_regressor_or_classifier(self, config, n_targets):
-#
-#         output_dim = n_targets if self.MT else 1 if self.task_type == "regression" else 2
-#         if not self.MT:
-#             # Combined input dimension for STL
-#             chem_dim = config["chem_model_config"]["layers"][-1]
-#             prot_dim = config["prot_model_config"]["layers"][-1]
-#             combined_input_dim = chem_dim + prot_dim
-#         else:
-#             # Only chemical features for MTL
-#             combined_input_dim = config["chem_model_config"]["layers"][-1]
-#
-#         self.regressor_or_classifier = nn.Linear(combined_input_dim, output_dim)
-#
-#     # if data_name == "papyrus":
-#     #     from uqdd.data.data_papyrus import get_datasets
-#     # elif data_name == "tdc":
-#     #     from uqdd.data.data_tdc import get_datasets
-#     # elif data_name == "other":
-#     #     raise NotImplementedError
-#     # else:
-#     #     raise ValueError("Invalid data_name")
-# seed = 42
-# set_seed(seed)
-# config = get_model_config("baseline", **kwargs) if not config else config
-# logger = (
-#     create_logger(name="baseline", file_level="debug", stream_level="info")
-#     if not logger
-#     else logger
-# )
-#
-# start_time = datetime.now()
-# logger.info(f"Baseline - start time: {start_time}")
-#
-# # get datasets
-# datasets = build_datasets(
-#     data_name=data_name,
-#     n_targets=n_targets,
-#     activity_type=activity_type,
-#     split_type=split_type,
-#     desc_prot=descriptor_protein,
-#     desc_chem=descriptor_chemical,
-#     label_scaling_func=label_scaling_func,
-#     ext=ext,
-#     logger=logger,
-# )
-# # build dataloaders
-#
-# # get descriptor lengths
-# desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein, descriptor_chemical)
-# # desc_prot_len, desc_chem_len = get_desc_len_from_dataset(datasets["train"])
-# logger.info(f"Chemical descriptor {descriptor_chemical} of length: {desc_chem_len}")
-# logger.info(f"Protein descriptor {descriptor_protein} of length: {desc_prot_len}")
-#
-# def run_baseline(
-#     config=None,
-#     data_kwargs=None,
-#     wandb_project_name=f"{TODAY}-baseline",
-#     logger=None,
-#     **kwargs,
-# ):
-#     config = get_model_config("baseline", **kwargs) if not config else config
-#     desc_chem_len, desc_prot_len = get_desc_len()
-#     # Initiate the model
-#     model = BaselineDNN(
-#         config=config,
-#         chem_input_dim=desc_chem_len,
-#         prot_input_dim=desc_prot_len,
-#         task_type=task_type,
-#         n_targets=n_targets,
-#     ).to(DEVICE)
-#     baseline_model =
-#     best_model, test_loss = run_model_e2e(
-#         model,
-#         "baseline",
-#         config,
-#         data_kwargs,
-#         wandb_project_name,
-#         logger,
-#     )
-#

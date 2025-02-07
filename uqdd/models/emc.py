@@ -1,11 +1,10 @@
-import numpy as np
+from typing import Tuple, Optional
 import wandb
 import torch
 import torch.nn as nn
 
-from uqdd import DEVICE, WANDB_DIR, WANDB_MODE
+from uqdd import DEVICE
 from uqdd.models.evidential import EvidentialDNN, ev_predict
-from uqdd.models.ensemble import process_results_arrs
 from uqdd.models.mcdropout import enable_dropout
 from uqdd.utils import create_logger
 
@@ -13,15 +12,40 @@ from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
     recalibrate_model,
-    assign_wandb_tags,
     get_dataloader,
-    post_training_save_model,
 )
 
 from uqdd.models.utils_models import get_model_config, calculate_means
 
 
-def emc_predict(ev_model, dataloader, num_mc_samples=10, device=DEVICE):
+def emc_predict(
+    ev_model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    num_mc_samples: int = 10,
+    device: torch.device = DEVICE
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
+
+    Parameters
+    ----------
+    ev_model : nn.Module
+        The evidential model with dropout layers.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader for the dataset to be evaluated.
+    num_mc_samples : int, optional
+        Number of Monte Carlo forward passes, by default 10.
+    device : torch.device, optional
+        The device to run the model on, by default DEVICE.
+
+    Returns
+    -------
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        - Stacked outputs from MC samples [batch_size, num_tasks, num_mc_samples]
+        - Labels [batch_size, num_tasks]
+        - Aleatoric uncertainties [batch_size, num_tasks, num_mc_samples]
+        - Epistemic uncertainties [batch_size, num_tasks, num_mc_samples]
+    """
     outputs_all, aleatoric_all, epistemic_all = [], [], []  # targets_all = []
     for _ in range(num_mc_samples):
         ev_model.eval()
@@ -40,10 +64,25 @@ def emc_predict(ev_model, dataloader, num_mc_samples=10, device=DEVICE):
     return outputs_all.cpu(), labels.cpu(), aleatoric_all.cpu(), epistemic_all.cpu()
 
 
-def run_emc(config=None):
+def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, dict]:
+    """
+    Trains and evaluates an Evidential Monte Carlo (EMC) model.
+
+    Parameters
+    ----------
+    config : dict, optional
+        Configuration dictionary for training and evaluation, by default None.
+
+    Returns
+    -------
+    Tuple[nn.Module, nn.Module, dict, dict]
+        - The trained EMC model.
+        - The recalibration model.
+        - Evaluation metrics.
+        - Generated plots.
+    """
     logger = LOGGER
     num_mc_samples = config.get("num_mc_samples", 10)
-
     # Train EvDNN
     best_model, config, _, _ = train_model_e2e(
         config,
@@ -52,12 +91,10 @@ def run_emc(config=None):
         logger=LOGGER,
     )
     dataloaders = get_dataloader(config, device=DEVICE, logger=logger)
-
     preds, labels, alea_vars, epi_vars = emc_predict(
         best_model, dataloaders["test"], num_mc_samples=num_mc_samples, device=DEVICE
     )
     preds, alea_vars, epi_vars = calculate_means(preds, alea_vars, epi_vars)
-
     # Then comes the predict metrics part
     metrics, plots, uct_logger = evaluate_predictions(
         config,
@@ -69,7 +106,6 @@ def run_emc(config=None):
         epi_vars,
         wandb_push=False,
     )
-
     # RECALIBRATION
     preds_val, labels_val, alea_vars_val, epi_vars_val = emc_predict(
         best_model, dataloaders["val"], num_mc_samples=num_mc_samples, device=DEVICE
@@ -89,14 +125,28 @@ def run_emc(config=None):
         epi_test=epi_vars,
         uct_logger=uct_logger,
     )
-
     uct_logger.wandb_log()
     wandb.finish()
-
     return best_model, iso_recal_model, metrics, plots
 
 
 def run_emc_wrapper(**kwargs):
+    """
+    Wrapper function for running an EMC model.
+
+    Parameters
+    ----------
+    kwargs : dict
+        Additional configuration parameters.
+
+    Returns
+    -------
+    Tuple[nn.Module, nn.Module, dict, dict]
+        - The trained EMC model.
+        - The recalibration model.
+        - Evaluation metrics.
+        - Generated plots.
+    """
     global LOGGER
     LOGGER = create_logger(name="emc", file_level="debug", stream_level="info")
     config = get_model_config(model_type="emc", **kwargs)
@@ -120,38 +170,3 @@ def run_emc_wrapper(**kwargs):
 #         num_mc_samples=5,
 #     )
 #     print("done")
-
-# def emc_predict(model, dataloader, num_mc_samples=10, device=DEVICE):
-#     model.train()  # Enable dropout
-#     outputs_all = []
-#     targets_all = []
-#     aleatoric_all = []
-#     ev_epistemic_all = []
-#
-#     # Here we need to selectively set batchnorm layers to eval mode for not affecting the running mean
-#     for m in model.modules():
-#         if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-#             m.eval()
-#
-#     with torch.no_grad():
-#         for _ in range(num_mc_samples):
-#             outputs, targets, alea, ev_epistemic = ev_predict(
-#                 model, dataloader, device=device, set_on_eval=False
-#             )
-#             outputs_all.append(outputs)
-#             targets_all.append(targets)
-#             aleatoric_all.append(alea)
-#             ev_epistemic_all.append(ev_epistemic)
-#
-#     # stack on dim 2
-#     outputs_all = torch.stack(outputs_all, dim=2)
-#     targets_all = torch.stack(targets_all, dim=2)
-#     aleatoric_all = torch.stack(aleatoric_all, dim=2)
-#     ev_epistemic_all = torch.stack(ev_epistemic_all, dim=2)
-#
-#     return (
-#         outputs_all.cpu(),
-#         targets_all.cpu(),
-#         aleatoric_all.cpu(),
-#         ev_epistemic_all.cpu(),
-#     )

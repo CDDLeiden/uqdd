@@ -1,8 +1,8 @@
 import argparse
 
 from uqdd.models.baseline import run_baseline_wrapper, run_baseline_hyperparam
-from uqdd.models.ensemble import run_ensemble_wrapper, run_ensemble_hyperparm
-from uqdd.models.mcdropout import run_mcdropout_wrapper, run_mcdropout_hyperparm
+from uqdd.models.ensemble import run_ensemble_wrapper
+from uqdd.models.mcdropout import run_mcdropout_wrapper
 from uqdd.models.evidential import run_evidential_wrapper, run_evidential_hyperparam
 from uqdd.models.eoe import run_eoe_wrapper
 from uqdd.models.emc import run_emc_wrapper
@@ -18,9 +18,7 @@ query_dict = {
     "baseline": run_baseline_wrapper,
     "baseline_hyperparam": run_baseline_hyperparam,
     "ensemble": run_ensemble_wrapper,
-    "ensemble_hyperparam": run_ensemble_hyperparm,
     "mcdropout": run_mcdropout_wrapper,
-    "mcdropout_hyperparam": run_mcdropout_hyperparm,
     "evidential": run_evidential_wrapper,
     "evidential_hyperparam": run_evidential_hyperparam,
     "eoe": run_eoe_wrapper,
@@ -59,11 +57,6 @@ def main():
         default=False,
         help="Label Median scaling function argument",
     )
-    # parser.add_argument(
-    #     "--median_scaling",
-    #     action="store_true",
-    #     help="Use median scaling",
-    # )
     parser.add_argument(
         "--task_type",
         type=str,
@@ -151,8 +144,8 @@ def main():
     parser.add_argument(
         "--sweep",
         type=bool,
-        # default=False,
-        default=True,
+        default=False,
+        # default=True,
         help="Sweep argument",
     )
     parser.add_argument(
@@ -272,16 +265,10 @@ def main():
     seed = args.seed
 
     if sweep_count is not None:
-        # if args.model in ["baseline", "ensemble", "mcdropout", "evidential"]:
         if args.model in ["baseline", "evidential"]:
-            print("HEREEEEEEEEEEEEE")
-            # print(kwargs)
             query_dict[f"{args.model}_hyperparam"](**kwargs)
         else:
-            print(
-                "Sweep count only supported for baseline and evidential models."
-                # "Sweep count only supported for baseline, ensemble, evidential and mcdropout models."
-            )
+            print("Sweep count only supported for baseline and evidential models.")
     else:
         if repeats > 1:
             for i in range(repeats):
@@ -293,7 +280,6 @@ def main():
                     if args.model not in ["ensemble", "eoe"]
                     else int(args.ensemble_size)
                 )
-
         else:
             query_dict[args.model](**kwargs)
 

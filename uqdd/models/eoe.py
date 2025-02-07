@@ -1,4 +1,3 @@
-import numpy as np
 import wandb
 import torch
 import torch.nn as nn
@@ -19,9 +18,31 @@ from uqdd.models.utils_train import (
 
 from uqdd.models.utils_models import get_model_config, set_seed, calculate_means
 
+from typing import Tuple, Optional, Dict, Any, List
+
 
 class EoEDNN(nn.Module):
-    def __init__(self, config=None, model_list=None, **kwargs):
+    """
+    Evidential Deep Ensemble (EoE) Model.
+
+    This model consists of multiple `EvidentialDNN` models, forming an ensemble to
+    improve prediction uncertainty estimation.
+
+    Parameters
+    ----------
+    config : Optional[Dict[str, Any]], optional
+        Configuration dictionary containing model hyperparameters, by default None.
+    model_list : Optional[List[nn.Module]], optional
+        Pretrained list of `EvidentialDNN` models for ensemble construction, by default None.
+    **kwargs
+        Additional parameters for initializing individual `EvidentialDNN` models.
+    """
+
+    def __init__(
+            self, config: Optional[Dict[str, Any]] = None,
+            model_list: Optional[List[nn.Module]] = None,
+            **kwargs
+    ):
         super(EoEDNN, self).__init__()
         self.model_list = model_list
         self.config = config
@@ -44,7 +65,24 @@ class EoEDNN(nn.Module):
                 seed += 1
         self.models = nn.ModuleList(models)
 
-    def forward(self, inputs):
+    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Forward pass through the ensemble of evidential neural networks.
+
+        Parameters
+        ----------
+        inputs : Tuple[torch.Tensor, torch.Tensor]
+            Tuple containing (protein features, chemical features).
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Returns the stacked ensemble predictions for:
+            - Mean `mu`
+            - Variance `v`
+            - Alpha parameter `alpha`
+            - Beta parameter `beta`
+        """
         # outputs = []
         mus, vs, alphas, betas = [], [], [], []
         for model in self.models:
@@ -63,7 +101,23 @@ class EoEDNN(nn.Module):
         return mus, vs, alphas, betas
 
 
-def run_eoe(config=None):
+def run_eoe(config: Optional[Dict[str, Any]] = None) -> Tuple[nn.Module, Any, Dict[str, Any], Dict[str, Any]]:
+    """
+    Train an ensemble of Evidential Neural Networks (EoE) and perform uncertainty quantification.
+
+    Parameters
+    ----------
+    config : Optional[Dict[str, Any]], optional
+        Configuration dictionary containing training hyperparameters, by default None.
+
+    Returns
+    -------
+    Tuple[EoEDNN, Any, Dict[str, Any], Dict[str, Any]]
+        - Trained `EoEDNN` model.
+        - Isotonic recalibration model.
+        - Dictionary containing evaluation metrics.
+        - Dictionary containing generated plots.
+    """
     ensemble_size = config.get("ensemble_size", 10)
     logger = LOGGER
     best_models = []
@@ -153,6 +207,22 @@ def run_eoe(config=None):
 
 
 def run_eoe_wrapper(**kwargs):
+    """
+    Wrapper function to initialize and train an Evidential Deep Ensemble (EoE).
+
+    Parameters
+    ----------
+    **kwargs
+        Additional configuration parameters.
+
+    Returns
+    -------
+    Tuple[EoEDNN, Any, Dict[str, Any], Dict[str, Any]]
+        - Trained `EoEDNN` model.
+        - Isotonic recalibration model.
+        - Dictionary containing evaluation metrics.
+        - Dictionary containing generated plots.
+    """
     global LOGGER
     LOGGER = create_logger(name="eoe", file_level="debug", stream_level="info")
     config = get_model_config(model_type="eoe", **kwargs)
@@ -177,77 +247,3 @@ def run_eoe_wrapper(**kwargs):
 #         epochs=5,
 #         seed=42,
 #     )
-
-# outputs = torch.stack(outputs, dim=2)
-# return outputs
-
-# preds, labels, alea, epistemic = eoe_predict(
-#     best_models, dataloaders["test"], device=DEVICE
-# )
-#
-# alea_mean = torch.mean(alea, dim=2)
-# epistemic_mean = torch.mean(epistemic, dim=2)
-# preds_mean = torch.mean(preds, dim=2)
-# labels_mean = torch.mean(labels, dim=2)
-# preds_val, labels_val, alea_val, epistemic_val = eoe_predict(
-#     eoe_model, dataloaders["val"], device=DEVICE
-# )
-# alea_mean_val = torch.mean(alea_val, dim=2)
-# epistemic_mean_val = torch.mean(epistemic_val, dim=2)
-# preds_mean_val = torch.mean(preds_val, dim=2)
-# labels_mean_val = torch.mean(labels_val, dim=2)
-# def eoe_predict(eoe_model_list, dataloader, device=DEVICE):
-#     outputs_list = []
-#     targets_list = []
-#     alea_list = []
-#     epistemic_list = []
-#
-#     outputs_, targets_, alea_, epistemic_ = ev_predict(
-#         eoe_model_list, dataloader, device
-#     )
-#
-#     for model in eoe_model_list:
-#         outputs, targets, alea, epistemic = ev_predict(model, dataloader, device)
-#         outputs_list.append(outputs)
-#         targets_list.append(targets)
-#         alea_list.append(alea)
-#         epistemic_list.append(epistemic)
-#
-#     outputs = torch.stack(outputs_list, dim=2)
-#     targets = torch.stack(targets_list, dim=2)
-#     alea = torch.stack(alea_list, dim=2)
-#     epistemic = torch.stack(epistemic_list, dim=2)
-#
-#     return outputs, targets, alea, epistemic
-
-# class EoEDNN(nn.Module):
-#     def __init__(self, config=None, model_list=None, **kwargs):
-#         super(EoEDNN, self).__init__()
-#         self.model_list = model_list
-#         self.config = config
-#         self.device = DEVICE
-#         self.ensemble_size = config.get("ensemble_size", 10)
-#         self.model_type = config.get("model_type", "eoe")
-#         self.logger = config.get("logger", None)
-#         self.tracker = config.get("tracker", "tensor")
-#
-#         if model_list is not None:
-#             models = model_list
-#         else:
-#             models = []
-#             seed = config.get("seed", 42)
-#             for _ in range(self.ensemble_size):
-#                 model = EvidentialDNN(config=config, **kwargs)
-#                 model.to(self.device)
-#                 set_seed(seed)
-#                 models.append(model)
-#                 seed += 1
-#         self.models = nn.ModuleList(models)
-#
-#     def forward(self, inputs):
-#         outputs = []
-#         for model in self.models:
-#             output = model(inputs)
-#             outputs.append(output)
-#         outputs = torch.stack(outputs, dim=2)
-#         return outputs
