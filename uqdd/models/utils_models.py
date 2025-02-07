@@ -2,7 +2,7 @@ import math
 import random
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any, List, Tuple, Union
 from collections import OrderedDict
 
 import numpy as np
@@ -114,14 +114,14 @@ def get_desc_len_from_dataset(dataset: torch.utils.data.Dataset) -> Tuple[int, i
 
 
 def get_desc_len(
-    *descriptors: str, logger: Optional[logging.Logger] = None
+    *descriptors: Optional[str], logger: Optional[logging.Logger] = None
 ) -> Tuple[int, ...]:
     """
     Retrieves descriptor lengths from the configuration.
 
     Parameters:
     -----------
-    descriptors : str
+    descriptors : Optional[str]
         Variable number of descriptor names for which lengths are required.
     logger : Optional[logging.Logger], default=None
         Logger for debugging information.
@@ -231,7 +231,7 @@ def build_datasets(
     task_type: str = "regression",
     ext: str = "pkl",
     logger: Optional[logging.Logger] = None,
-    device: str = DEVICE,
+    device: Union[str, torch.device] = DEVICE,
 ) -> Dict[str, torch.utils.data.Dataset]:
     """
     Builds datasets for training and evaluation.
