@@ -4,7 +4,8 @@ import torch
 import torch.nn as nn
 
 from uqdd import DEVICE
-from uqdd.models.evidential import EvidentialDNN, ev_predict
+from uqdd.models.evidential import EvidentialDNN, ev_predict, ev_predict_params_nll
+from uqdd.models.loss import nig_nll
 from uqdd.models.mcdropout import enable_dropout
 from uqdd.utils import create_logger
 
@@ -22,7 +23,7 @@ def emc_predict(
     ev_model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
     num_mc_samples: int = 10,
-    device: torch.device = DEVICE
+    device: torch.device = DEVICE,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
@@ -62,6 +63,37 @@ def emc_predict(
     epistemic_all = torch.stack(epistemic_all, dim=2)  # .mean(dim=2)
 
     return outputs_all.cpu(), labels.cpu(), aleatoric_all.cpu(), epistemic_all.cpu()
+
+
+def emc_predict_params_nll(
+    ev_model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    num_mc_samples: int = 10,
+    device: torch.device = DEVICE,
+):
+    # mus, vs, alphas, betas = [], [], [], []
+    test_nll = 0.0
+    for _ in range(num_mc_samples):
+        ev_model.eval()
+        enable_dropout(ev_model)
+
+        nll = ev_predict_params_nll(
+            ev_model, dataloader, device=device, set_on_eval=False
+        )
+
+        test_nll += nll
+        # mus.append(mu)
+        # vs.append(v)
+        # alphas.append(alpha)
+        # betas.append(beta)
+    return test_nll / num_mc_samples
+
+    # mus = torch.stack(mus, dim=2)
+    # vs = torch.stack(vs, dim=2)
+    # alphas = torch.stack(alphas, dim=2)
+    # betas = torch.stack(betas, dim=2)
+    #
+    # return mus.cpu(), vs.cpu(), alphas.cpu(), betas.cpu(), targets.cpu()
 
 
 def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, dict]:

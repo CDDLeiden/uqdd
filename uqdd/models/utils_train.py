@@ -453,6 +453,7 @@ def evaluate_predictions(
     export_preds: bool = True,
     verbose: bool = True,
     csv_path: Optional[str] = None,
+    nll: Optional[float] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
     """
     Evaluates predictions, computes uncertainty metrics, and optionally logs results.
@@ -538,6 +539,7 @@ def evaluate_predictions(
         y_eps=y_eps,
         task_name=task_name,
         figpath=figpath,
+        nll=nll,
     )
 
     # getting calibration props

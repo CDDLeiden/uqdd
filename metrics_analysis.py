@@ -945,7 +945,7 @@ def plot_calibration_data(
     base_path,
     save_dir=None,
     title="Calibration Plot",
-    color_name="tab10",
+    color_name="tab10_r",
     group_order=None,
 ):
     """
@@ -1020,7 +1020,7 @@ def plot_calibration_data(
     plt.ylim(0, 1)
 
     if save_dir:
-        plot_name = row["Activity"] + f"{title.replace(' ', '_')}.png"
+        plot_name = f"{title.replace(' ', '_')}"
         save_plot(plt.gcf(), save_dir, plot_name, tighten=True)
 
         # os.makedirs(save_dir, exist_ok=True)
@@ -1214,7 +1214,7 @@ def get_handles_labels(ax, group_order):
 def plot_rmse_rejection_curves(
     df,
     base_dir,
-    cmap="tab10",
+    cmap="tab10_r",
     save_dir_plot=None,
     add_to_title="",
     normalize_rmse=False,
@@ -1363,7 +1363,7 @@ def plot_auc_comparison(
     cmap="crest_r",
     save_dir=None,
     add_to_title="",
-    min_y_axis=0.5,
+    min_y_axis=0.0,
     hatches_dict=None,
     group_order=None,
 ):
@@ -1662,7 +1662,14 @@ if __name__ == "__main__":
     highly_correlated_uctmetrics_no_time = find_highly_correlated_metrics(
         df_no_time, uctmetrics, threshold=0.9, save_dir=save_dir_no_time, cmap=corr_cmap
     )
-    uctmetrics_uncorr = ["Miscalibration Area", "Sharpness", "CRPS", "NLL", "Interval"]
+    uctmetrics_uncorr = [
+        "Miscalibration Area",
+        "Sharpness",
+        "CRPS",
+        "NLL",
+        "Interval",
+    ]  #
+
     highly_correlated_uctmetrics_uncorr = find_highly_correlated_metrics(
         df_pcm, uctmetrics_uncorr, threshold=0.9, save_dir=save_dir, cmap=corr_cmap
     )
@@ -1698,6 +1705,40 @@ if __name__ == "__main__":
     plot_metrics(
         df_no_time,
         uctmetrics_uncorr,
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        hatches_dict=hatches_dict_no_time,
+        group_order=group_order_no_time,
+    )
+
+    # plot_metrics(df_pcm, uctmetrics_uncorr, cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+    plot_metrics(
+        df_no_time,
+        [
+            "Miscalibration Area",
+            "Sharpness",
+            "CRPS",
+        ],
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        hatches_dict=hatches_dict_no_time,
+        group_order=group_order_no_time,
+    )
+    plot_metrics(
+        df_no_time,
+        [
+            "NLL",
+            "Interval",
+        ],
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        hatches_dict=hatches_dict_no_time,
+        group_order=group_order_no_time,
+    )
+
+    plot_metrics(
+        df_no_time,
+        ["Miscalibration Area", "Sharpness", "CRPS", "Interval"],
         cmap=color_map,
         save_dir=save_dir_no_time,
         hatches_dict=hatches_dict_no_time,
@@ -1789,6 +1830,15 @@ if __name__ == "__main__":
                 hatches_dict=hatches_dict_no_time,
                 group_order=group_order_no_time,
             )
+            plot_auc_comparison(
+                stats_df,
+                cmap=color_map,
+                save_dir=save_dir_plot,
+                add_to_title="all" + add_to_title + "-min-0.5",
+                hatches_dict=hatches_dict_no_time,
+                group_order=group_order_no_time,
+                min_y_axis=0.5,
+            )
 
             save_stats_df(stats_df, save_dir_plot, add_to_title="all" + add_to_title)
 
@@ -1813,6 +1863,16 @@ if __name__ == "__main__":
                     add_to_title=name + add_to_title,
                     hatches_dict=hatches_dict_no_time,
                     group_order=group_order_no_time,
+                )
+
+                plot_auc_comparison(
+                    stats_df,
+                    cmap=color_map,
+                    save_dir=save_dir_plot,
+                    add_to_title=name + add_to_title + "-min-0.5",
+                    hatches_dict=hatches_dict_no_time,
+                    group_order=group_order_no_time,
+                    min_y_axis=0.5,
                 )
 
                 save_stats_df(stats_df, save_dir_plot, add_to_title=name + add_to_title)

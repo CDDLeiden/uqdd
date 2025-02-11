@@ -17,6 +17,7 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 
 from openpyxl import load_workbook
+from wandb import Image
 
 from uqdd import FIGS_DIR, DATA_DIR
 from matplotlib.ticker import MaxNLocator
@@ -789,17 +790,17 @@ def make_uct_plots(
 
     for plot_name, plot_func, kwargs in plot_functions:
         fig, ax = plt.subplots(figsize=(6, 4))
-        # if plot_name == "sharpness":
-        #     plot_func(y_std=y_std, n_subset=n_subset, ax=ax)
-        # else:
-        plot_func(
-            y_pred=y_pred,
-            y_std=y_std,
-            y_true=y_true,
-            n_subset=n_subset,
-            ax=ax,
-            **kwargs,
-        )
+        if plot_name == "sharpness":
+            plot_func(y_std=y_std, n_subset=n_subset, ax=ax)
+        else:
+            plot_func(
+                y_pred=y_pred,
+                y_std=y_std,
+                y_true=y_true,
+                n_subset=n_subset,
+                ax=ax,
+                **kwargs,
+            )
         pname = plot_name.replace("_", " ").capitalize()
         t_name = task_name.replace("_", " ")
         ax.set_title(f"{pname} - {t_name}")
@@ -894,7 +895,7 @@ def calculate_uct_metrics(
     obs_props: Optional[np.ndarray] = None,
     recal_model: Optional[IsotonicRegression] = None,
     verbose: bool = True,
-) -> Tuple[Dict[str, float], Dict[str, plt.Figure]]:
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, plt.Figure]]:
     """
     Computes Uncertainty Calibration Tool (UCT) metrics and generates corresponding plots.
 
@@ -925,7 +926,7 @@ def calculate_uct_metrics(
 
     Returns:
     --------
-    Tuple[Dict[str, float], Dict[str, plt.Figure]]
+    Tuple[Dict[str, Dict[str, float]], Dict[str, plt.Figure]]:
         Dictionary containing computed UCT metrics and generated plots.
     """
 
@@ -1227,7 +1228,9 @@ def rmse(x: np.ndarray, axis: Optional[int] = None) -> float:
 
 
 ### SOURCE: UQtools.py https://github.com/jensengroup/UQ_validation_methods/blob/main/UQtools.py ###
-def get_bootstrap_intervals(errors_ordered: np.ndarray, Nbins: int = 10) -> Tuple[List[float], List[float]]:
+def get_bootstrap_intervals(
+    errors_ordered: np.ndarray, Nbins: int = 10
+) -> Tuple[List[float], List[float]]:
     """
     Computes bootstrap confidence intervals for error calibration.
 
@@ -1303,7 +1306,9 @@ def NLL(uncertainties: np.ndarray, errors: np.ndarray) -> float:
     return NLL
 
 
-def calibration_curve(errors_sigma: np.ndarray) -> tuple[list[int | Any], list[float | Any]]:
+def calibration_curve(
+    errors_sigma: np.ndarray,
+) -> tuple[list[int | Any], list[float | Any]]:
     """
     Computes calibration curves based on error sigmas.
 
@@ -1328,7 +1333,6 @@ def calibration_curve(errors_sigma: np.ndarray) -> tuple[list[int | Any], list[f
         errors_observed.append(errors_frac)
 
     return gaus_pred, errors_observed
-
 
 
 def plot_calibration_curve(
@@ -1368,8 +1372,9 @@ def plot_calibration_curve(
     return fig
 
 
-
-def plot_Z_scores(errors: np.ndarray, uncertainties: np.ndarray) -> Tuple[plt.Figure, plt.Axes]:
+def plot_Z_scores(
+    errors: np.ndarray, uncertainties: np.ndarray
+) -> Tuple[plt.Figure, plt.Axes]:
     """
     Plots a histogram of standardized Z-scores for uncertainty quantification.
 
@@ -1463,7 +1468,9 @@ def f_linear_segment(x: float, point_list: List[float], x_list: List[float]) -> 
     return f
 
 
-def area_function(x: float, observed_list: List[float], predicted_list: List[float]) -> float:
+def area_function(
+    x: float, observed_list: List[float], predicted_list: List[float]
+) -> float:
     """
     Computes the absolute difference between observed and predicted calibration.
 
@@ -1485,7 +1492,9 @@ def area_function(x: float, observed_list: List[float], predicted_list: List[flo
     return h
 
 
-def calibration_area(observed: Union[np.ndarray, list[float]], predicted: Union[np.ndarray, list[float]]) -> float:
+def calibration_area(
+    observed: Union[np.ndarray, list[float]], predicted: Union[np.ndarray, list[float]]
+) -> float:
     """
     Computes the calibration miscalibration area using numerical integration.
 
@@ -1759,7 +1768,7 @@ class MetricsTable:
         run_name: Optional[str] = None,
         verbose: bool = True,
         csv_path: Optional[Union[str, Path]] = None,
-    ) -> None:
+    ):
         """
         Initializes a metrics table for tracking model performance.
 
@@ -1902,6 +1911,7 @@ class MetricsTable:
         exp_props: Optional[np.ndarray] = None,
         obs_props: Optional[np.ndarray] = None,
         recal_model: Optional[IsotonicRegression] = None,
+        nll: Optional[float] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, plt.Figure]]:
         """
         Computes and logs metrics to the table.
@@ -1950,6 +1960,7 @@ class MetricsTable:
             exp_props=exp_props,
             obs_props=obs_props,
             recal_model=recal_model,
+            nll=nll,
         )
 
         # self.export_plots(imgs, task_name)
@@ -1971,7 +1982,8 @@ class MetricsTable:
         exp_props: Optional[np.ndarray] = None,
         obs_props: Optional[np.ndarray] = None,
         recal_model: Optional[IsotonicRegression] = None,
-    ) -> Tuple[Dict[str, Any], Dict[str, plt.Figure]]:
+        nll: Optional[float] = None,
+    ) -> tuple[dict[str, Any] | dict[str, float], dict[Any, Image]]:
         """
         Computes various uncertainty quantification (UQ) metrics and plots.
 
@@ -2027,6 +2039,9 @@ class MetricsTable:
                 recal_model=recal_model,
                 verbose=self.verbose,
             )
+            if nll:
+                uctmetrics["scoring_rule"]["nll"] = nll
+
             # calculate other uqtools metrics
             uqmetrics, uqplots = calculate_uqtools_metrics(
                 y_std,
@@ -2069,7 +2084,10 @@ class MetricsTable:
         return metrics, plots
 
     def add_data(
-            self, task_name: str, metrics: Dict[str, Any], plots: Dict[str, plt.Figure]
+        self,
+        task_name: str,
+        metrics: Dict[str, Any],
+        plots: Dict[str, plt.Figure] | Dict[str, Image],
     ) -> None:
         """
         Adds computed metrics and plots to the metrics table.
@@ -2080,7 +2098,7 @@ class MetricsTable:
             Name of the task.
         metrics : Dict[str, Any]
             Dictionary containing computed metrics.
-        plots : Dict[str, plt.Figure]
+        plots : Dict[str, plt.Figure] or Dict[str, Image]
             Dictionary containing generated plots.
 
         Returns
@@ -2436,7 +2454,6 @@ def recalibration_metrics_and_plots(
     plt.close()
 
     return metrics, plots
-
 
 
 def recalibrate(

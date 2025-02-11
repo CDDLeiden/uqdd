@@ -1,7 +1,7 @@
 #!/bin/bash
 
 activity=${1:-"kx"}
-project=${2:-"2025-02-03-kx-all"}
+project=${2:-"2025-02-11-kx-all"}
 color=${3:-"tab10_r"}
 corr_color=${4:-"YlGnBu"}
 part=${5:-"SPBe_gpu"}

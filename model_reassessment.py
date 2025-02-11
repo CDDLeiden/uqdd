@@ -3,8 +3,8 @@ import pandas as pd
 import argparse
 
 import glob
+
 from uqdd import DEVICE, MODELS_DIR
-from uqdd.models.emc import emc_predict
 
 # from uqdd.utils import get_config
 from uqdd.utils import load_df, create_logger
@@ -12,8 +12,13 @@ from uqdd.models.utils_models import load_model, get_model_config, calculate_mea
 from uqdd.models.baseline import BaselineDNN
 from uqdd.models.ensemble import EnsembleDNN
 from uqdd.models.mcdropout import mc_predict
-from uqdd.models.evidential import EvidentialDNN, ev_predict
+from uqdd.models.evidential import (
+    EvidentialDNN,
+    ev_predict,
+    ev_predict_params_nll,
+)
 from uqdd.models.eoe import EoEDNN
+from uqdd.models.emc import emc_predict, emc_predict_params_nll
 
 # METRICS
 from uqdd.models.utils_train import (
@@ -35,6 +40,45 @@ import ast
 #     if isinstance(val, str):
 #         return ast.literal_eval(val)
 #     return val
+
+
+def evid_nll(evidential_model, test_dataloader, model_type="evidential", device=DEVICE):
+    if model_type in ["evidential", "eoe"]:
+        return ev_predict_params_nll(evidential_model, test_dataloader, device=device)
+
+    elif model_type == "emc":
+        return emc_predict_params_nll(evidential_model, test_dataloader, device=device)
+
+    else:
+        return None
+
+
+# def evid_nll(evidential_model, test_dataloader, model_type="evidential", device=DEVICE):
+#     if model_type in ["evidential", "eoe"]:
+#         mus, vs, alphas, betas, targets = ev_predict_params(
+#             evidential_model, test_dataloader, device=device
+#         )
+#     elif model_type == "emc":
+#         mus, vs, alphas, betas, targets = emc_predict_params(
+#             evidential_model, test_dataloader, device=device
+#         )
+#     else:
+#         return None
+#     nll = nig_nll(mus, vs, alphas, betas, targets)
+#
+#     return nll.item()
+#     #
+# evidential_model.eval()
+# test_nll = 0
+# with torch.no_grad():
+#     for i, (inputs, targets) in enumerate(test_dataloader):
+#         inputs, targets = inputs.to(device), targets.to(device)
+#         outputs = evidential_model(inputs)
+#         nll = nig_nll(*outputs, targets)
+#         test_nll += nll.item()
+# test_nll /= len(test_dataloader)
+# return test_nll
+# raise NotImplementedError
 
 
 # Function to convert string representation of list to actual list of integers
@@ -76,16 +120,6 @@ def preprocess_runs(
     )
     runs_df.rename(columns={"Name": "run_name"}, inplace=True)
 
-    # DEALING WITH MODEL_NAME IF DOESN'T EXIST
-    # runs_df["model_name"] = runs_df.apply(
-    #     lambda row: (
-    #         f"{data_name}_{activity_type}_{row['model_type']}_{row['split_type']}_{descriptor_protein}_{descriptor_chemical}_{row['run_name']}"
-    #         if pd.isna(row["model_name"])
-    #         else row["model_name"]
-    #     ),
-    #     axis=1,
-    # )
-
     i = 1
     # Update and match model_name with model saved files
     for index, row in runs_df.iterrows():
@@ -122,8 +156,6 @@ def preprocess_runs(
 
 
 # Get model class and predict function
-
-
 def get_model_class(model_type: str):
     if model_type.lower() in ["baseline", "mcdropout"]:
         model_class = BaselineDNN
@@ -190,6 +222,13 @@ def pkl_preds_export(preds, labels, alea_vars, epi_vars, outpath):
     return df
 
 
+def csv_nll_post_processing(csv_path):
+    # Load the csv file
+    df = pd.read_csv(csv_path)
+    df["NLL"] = df.groupby("model name")["NLL"].transform("first")
+    df.to_csv(csv_path, index=False)
+
+
 def reassess_metrics(
     runs_df,
     figs_out_path,
@@ -213,6 +252,9 @@ def reassess_metrics(
         # popping the model_type
         model_type = rowkwargs.pop("model_type")
         activity_type = rowkwargs.pop("activity_type")
+
+        if model_type != "eoe":
+            continue
 
         if model_path:
             model_fig_out_path = os.path.join(figs_out_path, model_name)
@@ -243,88 +285,103 @@ def reassess_metrics(
                 subset="test",
                 num_mc_samples=num_mc_samples,
             )
-            df = pkl_preds_export(
-                preds, labels, alea_vars, epi_vars, model_fig_out_path
+            # if model_type in ["evidential"]:  # , "eoe", "emc"
+            # calculate evidential nll
+            nll = evid_nll(
+                model, dataloaders["test"], model_type=model_type, device=DEVICE
             )
-
-            # Calculate the metrics
-            metrics, plots, uct_logger = evaluate_predictions(
-                config,
-                preds,
-                labels,
-                alea_vars,
-                model_type,
-                logger,
-                epi_vars=epi_vars,
-                wandb_push=False,
-                run_name=config["run_name"],
-                project_name=project_out_name,  # for the csv file
-                figpath=model_fig_out_path,
-                export_preds=False,
-                verbose=False,
-                csv_path=csv_out_path,
-            )
-
-            # Recalibrate model
-            preds_val, labels_val, alea_vars_val, epi_vars_val = get_preds(
-                model,
-                dataloaders,
-                model_type,
-                subset="val",
-                num_mc_samples=num_mc_samples,
-            )
-
-            iso_recal_model = recalibrate_model(
-                preds_val,
-                labels_val,
-                alea_vars_val,
-                preds,
-                labels,
-                alea_vars,
-                config=config,
-                epi_val=epi_vars_val,
-                epi_test=epi_vars,
-                uct_logger=uct_logger,
-                figpath=model_fig_out_path,
-            )
-
-            # Log the metrics to the CSV file
-            uct_logger.csv_log()
+            if nll and nll > 3.0:
+                # pass
+                nll = evid_nll(
+                    model, dataloaders["test"], model_type=model_type, device=DEVICE
+                )
+            print(f"Evidential NLL: {nll}")
+    #
+    #         df = pkl_preds_export(
+    #             preds, labels, alea_vars, epi_vars, model_fig_out_path
+    #         )
+    #
+    #         # Calculate the metrics
+    #         metrics, plots, uct_logger = evaluate_predictions(
+    #             config,
+    #             preds,
+    #             labels,
+    #             alea_vars,
+    #             model_type,
+    #             logger,
+    #             epi_vars=epi_vars,
+    #             wandb_push=False,
+    #             run_name=config["run_name"],
+    #             project_name=project_out_name,  # for the csv file
+    #             figpath=model_fig_out_path,
+    #             export_preds=False,
+    #             verbose=False,
+    #             csv_path=csv_out_path,
+    #             nll=nll,
+    #         )
+    #
+    #         # Recalibrate model
+    #         preds_val, labels_val, alea_vars_val, epi_vars_val = get_preds(
+    #             model,
+    #             dataloaders,
+    #             model_type,
+    #             subset="val",
+    #             num_mc_samples=num_mc_samples,
+    #         )
+    #
+    #         iso_recal_model = recalibrate_model(
+    #             preds_val,
+    #             labels_val,
+    #             alea_vars_val,
+    #             preds,
+    #             labels,
+    #             alea_vars,
+    #             config=config,
+    #             epi_val=epi_vars_val,
+    #             epi_test=epi_vars,
+    #             uct_logger=uct_logger,
+    #             figpath=model_fig_out_path,
+    #         )
+    #
+    #         # Log the metrics to the CSV file
+    #         uct_logger.csv_log()
+    #
+    # csv_nll_post_processing(csv_out_path)
 
 
 if __name__ == "__main__":
-    # Set up argument parser
-    parser = argparse.ArgumentParser(
-        description="Process input parameters for the script."
-    )
-    parser.add_argument(
-        "--activity_type",
-        type=str,
-        required=True,
-        help="The type of activity (e.g., 'kx', 'xc50').",
-    )
-    parser.add_argument(
-        "--runs_file_name",
-        type=str,
-        required=True,
-        help="The name of the runs file (without path).",
-    )
-    parser.add_argument(
-        "--project_name", type=str, required=True, help="The name of the project."
-    )
-
-    args = parser.parse_args()
-
-    activity_type = args.activity_type
-    project_name = args.project_name
-    runs_file_name = args.runs_file_name
+    # # Set up argument parser
+    # parser = argparse.ArgumentParser(
+    #     description="Process input parameters for the script."
+    # )
+    # parser.add_argument(
+    #     "--activity_type",
+    #     type=str,
+    #     required=True,
+    #     help="The type of activity (e.g., 'kx', 'xc50').",
+    # )
+    # parser.add_argument(
+    #     "--runs_file_name",
+    #     type=str,
+    #     required=True,
+    #     help="The name of the runs file (without path).",
+    # )
+    # parser.add_argument(
+    #     "--project_name", type=str, required=True, help="The name of the project."
+    # )
+    #
+    # args = parser.parse_args()
+    #
+    # activity_type = args.activity_type
+    # project_name = args.project_name
+    # runs_file_name = args.runs_file_name
 
     ############################## Testing ################################
-    # activity_type = "kx"
-    # project_name = "runs_evidential_old_kx"
-    # # project_name = "runs_ensemble_mcdp_xc50"
-    # runs_file_name = "runs_evidential_old_kx.csv"
-    # # runs_file_name = "runs_ensemble_mcdp_xc50.csv"
+    activity_type = "kx"
+    project_name = "kx_test"
+    # project_name = "runs_ensemble_mcdp_xc50"
+    runs_file_name = "runs_evidential_kx.csv"
+    # runs_file_name = "runs_ensemble_mcdp_xc50.csv"
     # "/users/home/bkhalil/Repos/uqdd/uqdd/data/runs/runs_evidential_old_kx.csv"
     #######################################################################
     data_name = "papyrus"

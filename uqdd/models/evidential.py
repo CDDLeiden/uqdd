@@ -3,12 +3,13 @@ import logging
 import wandb
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 import torch.nn.functional as F
 from tqdm import tqdm
 
 from uqdd import DEVICE
 from uqdd.models.baseline import BaselineDNN
+from uqdd.models.loss import nig_nll
 from uqdd.utils import create_logger
 
 from uqdd.models.utils_train import (
@@ -30,7 +31,7 @@ def ev_predict(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
     device: torch.device = DEVICE,
-    set_on_eval: bool = True
+    set_on_eval: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Performs evidential prediction using the provided model and dataloader.
@@ -80,6 +81,63 @@ def ev_predict(
     return outputs_all, targets_all, alea_all, epistemic_all
 
 
+def ev_predict_params_nll(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device = DEVICE,
+    set_on_eval: bool = True,
+) -> torch.Tensor:
+    """
+    Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The trained evidential deep learning model.
+    dataloader: torch.utils.data.DataLoader
+        The dataloader containing the test dataset.
+    device: torch.device, optional
+        The device to run inference on, by default DEVICE.
+    set_on_eval: bool, optional
+        Whether to set the model in evaluation mode, by default True.
+
+    Returns
+    -------
+
+    """
+    if set_on_eval:
+        model.eval()
+    test_nll = 0.0
+    # mus, vs, alphas, betas = [], [], [], []
+    # all_targets = []
+    with torch.no_grad():
+        for inputs, targets in tqdm(
+            dataloader, total=len(dataloader), desc="Evidential prediction"
+        ):
+            inputs = tuple(x.to(device) for x in inputs)
+            outputs = model(inputs)  # , alea_vars
+
+            mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+
+            nll = nig_nll(mu, v, alpha, beta, targets)
+            test_nll += nll.item()
+            # mus.append(mu)
+            # vs.append(v)
+            # alphas.append(alpha)
+            # betas.append(beta)
+            # all_targets.append(targets)
+    test_nll /= len(dataloader)
+
+    return test_nll
+    # mus = torch.cat(mus, dim=0)
+    # vs = torch.cat(vs, dim=0)
+    # alphas = torch.cat(alphas, dim=0)
+    # betas = torch.cat(betas, dim=0)
+    # all_targets = torch.cat(all_targets, dim=0)
+
+    # return mus.cpu(), vs.cpu(), alphas.cpu(), betas.cpu(), all_targets.cpu()
+
+
 # Adopted and Modified from https://github.com/teddykoker/evidential-learning-pytorch
 class NormalInvGamma(nn.Module):
     """
@@ -92,6 +150,7 @@ class NormalInvGamma(nn.Module):
     out_units : int
         Number of output units.
     """
+
     def __init__(self, in_features: int, out_units: int) -> None:
         super().__init__()
         self.dense = nn.Linear(in_features, out_units * 4)
@@ -115,7 +174,9 @@ class NormalInvGamma(nn.Module):
         """
         return F.softplus(x) + eps
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass of the Normal Inverse Gamma layer.
 
@@ -149,6 +210,7 @@ class Dirichlet(nn.Module):
     out_units : int
         Number of output units.
     """
+
     def __init__(self, in_features, out_units):
         super().__init__()
         self.dense = nn.Linear(in_features, out_units)
@@ -202,7 +264,13 @@ class EvidentialDNN(BaselineDNN):
     logger : logging.Logger, optional
         Logger instance.
     """
-    def __init__(self, config: Optional[dict] = None, logger: Optional[logging.Logger] = None, **kwargs) -> None:
+
+    def __init__(
+        self,
+        config: Optional[dict] = None,
+        logger: Optional[logging.Logger] = None,
+        **kwargs,
+    ) -> None:
         super(EvidentialDNN, self).__init__(
             config,
             logger,
@@ -223,7 +291,9 @@ class EvidentialDNN(BaselineDNN):
 
         self.apply(self.init_wt)
 
-    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, ...]:
+    def forward(
+        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+    ) -> Tuple[torch.Tensor, ...]:
         """
         Forward pass of the EvidentialDNN model.
 
@@ -252,7 +322,7 @@ class EvidentialDNN(BaselineDNN):
 
 
 def run_evidential(
-        config: Optional[dict] = None
+    config: Optional[dict] = None,
 ) -> Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]:
     """
     Trains and evaluates an Evidential Deep Neural Network.
