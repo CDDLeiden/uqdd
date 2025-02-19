@@ -1,18 +1,24 @@
 import pandas as pd
-import matplotlib.pyplot as plt
+
 import itertools
 import os
 import argparse
-
+from typing import List, Dict, Optional, Union
 import numpy as np
 
 import shutil
 
 import seaborn as sns
+import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib import colormaps  # Use the new colormaps API
+
+# from matplotlib import colormaps  # Use the new colormaps API
 from matplotlib.cm import ScalarMappable
+import matplotlib.gridspec as gridspec
+
 from sklearn.metrics import mean_squared_error, auc
+
+LEGEND_ON = False
 
 # DESCRIPTORS
 descriptor_protein = "ankh-large"
@@ -226,7 +232,7 @@ all_cmaps = [
     "copper",
     "copper_r",
     "crest",
-    "crest_r",
+    "tab10_r",
     "cubehelix",
     "cubehelix_r",
     "flag",
@@ -402,15 +408,31 @@ def aggregate_results_csv(
 
 
 # HELPER FUNCTIONS FOR PLOTTING #
-def save_plot(fig, save_dir, plot_name, tighten=True):
+def save_plot(fig, save_dir, plot_name, tighten=True, show_legend=LEGEND_ON):
+    if not show_legend:
+        plt.legend().remove()
     if tighten:
         plt.tight_layout()
-    if save_dir:
+
+    if save_dir and tighten:
         os.makedirs(save_dir, exist_ok=True)
-        fig.savefig(os.path.join(save_dir, f"{plot_name}.png"), dpi=1200)
+        fig.savefig(
+            os.path.join(save_dir, f"{plot_name}.png"), dpi=300, bbox_inches="tight"
+        )
+        fig.savefig(os.path.join(save_dir, f"{plot_name}.svg"), bbox_inches="tight")
+        fig.savefig(
+            os.path.join(save_dir, f"{plot_name}.pdf"), dpi=300, bbox_inches="tight"
+        )
+        fig.savefig(
+            os.path.join(save_dir, f"{plot_name}.eps"), dpi=300, bbox_inches="tight"
+        )
+
+    elif save_dir and not tighten:
+        os.makedirs(save_dir, exist_ok=True)
+        fig.savefig(os.path.join(save_dir, f"{plot_name}.png"), dpi=300)
         fig.savefig(os.path.join(save_dir, f"{plot_name}.svg"))
-        fig.savefig(os.path.join(save_dir, f"{plot_name}.pdf"))
-        fig.savefig(os.path.join(save_dir, f"{plot_name}.eps"))
+        fig.savefig(os.path.join(save_dir, f"{plot_name}.pdf"), dpi=300)
+        fig.savefig(os.path.join(save_dir, f"{plot_name}.eps"), dpi=300)
 
 
 # Function to handle inf values
@@ -489,7 +511,7 @@ def plot_histogram_metrics(
 
 # Function to plot pairwise scatter plots for metrics
 def plot_pairwise_scatter_metrics(
-    df, title, metrics, save_dir=None, group_order=group_order, cmap="crest_r"
+    df, title, metrics, save_dir=None, group_order=group_order, cmap="tab10_r"
 ):
     df = handle_inf_values(df)
     num_metrics = len(metrics)
@@ -535,45 +557,84 @@ def plot_pairwise_scatter_metrics(
 
 
 def plot_metrics(
-    df,
-    metrics,
-    cmap="crest_r",
-    save_dir=None,
-    hatches_dict=hatches_dict,
-    group_order=group_order,
-    show=True,
-):
-    stats_dfs = []
+    df: pd.DataFrame,
+    metrics: List[str],
+    cmap: str = "tab10_r",
+    save_dir: Optional[str] = None,
+    hatches_dict: Optional[Dict[str, str]] = None,
+    group_order: Optional[List[str]] = None,
+    show: bool = True,
+    fig_width: Optional[float] = None,
+    fig_height: Optional[float] = None,
+) -> Dict[str, str]:
+    """
+    Plots bar charts for multiple metrics, ensuring that the plot box (axes area)
+    has fixed dimensions while the overall figure adjusts to fit additional elements
+    like legends, labels, and titles.
 
-    # Prepare data for each metric
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe containing the metrics data.
+    metrics : List[str]
+        List of metric names to be plotted.
+    cmap : str, optional
+        Colormap for bars, by default "tab10_r".
+    save_dir : Optional[str], optional
+        Directory to save the plot, by default None.
+    hatches_dict : Optional[Dict[str, str]], optional
+        Dictionary mapping split types to hatching patterns, by default None.
+    group_order : Optional[List[str]], optional
+        Order of the groups in the plot, by default None.
+    show : bool, optional
+        Whether to display the plot, by default True.
+    fig_width : Optional[float], optional
+        Width of the **inner plot box** (not the full figure), by default None.
+    fig_height : Optional[float], optional
+        Height of the **inner plot box** (not the full figure), by default None.
+
+    Returns
+    -------
+    Dict[str, str]
+        Dictionary mapping model types to colors.
+    """
+
+    # Default plot area size if not provided
+    plot_width = fig_width if fig_width else max(10, len(metrics) * 2)
+    plot_height = fig_height if fig_height else 6
+
+    # Compute total figure size, leaving space for legends and labels
+    total_width = plot_width + 5  # Extra space for legend
+    total_height = plot_height + 2  # Extra space for x-axis labels
+
+    fig = plt.figure(figsize=(total_width, total_height))
+    gs = gridspec.GridSpec(
+        1, 1, figure=fig, left=0.1, right=0.75, top=0.9, bottom=0.15
+    )  # Main plot area
+
+    ax = fig.add_subplot(gs[0])  # Main plot area
+    ax.set_position([0.1, 0.15, plot_width / total_width, plot_height / total_height])
+
+    stats_dfs = []
     for metric in metrics:
         mean_df = (
-            df.loc[:, ["Split", "Model type", metric]]
-            .groupby(["Split", "Model type"])
-            .mean()
-            .rename(columns={metric: f"{metric}_mean"})
+            df.groupby(["Split", "Model type"])[metric].mean().rename(f"{metric}_mean")
         )
         std_df = (
-            df.loc[:, ["Split", "Model type", metric]]
-            .groupby(["Split", "Model type"])
-            .std()
-            .rename(columns={metric: f"{metric}_std"})
+            df.groupby(["Split", "Model type"])[metric].std().rename(f"{metric}_std")
         )
-        stats_df = (
-            pd.merge(mean_df, std_df, on=["Split", "Model type"])
-            .sort_values(["Split", "Model type"])
-            .reset_index()
-            .assign(
-                Group=lambda df: df.apply(
-                    lambda row: f"{row['Split']}_{row['Model type']}", axis=1
-                )
-            )
+        stats_df = pd.merge(
+            mean_df, std_df, left_index=True, right_index=True
+        ).reset_index()
+        stats_df["Group"] = stats_df.apply(
+            lambda row: f"{row['Split']}_{row['Model type']}", axis=1
         )
         stats_df["Metric"] = metric
         stats_dfs.append(stats_df)
 
     combined_stats_df = pd.concat(stats_dfs)
-    # Ensure 'Group' column is categorical with the specified order
+
+    # Ensure categorical order if provided
     if group_order:
         combined_stats_df["Group"] = pd.Categorical(
             combined_stats_df["Group"], categories=group_order, ordered=True
@@ -591,16 +652,9 @@ def plot_metrics(
         )
     }
 
-    # Calculate appropriate figsize based on the number of metrics
-    fig_width = max(10, len(metrics) * 2)
-    fig, ax = plt.subplots(figsize=(fig_width, 6))
-    # fig, ax = plt.subplots(figsize=(12, 6))
-    bar_width = 0.12  # 0.12
-    # bar_spacing = 0.4 # 0.01
-    group_spacing = 0.4  # 0.7
-    num_bars = len(model_types) * len(
-        hatches_dict
-    )  #  len(hatches_dict)  = number of splits
+    bar_width = 0.12
+    group_spacing = 0.4
+    num_bars = len(model_types) * len(hatches_dict)
     positions = []
     tick_positions = []
     tick_labels = []
@@ -616,7 +670,6 @@ def plot_metrics(
             position = (
                 i * (num_bars * bar_width + group_spacing) + (j % num_bars) * bar_width
             )
-            # position = i * (len(model_types) * (bar_width + bar_spacing) + group_spacing) + j * (bar_width + bar_spacing)
             positions.append(position)
             ax.bar(
                 position,
@@ -628,15 +681,14 @@ def plot_metrics(
         center_position = (
             i * (num_bars * bar_width + group_spacing) + (num_bars * bar_width) / 2
         )
-        # center_position = (positions[-1] + positions[-len(model_types)]) / 2
         tick_positions.append(center_position)
+        if " " in metric:
+            metric = metric.replace(" ", "\n")
         tick_labels.append(metric)
-        # tick_positions.append((positions[-1] + positions[-len(model_types)]) / 2)
-        # tick_labels.append(metric)
 
     def create_stats_legend(df, color_mapping, hatches_dict, group_order):
         patches_dict = {}
-        for idx, row in df.iterrows():
+        for _, row in df.iterrows():
             label = f"{row['Split']} {row['Model type']}"
             group_label = f"{row['Split']}_{row['Model type']}"
             if group_label not in patches_dict:
@@ -645,35 +697,16 @@ def plot_metrics(
                     hatch=hatches_dict[row["Split"]],
                     label=label,
                 )
-        # Collect patches in order of group_order
-        patches = [
-            patches_dict[group] for group in group_order if group in patches_dict
-        ]
-        return patches
+        return [patches_dict[group] for group in group_order if group in patches_dict]
 
-        # def create_stats_legend(df, color_mapping, hatches_dict, group_order):
-        #     patches = []
-        #     # patches_dict = {}
-        #     for idx, row in df.iterrows():
-        #         label = f"{row['Split']} {row['Model type']}"
-        #         # group_label = f"{row['Split']}_{row['Model type']}"
-        #         if label not in [patch.get_label() for patch in patches]:
-        #             patches.append(
-        #                 mpatches.Patch(
-        #                     facecolor=color_mapping[row["Model type"]],
-        #                     hatch=hatches_dict[row["Split"]],
-        #                     label=label
-        #                 )
-        #             )
-        #     return patches
-
+    # if LEGEND_ON:
     legend_elements = create_stats_legend(
         combined_stats_df, color_dict, hatches_dict, group_order
     )
 
     ax.legend(
         handles=legend_elements,
-        bbox_to_anchor=(1.0, 1.0),
+        bbox_to_anchor=(1.05, 1),
         loc="upper left",
         borderaxespad=0,
         frameon=False,
@@ -697,14 +730,19 @@ def plot_metrics(
     ax.set_xticklabels(
         tick_labels, rotation=45, ha="right", rotation_mode="anchor", fontsize=9
     )
-    ax.set_xlabel("Metrics")
-    ax.set_ylabel("Values")
-    metrics_names = "_".join(metrics)
-    plot_name = f"barplot_{cmap}_{metrics_names}"
-    save_plot(fig, save_dir, plot_name)
+    # ax.set_xlabel("Metrics")
+    # ax.set_ylabel("Values")
+
+    if save_dir:
+        metrics_names = "_".join(metrics)
+        plot_name = f"barplot_{cmap}_{metrics_names}"
+        save_plot(fig, save_dir, plot_name)  #  tighten=True
+
     if show:
         plt.show()
         plt.close()
+
+    return color_dict
 
 
 def find_highly_correlated_metrics(
@@ -743,34 +781,67 @@ def find_highly_correlated_metrics(
 
 
 def plot_comparison_metrics(
-    df, metrics, cmap="crest_r", save_dir=None
-):  # , draw_points_on_error_bars=False
-    stats_dfs = []
+    df: pd.DataFrame,
+    metrics: List[str],
+    cmap: str = "tab10_r",
+    save_dir: Optional[str] = None,
+    fig_width: Optional[float] = None,
+    fig_height: Optional[float] = None,
+):
+    """
+    Plots comparison bar charts for multiple metrics, ensuring that the **plot box** has fixed
+    dimensions while the overall figure adapts for legends, labels, and titles.
 
-    # Prepare data for each metric
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe containing the metrics data.
+    metrics : List[str]
+        List of metric names to be plotted.
+    cmap : str, optional
+        Colormap for bars, by default "tab10_r".
+    save_dir : Optional[str], optional
+        Directory to save the plot, by default None.
+    fig_width : Optional[float], optional
+        Width of the **inner plot box** (not the full figure), by default None.
+    fig_height : Optional[float], optional
+        Height of the **inner plot box** (not the full figure), by default None.
+    """
+
+    # Default plot area size if not provided
+    plot_width = fig_width if fig_width else max(7, len(metrics) * 3)
+    plot_height = fig_height if fig_height else 6
+
+    # Compute total figure size to accommodate labels and legend
+    total_width = plot_width + 5  # Extra space for legend
+    total_height = plot_height + 2  # Extra space for x-axis labels
+
+    fig = plt.figure(figsize=(total_width, total_height))
+    gs = gridspec.GridSpec(
+        1, 1, figure=fig, left=0.1, right=0.75, top=0.9, bottom=0.15
+    )  # Main plot area
+
+    ax = fig.add_subplot(gs[0])
+    ax.set_position([0.1, 0.15, plot_width / total_width, plot_height / total_height])
+
+    stats_dfs = []
     for metric in metrics:
         mean_df = (
-            df.loc[:, ["Split", "Model type", "Calibration", metric]]
-            .groupby(["Split", "Model type", "Calibration"])
+            df.groupby(["Split", "Model type", "Calibration"])[metric]
             .mean()
-            .rename(columns={metric: f"{metric}_mean"})
+            .rename(f"{metric}_mean")
         )
         std_df = (
-            df.loc[:, ["Split", "Model type", "Calibration", metric]]
-            .groupby(["Split", "Model type", "Calibration"])
+            df.groupby(["Split", "Model type", "Calibration"])[metric]
             .std()
-            .rename(columns={metric: f"{metric}_std"})
+            .rename(f"{metric}_std")
         )
-        stats_df = (
-            pd.merge(mean_df, std_df, on=["Split", "Model type", "Calibration"])
-            .sort_values(["Split", "Model type", "Calibration"])
-            .reset_index()
-            .assign(
-                Group=lambda df: df.apply(
-                    lambda row: f"{row['Split']}_{row['Model type']}_{row['Calibration']}",
-                    axis=1,
-                )
-            )
+        stats_df = pd.merge(
+            mean_df, std_df, left_index=True, right_index=True
+        ).reset_index()
+        stats_df["Group"] = stats_df.apply(
+            lambda row: f"{row['Split']}_{row['Model type']}_{row['Calibration']}",
+            axis=1,
         )
         stats_df["Metric"] = metric
         stats_dfs.append(stats_df)
@@ -791,10 +862,6 @@ def plot_comparison_metrics(
         "Before Calibration": "\\\\",
         "After Calibration": "",
     }
-
-    # Calculate appropriate figsize based on the number of metrics
-    fig_width = max(7, len(metrics) * 3)
-    fig, ax = plt.subplots(figsize=(fig_width, 6))
 
     bar_width = 0.1
     group_spacing = 0.2  # Adjusted for closer split groups
@@ -835,10 +902,7 @@ def plot_comparison_metrics(
                         hatch=hatches_dict[calibration],
                         width=bar_width,
                     )
-                    # # Draw point on the error bar
-                    # if draw_points_on_error_bars:
-                    #     ax.plot(position, height, 'o', color='black')
-            # Add tick positions and labels for each split within each metric
+
             center_position = (
                 i
                 * (
@@ -865,30 +929,28 @@ def plot_comparison_metrics(
             )
         return patches
 
-    legend_elements = create_stats_legend(color_dict, hatches_dict)
+    if LEGEND_ON:
+        legend_elements = create_stats_legend(color_dict, hatches_dict)
 
-    ax.legend(
-        handles=legend_elements,
-        bbox_to_anchor=(1.0, 1.0),
-        loc="upper left",
-        borderaxespad=0,
-        frameon=False,
-    )
+        ax.legend(
+            handles=legend_elements,
+            bbox_to_anchor=(1.05, 1),
+            loc="upper left",
+            borderaxespad=0,
+            frameon=False,
+        )
 
     for (_, row), bar in zip(combined_stats_df.iterrows(), ax.patches):
         x_bar = bar.get_x() + bar.get_width() / 2
         y_bar = bar.get_height()
-        # print(row[f"{row['Metric']}_std"])
         yerr_lower = y_bar - max(0, y_bar - row[f"{row['Metric']}_std"])
         yerr_upper = row[f"{row['Metric']}_std"]
         ax.errorbar(
             x_bar,
             y_bar,
-            # yerr=row[f"{row['Metric']}_std"],
             yerr=[[yerr_lower], [yerr_upper]],
             color="black",
-            # fmt='o' if draw_points_on_error_bars else 'none',  # Option to draw points on error bars
-            fmt="none",  # Option to draw points on error bars
+            fmt="none",
             elinewidth=1,
             capsize=3,
             alpha=0.5,
@@ -898,12 +960,16 @@ def plot_comparison_metrics(
     ax.set_xticklabels(
         tick_labels, rotation=45, ha="right", rotation_mode="anchor", fontsize=9
     )
-    ax.set_xlabel("Metrics and Splits")
-    ax.set_ylabel("Values")
-    metrics_names = "_".join(metrics)
-    plot_name = f"comparison_barplot_{cmap}_{metrics_names}"
-    # plot_name += "_points" if draw_points_on_error_bars else ""
-    save_plot(fig, save_dir, plot_name)
+
+    if save_dir:
+        plot_name = f"comparison_barplot_{cmap}_{'_'.join(metrics)}"
+        save_plot(fig, save_dir, plot_name, tighten=True)
+        # plt.savefig(
+        #     f"{save_dir}/comparison_barplot_{cmap}_{'_'.join(metrics)}.png",
+        #     bbox_inches="tight",
+        #     dpi=300,
+        # )
+
     plt.show()
     plt.close()
 
@@ -941,40 +1007,69 @@ def load_and_aggregate_calibration_data(base_path, paths):
 
 
 def plot_calibration_data(
-    df_aggregated,
-    base_path,
-    save_dir=None,
-    title="Calibration Plot",
-    color_name="tab10_r",
-    group_order=None,
+    df_aggregated: pd.DataFrame,
+    base_path: str,
+    save_dir: Optional[str] = None,
+    title: str = "Calibration Plot",
+    color_name: str = "tab10_r",
+    group_order: Optional[List[str]] = None,
+    fig_width: Optional[float] = None,
+    fig_height: Optional[float] = None,
 ):
     """
-    Iterates over models in df_aggregated, loads and plots calibration data.
+    Iterates over models in df_aggregated, loads and plots calibration data,
+    ensuring the **inner plot box** has fixed width and height.
+
+    Parameters
+    ----------
+    df_aggregated : pd.DataFrame
+        Dataframe containing model paths and group labels.
+    base_path : str
+        Path to load the calibration data.
+    save_dir : Optional[str], optional
+        Directory to save the plot, by default None.
+    title : str, optional
+        Title of the plot, by default "Calibration Plot".
+    color_name : str, optional
+        Colormap name for the lines, by default "tab10_r".
+    group_order : Optional[List[str]], optional
+        Order of groups in the legend, by default None.
+    fig_width : Optional[float], optional
+        Width of the **inner plot box** (not the full figure), by default None.
+    fig_height : Optional[float], optional
+        Height of the **inner plot box** (not the full figure), by default None.
     """
-    plt.figure(figsize=(12, 8))
-    # Use group_order to create consistent coloring
+
+    # Default plot area size if not provided
+    plot_width = fig_width if fig_width else 6
+    plot_height = fig_height if fig_height else 6
+
+    # Compute total figure size to accommodate labels and legend
+    total_width = plot_width + 4  # Extra space for legend
+    total_height = plot_height + 2  # Extra space for x-axis labels
+
+    fig = plt.figure(figsize=(total_width, total_height))
+    gs = gridspec.GridSpec(
+        1, 1, figure=fig, left=0.15, right=0.75, top=0.9, bottom=0.15
+    )  # Main plot area
+
+    ax = fig.add_subplot(gs[0])
+    ax.set_position([0.15, 0.15, plot_width / total_width, plot_height / total_height])
+
+    # Define colors based on `group_order`
     if group_order is None:
         group_order = list(df_aggregated["Group"].unique())
-
-    # colormap = colormaps[color_name]
-    # colors = [colormap(i / len(group_order)) for i in range(len(group_order))]
-    # color_dict = {group: colors[i] for i, group in enumerate(group_order)}
 
     scalar_mappable = ScalarMappable(cmap=color_name)
     colors = scalar_mappable.to_rgba(range(len(group_order)))
     color_dict = {group: color for group, color in zip(group_order, colors)}
 
-    # color_map = plt.cm.get_cmap(
-    #     color_name, len(df_aggregated)
-    # )  # Generate unique colors
-    # Store legend handles to ensure legend follows group_order
     legend_handles = {}
 
     for idx, row in df_aggregated.iterrows():
         model_paths = row["project_model"]
         group_label = row["Group"]
         color = color_dict[group_label]  # Get the color based on group_order
-        # color = color_map(idx)  # Assign a color to each group
 
         # Load and aggregate calibration data
         expected, mean_observed, lower_bound, upper_bound = (
@@ -982,51 +1077,44 @@ def plot_calibration_data(
         )
 
         # Plot the mean line
-        (line,) = plt.plot(expected, mean_observed, label=group_label, color=color)
+        (line,) = ax.plot(expected, mean_observed, label=group_label, color=color)
 
         # Fill the shaded area
-        plt.fill_between(expected, lower_bound, upper_bound, alpha=0.2, color=color)
+        ax.fill_between(expected, lower_bound, upper_bound, alpha=0.2, color=color)
 
         # Store line handles for the legend in order
         if group_label not in legend_handles:
             legend_handles[group_label] = line
 
     # Perfect calibration line
-    (perfect_line,) = plt.plot([0, 1], [0, 1], "k--", label="Perfect Calibration")
-    # Add perfect calibration to the handles
+    (perfect_line,) = ax.plot([0, 1], [0, 1], "k--", label="Perfect Calibration")
     legend_handles["Perfect Calibration"] = perfect_line
 
-    # Plot settings
-    plt.title(title)
-    plt.xlabel("Expected Proportion")
-    plt.ylabel("Observed Proportion")
     # Sort legend handles based on group_order
     ordered_legend_handles = [
         legend_handles[group] for group in group_order if group in legend_handles
     ]
     ordered_legend_handles.append(legend_handles["Perfect Calibration"])
+    if LEGEND_ON:
+        ax.legend(
+            handles=ordered_legend_handles,
+            bbox_to_anchor=(1.05, 1),
+            loc="upper left",
+        )
 
-    plt.legend(
-        handles=ordered_legend_handles,
-        bbox_to_anchor=(1.05, 1),
-        loc="upper left",
-        # title="Models"
-    )
-
-    # plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
-    plt.grid(True)
-
-    plt.xlim(0, 1)
-    plt.ylim(0, 1)
+    ax.set_title(title)
+    ax.set_xlabel("Expected Proportion")
+    ax.set_ylabel("Observed Proportion")
+    ax.grid(True)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
 
     if save_dir:
         plot_name = f"{title.replace(' ', '_')}"
-        save_plot(plt.gcf(), save_dir, plot_name, tighten=True)
-
-        # os.makedirs(save_dir, exist_ok=True)
-        # plt.savefig(os.path.join(save_dir, f"{title.replace(' ', '_')}.png"), dpi=300, bbox_inches='tight')
+        save_plot(fig, save_dir, plot_name, tighten=True)
 
     plt.show()
+    plt.close()
 
 
 def move_model_folders(df, search_dirs, output_dir, overwrite=False):
@@ -1173,7 +1261,7 @@ def calculate_rejection_curve(
         preds = load_predictions(model_path)
         # check if preds were correctly loaded or not
         if preds.empty:
-            print(f"P")
+            print(f"Preds not loaded for model: {model_path}")
             continue
 
             # break
@@ -1212,23 +1300,73 @@ def get_handles_labels(ax, group_order):
 
 
 def plot_rmse_rejection_curves(
-    df,
-    base_dir,
-    cmap="tab10_r",
-    save_dir_plot=None,
-    add_to_title="",
-    normalize_rmse=False,
-    unc_type="aleatoric",
-    max_rejection_ratio=0.95,
-    group_order=None,
-):
+    df: pd.DataFrame,
+    base_dir: str,
+    cmap: str = "tab10_r",
+    save_dir_plot: Optional[str] = None,
+    add_to_title: str = "",
+    normalize_rmse: bool = False,
+    unc_type: str = "aleatoric",
+    max_rejection_ratio: float = 0.95,
+    group_order: Optional[List[str]] = None,
+    fig_width: Optional[float] = None,
+    fig_height: Optional[float] = None,
+) -> pd.DataFrame:
     """
-    Plot RMSE rejection curves for different groups and splits.
+    Plot RMSE rejection curves for different groups and splits, ensuring that the **inner plot box**
+    has fixed width and height.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe containing model paths and group labels.
+    base_dir : str
+        Path to load the rejection data.
+    cmap : str, optional
+        Colormap name for the lines, by default "tab10_r".
+    save_dir_plot : Optional[str], optional
+        Directory to save the plot, by default None.
+    add_to_title : str, optional
+        Additional string to append to the plot title, by default "".
+    normalize_rmse : bool, optional
+        If True, normalizes RMSE, by default False.
+    unc_type : str, optional
+        Type of uncertainty: "aleatoric", "epistemic", or "both".
+    max_rejection_ratio : float, optional
+        Maximum rejection ratio to consider, by default 0.95.
+    group_order : Optional[List[str]], optional
+        Order of groups in the legend, by default None.
+    fig_width : Optional[float], optional
+        Width of the **inner plot box** (not the full figure), by default None.
+    fig_height : Optional[float], optional
+        Height of the **inner plot box** (not the full figure), by default None.
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame containing AUC-RRC statistics for each model group.
     """
+
     assert unc_type in ["aleatoric", "epistemic", "both"], "Invalid unc_type"
     unc_col = "y_alea" if unc_type == "aleatoric" else "y_eps"
 
-    # Use group_order for consistent coloring and legend order
+    # Set default dimensions for the **inner plot box**
+    plot_width = fig_width if fig_width else 6
+    plot_height = fig_height if fig_height else 6
+
+    # Compute total figure size dynamically
+    total_width = plot_width + 4  # Space for legend
+    total_height = plot_height + 2  # Space for x-axis labels
+
+    fig = plt.figure(figsize=(total_width, total_height))
+    gs = gridspec.GridSpec(
+        1, 1, figure=fig, left=0.15, right=0.75, top=0.9, bottom=0.15
+    )  # Define space for the main plot
+
+    ax = fig.add_subplot(gs[0])
+    ax.set_position([0.15, 0.15, plot_width / total_width, plot_height / total_height])
+
+    # Use group_order for consistent coloring
     if group_order is None:
         group_order = list(df["Group"].unique())
 
@@ -1236,17 +1374,15 @@ def plot_rmse_rejection_curves(
     colors = scalar_mappable.to_rgba(range(len(group_order)))
     color_dict = {group: color for group, color in zip(group_order, colors)}
 
-    # Update paths for models
-    df["model_path"] = df["project_model"].apply(
+    df.loc[:, "model_path"] = df["project_model"].apply(
         lambda x: (
             str(os.path.join(base_dir, x)) if not str(x).startswith(base_dir) else x
         )
     )
 
-    # Plot RMSE-Rejection curves
-    fig, ax = plt.subplots(figsize=(12, 8))
     stats_dfs = []
     included_groups = df["Group"].unique()
+    legend_handles = []
 
     for group in included_groups:
         group_data = df[df["Group"] == group]
@@ -1262,7 +1398,8 @@ def plot_rmse_rejection_curves(
             )
         )
 
-        ax.plot(
+        # **Plot the curve**
+        (line,) = ax.plot(
             rejection_rates,
             mean_rmses,
             label=f"{group} (AUC-RRC: {mean_auc:.3f} ± {std_auc:.3f})",
@@ -1275,6 +1412,7 @@ def plot_rmse_rejection_curves(
             color=color_dict[group],
             alpha=0.2,
         )
+        legend_handles.append(line)
 
         stats_dfs.append(
             {
@@ -1302,7 +1440,8 @@ def plot_rmse_rejection_curves(
             )
         )
 
-        ax.plot(
+        # **Plot the random reject curve**
+        (line,) = ax.plot(
             rejection_rates,
             mean_rmses,
             label=f"random reject - {split} (AUC-RRC: {mean_auc:.3f} ± {std_auc:.3f})",
@@ -1316,6 +1455,7 @@ def plot_rmse_rejection_curves(
             color="grey",
             alpha=0.2,
         )
+        legend_handles.append(line)
 
         stats_dfs.append(
             {
@@ -1330,20 +1470,27 @@ def plot_rmse_rejection_curves(
     # Plot settings
     ax.set_xlabel("Rejection Rate")
     ax.set_ylabel("RMSE" if not normalize_rmse else "Normalized RMSE")
-    ax.set_title(
-        "RMSE-Rejection Curves"
-        if not normalize_rmse
-        else "Normalized RMSE-Rejection Curves"
-    )
+    # ax.set_title(
+    #     "RMSE-Rejection Curves"
+    #     if not normalize_rmse
+    #     else "Normalized RMSE-Rejection Curves"
+    # )
+
     ax.set_xlim(0, max_rejection_ratio)
     ax.grid(True)
 
-    ordered_handles, ordered_labels = get_handles_labels(ax, group_order)
+    # Order legend by `group_order`
+    if LEGEND_ON:
+        ordered_handles, ordered_labels = get_handles_labels(ax, group_order)
+        ordered_handles += [legend_handles[-1]]  # Append random reject at the end
+        ordered_labels += [legend_handles[-1].get_label()]
 
-    ax.legend(
-        handles=ordered_handles,
-        loc="lower left",
-    )
+        ax.legend(
+            handles=ordered_handles,
+            loc="lower left",
+        )
+
+    # fig.subplots_adjust(left=0.12, right=0.85, top=0.9, bottom=0.2)
 
     # Save the plot
     plot_name = (
@@ -1354,57 +1501,126 @@ def plot_rmse_rejection_curves(
     save_plot(fig, save_dir_plot, plot_name, tighten=True)
 
     plt.show()
+    plt.close()
 
     return pd.DataFrame(stats_dfs)
 
 
 def plot_auc_comparison(
-    stats_df,
-    cmap="crest_r",
-    save_dir=None,
-    add_to_title="",
-    min_y_axis=0.0,
-    hatches_dict=None,
-    group_order=None,
+    stats_df: pd.DataFrame,
+    cmap: str = "tab10_r",
+    color_dict: Optional[Dict[str, str]] = None,
+    save_dir: Optional[str] = None,
+    add_to_title: str = "",
+    min_y_axis: float = 0.0,
+    hatches_dict: Optional[Dict[str, str]] = None,
+    group_order: Optional[List[str]] = None,
+    fig_width: Optional[float] = None,
+    fig_height: Optional[float] = None,
 ):
     """
     Plots AUC-RRC comparison bar plot with colors by Model type and hatches by Split.
-    """
-    if group_order is None:
-        group_order = list(stats_df["Group"].unique())
 
+    Ensures that only the **inner plot box** has fixed width and height, while the total figure
+    adjusts dynamically to accommodate the legend, labels, and title.
+
+    Parameters
+    ----------
+    stats_df : pd.DataFrame
+        DataFrame containing AUC-RRC statistics.
+    cmap : str, optional
+        Colormap for the bars, by default "tab10_r".
+    save_dir : Optional[str], optional
+        Directory to save the plot, by default None.
+    add_to_title : str, optional
+        Additional string for the plot name, by default "".
+    min_y_axis : float, optional
+        Minimum value for the y-axis, by default 0.0.
+    hatches_dict : Optional[Dict[str, str]], optional
+        Dictionary mapping splits to hatch patterns, by default None.
+    group_order : Optional[List[str]], optional
+        Order of groups for consistent color mapping, by default None.
+    fig_width : Optional[float], optional
+        Width of the **inner plot box**, by default None.
+    fig_height : Optional[float], optional
+        Height of the **inner plot box**, by default None.
+
+    Returns
+    -------
+    None
+    """
     if hatches_dict is None:
         hatches_dict = {"stratified": "\\\\", "scaffold_cluster": "", "time": "///"}
 
-    # Create color mapping for Model type
-    scalar_mappable = ScalarMappable(cmap=cmap)
+    if group_order:
+        all_groups = group_order + list(
+            stats_df.loc[
+                stats_df["Group"].str.startswith("random reject"), "Group"
+            ].unique()
+        )
+        stats_df["Group"] = pd.Categorical(
+            stats_df["Group"], categories=all_groups, ordered=True
+        )
+    else:
+        all_groups = stats_df["Group"].unique().tolist()
 
-    # unique_model_types = stats_df["Model type"].unique().pop('random reject')
+    stats_df = stats_df.sort_values("Group").reset_index(drop=True)
+
+    # **Sort splits according to `hatches_dict` order**
+    splits = list(hatches_dict.keys())
+    stats_df.loc[:, "Split"] = pd.Categorical(
+        stats_df["Split"], categories=splits, ordered=True
+    )
+    stats_df = stats_df.sort_values("Split").reset_index(drop=True)
+
     unique_model_types = stats_df.loc[
         stats_df["Model type"] != "random reject", "Model type"
     ].unique()
 
-    colors = scalar_mappable.to_rgba(range(len(unique_model_types)))
-    color_dict = {model: color for model, color in zip(unique_model_types, colors)}
-    color_dict["random reject"] = "black"  # Color for Random baseline
+    if color_dict is None:
+        scalar_mappable = ScalarMappable(cmap=cmap)
+        # Exclude "random reject" from color mapping, then add it manually as black
 
+        # Color mapping, ordered by `unique_model_types`
+        colors = scalar_mappable.to_rgba(range(len(unique_model_types)))
+        color_dict = {model: color for model, color in zip(unique_model_types, colors)}
+
+    color_dict["random reject"] = "black"  # Set "random reject" to black
+
+    # Append "random reject" back to model types for plotting
     unique_model_types = np.append(unique_model_types, "random reject")
-    # Calculate figure parameters
-    splits = stats_df["Split"].unique()
+
+    # Calculate number of splits and bar spacing
+    # splits = stats_df["Split"].unique()
     bar_width = 0.12
     group_spacing = 0.6
-    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # **Set default inner plot box size**
+    plot_width = fig_width if fig_width else 6
+    plot_height = fig_height if fig_height else 6
+
+    # **Compute total figure size dynamically**
+    total_width = plot_width + 4  # Add space for legend
+    total_height = plot_height + 4  # Add space for axis labels
+
+    # **Create the figure with fixed plot box dimensions**
+    fig = plt.figure(figsize=(total_width, total_height))
+    gs = gridspec.GridSpec(
+        1, 1, figure=fig, left=0.15, right=0.75, top=0.9, bottom=0.15
+    )  # Define space for the main plot
+    ax = fig.add_subplot(gs[0])
+    ax.set_position([0.15, 0.15, plot_width / total_width, plot_height / total_height])
 
     tick_positions = []
     tick_labels = []
 
-    # Plot bars for each split and group
+    # **Plot bars for each split and group**
     for i, split in enumerate(splits):
         split_data = stats_df[stats_df["Split"] == split]
-        split_data["Group"] = pd.Categorical(
-            split_data["Group"], categories=group_order, ordered=True
+        split_data.loc[:, "Group"] = pd.Categorical(
+            split_data["Group"], categories=all_groups, ordered=True
         )
-        split_data = split_data.sort_values("Group").reset_index(drop=True)
+        # split_data = split_data.sort_values("Group").reset_index(drop=True)
 
         for j, (_, row) in enumerate(split_data.iterrows()):
             position = (
@@ -1412,7 +1628,7 @@ def plot_auc_comparison(
                 + j * bar_width
             )
 
-            # Plot bar
+            # **Plot the bars**
             ax.bar(
                 position,
                 height=row["AUC-RRC_mean"],
@@ -1421,14 +1637,9 @@ def plot_auc_comparison(
                 edgecolor="white" if row["Model type"] == "random reject" else "black",
                 hatch=hatches_dict[row["Split"]],
                 width=bar_width,
-                label=(
-                    f"{row['Split']} {row['Model type']}"
-                    if position not in tick_positions
-                    else ""
-                ),
             )
 
-        # Add center position for tick labels
+        # **Add tick labels for each split**
         center_position = (
             i * (len(unique_model_types) * bar_width + group_spacing)
             + (len(unique_model_types) * bar_width) / 2
@@ -1436,8 +1647,13 @@ def plot_auc_comparison(
         tick_positions.append(center_position)
         tick_labels.append(split)
 
-    # Create legend
-    def create_stats_legend(color_dict, hatches_dict, splits, model_types):
+    # **Create legend**
+    def create_stats_legend(
+        color_dict: Dict[str, str],
+        hatches_dict: Dict[str, str],
+        splits: List[str],
+        model_types: Union[List[str], np.ndarray],
+    ):
         patches = []
         for split in splits:
             for model in model_types:
@@ -1452,30 +1668,36 @@ def plot_auc_comparison(
                 patches.append(patch)
         return patches
 
-    legend_elements = create_stats_legend(
-        color_dict, hatches_dict, splits, unique_model_types
-    )
+    if LEGEND_ON:
+        legend_elements = create_stats_legend(
+            color_dict, hatches_dict, splits, unique_model_types
+        )
 
-    ax.legend(
-        handles=legend_elements,
-        bbox_to_anchor=(1.05, 1),
-        loc="upper left",
-        borderaxespad=0,
-        frameon=False,
-        # title="Legend",
-    )
+        # **Move the legend outside the plot box**
+        ax.legend(
+            handles=legend_elements,
+            bbox_to_anchor=(1.05, 1),
+            loc="upper left",
+            borderaxespad=0,
+            frameon=False,
+        )
 
-    # Axes settings
+    # **Axes settings**
     ax.set_xticks(tick_positions)
     ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=9)
-    ax.set_xlabel("Splits")
-    ax.set_ylabel("AUC-RRC")
+    # Uncomment if needed. Adjust as needed.
+    # ax.set_xlabel("Splits")
+    ax.set_ylabel("RRC-AUC")
     ax.set_ylim(min_y_axis, 1.0)
 
-    # Save and show plot
+    # fig.subplots_adjust(left=0.12, right=0.85, top=0.9, bottom=0.2)
+    # plt.tight_layout()  # Ensures compact figure layout
+
+    # **Save and show the plot**
     plot_name = f"auc_comparison_barplot_{cmap}"
     plot_name += f"_{add_to_title}" if add_to_title else ""
     save_plot(fig, save_dir, plot_name, tighten=True)
+
     plt.show()
     plt.close()
 
@@ -1529,16 +1751,21 @@ if __name__ == "__main__":
     type_n_targets = "all"
     activity_type = args.activity_type
     project_name = args.project_name
+    # LEGEND_ON = args.legend_on
     color_map = args.color
     corr_cmap = args.corr_color
-    ############################## Testing ################################
+
+    ############################# Testing ################################
     # color_map = None
-    # color_map = 'tableau-colorblind10'
-    # activity_type = 'kx'
-    # type_n_targets = 'all'
-    # project_name = '2025-01-08-xc50-all'
-    # project_name = '2025-01-30-kx-all'
-    ############################## Testing ################################
+    # color_map = "tableau-colorblind10"
+    # data_name = "papyrus"
+    # color_map = "tab10_r"
+    # corr_cmap = "YlGnBu"
+    # activity_type = "kx"
+    # type_n_targets = "all"
+    # # project_name = '2025-01-08-xc50-all'
+    # project_name = "2025-02-19-kx-test"
+    # ############################## Testing ################################
 
     project_out_name = project_name
 
@@ -1668,7 +1895,7 @@ if __name__ == "__main__":
         "CRPS",
         "NLL",
         "Interval",
-    ]  #
+    ]
 
     highly_correlated_uctmetrics_uncorr = find_highly_correlated_metrics(
         df_pcm, uctmetrics_uncorr, threshold=0.9, save_dir=save_dir, cmap=corr_cmap
@@ -1681,37 +1908,43 @@ if __name__ == "__main__":
         cmap=corr_cmap,
     )
 
-    # plot_metrics(df_pcm, accmetrics, cmap="crest_r", save_dir=save_dir_no_time, hatches_dict=hatches_dict_no_time, group_order=group_order_no_time)
-    plot_metrics(
+    # plot_metrics(df_pcm, accmetrics, cmap="tab10_r", save_dir=save_dir_no_time, hatches_dict=hatches_dict_no_time, group_order=group_order_no_time)
+    color_dict = plot_metrics(
         df_no_time,
-        accmetrics,
+        accmetrics,  # 6
         cmap=color_map,
         save_dir=save_dir_no_time,
         hatches_dict=hatches_dict_no_time,
         group_order=group_order_no_time,
+        fig_width=12,
+        fig_height=3,
     )
 
     # plot_metrics(df_pcm, accmetrics2, cmap=color_map, save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
     plot_metrics(
         df_no_time,
-        accmetrics2,
+        accmetrics2,  # 3
         cmap=color_map,
         save_dir=save_dir_no_time,
         hatches_dict=hatches_dict_no_time,
         group_order=group_order_no_time,
+        fig_width=6,
+        fig_height=3,
     )
 
-    # plot_metrics(df_pcm, uctmetrics_uncorr, cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+    # plot_metrics(df_pcm, uctmetrics_uncorr, cmap="tab10_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
     plot_metrics(
         df_no_time,
-        uctmetrics_uncorr,
+        uctmetrics_uncorr,  # 5
         cmap=color_map,
         save_dir=save_dir_no_time,
         hatches_dict=hatches_dict_no_time,
         group_order=group_order_no_time,
+        fig_width=10,
+        fig_height=3,
     )
 
-    # plot_metrics(df_pcm, uctmetrics_uncorr, cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+    # plot_metrics(df_pcm, uctmetrics_uncorr, cmap="tab10_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
     plot_metrics(
         df_no_time,
         [
@@ -1723,6 +1956,8 @@ if __name__ == "__main__":
         save_dir=save_dir_no_time,
         hatches_dict=hatches_dict_no_time,
         group_order=group_order_no_time,
+        fig_width=6,  # 3
+        fig_height=3,
     )
     plot_metrics(
         df_no_time,
@@ -1734,30 +1969,40 @@ if __name__ == "__main__":
         save_dir=save_dir_no_time,
         hatches_dict=hatches_dict_no_time,
         group_order=group_order_no_time,
+        fig_width=4,  # 2
+        fig_height=3,
     )
 
     plot_metrics(
         df_no_time,
-        ["Miscalibration Area", "Sharpness", "CRPS", "Interval"],
+        [
+            "CRPS",
+            "Sharpness",
+            "Interval",
+        ],
         cmap=color_map,
         save_dir=save_dir_no_time,
         hatches_dict=hatches_dict_no_time,
         group_order=group_order_no_time,
+        fig_width=6,  # 3
+        fig_height=3,
     )
 
     for m in accmetrics2:
-        # plot_metrics(df_pcm, [m], cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+        # plot_metrics(df_pcm, [m], cmap="tab10_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
         plot_metrics(
             df_no_time,
-            [m],
+            [m],  # 1
             cmap=color_map,
             save_dir=save_dir_no_time,
             hatches_dict=hatches_dict_no_time,
             group_order=group_order_no_time,
+            fig_width=2,
+            fig_height=3,
         )
 
     for m in uctmetrics_uncorr:
-        # plot_metrics(df_pcm, [m], cmap="crest_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
+        # plot_metrics(df_pcm, [m], cmap="tab10_r", save_dir=save_dir, hatches_dict=hatches_dict, group_order=group_order)
         plot_metrics(
             df_no_time,
             [m],
@@ -1765,23 +2010,40 @@ if __name__ == "__main__":
             save_dir=save_dir_no_time,
             hatches_dict=hatches_dict_no_time,
             group_order=group_order_no_time,
+            fig_width=2,
+            fig_height=3,
         )
 
     # plot_comparison_metrics(df_pcm, uctmetrics_uncorr, cmap=color_map, save_dir=save_dir)
     plot_comparison_metrics(
-        df_calib_no_time, uctmetrics_uncorr, cmap=color_map, save_dir=save_dir_no_time
+        df_calib_no_time,
+        uctmetrics_uncorr,  # 10
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        fig_width=20,
+        fig_height=3,
     )
 
     mc_list = ["RMS Calibration", "MA Calibration", "Miscalibration Area"]
     # plot_comparison_metrics(df_pcm, mc_list, cmap=color_map, save_dir=save_dir)
     plot_comparison_metrics(
-        df_calib_no_time, mc_list, cmap=color_map, save_dir=save_dir_no_time
+        df_calib_no_time,
+        mc_list,  # 6
+        cmap=color_map,
+        save_dir=save_dir_no_time,
+        fig_width=12,
+        fig_height=3,
     )
 
     for mc in mc_list:
-        # plot_comparison_metrics(df_calib, ['Miscalibration Area'], cmap="crest_r", save_dir=save_dir)
+        # plot_comparison_metrics(df_calib, ['Miscalibration Area'], cmap="tab10_r", save_dir=save_dir)
         plot_comparison_metrics(
-            df_calib_no_time, [mc], cmap=color_map, save_dir=save_dir_no_time
+            df_calib_no_time,
+            [mc],  # 2
+            cmap=color_map,
+            save_dir=save_dir_no_time,
+            fig_width=4,
+            fig_height=3,
         )
 
     plot_calibration_data(
@@ -1791,7 +2053,41 @@ if __name__ == "__main__":
         title="Calibration Curves for Models",
         color_name=color_map,
         group_order=group_order_no_time,
+        fig_width=5,
+        fig_height=5,
     )
+
+    # Now lets do calibration for each one separately
+    dfs = [
+        final_aggregated_no_time.iloc[[i]] for i in range(len(final_aggregated_no_time))
+    ]
+    for i, df in enumerate(dfs):
+        plot_calibration_data(
+            df,
+            base_path,
+            save_dir_no_time,
+            title=f"Calibration Curves for {df['Group'].values[0]}",
+            color_name=color_map,
+            group_order=group_order_no_time,
+            fig_width=5,
+            fig_height=5,
+        )
+    # Now lets do calibration curves for each split separately
+    dfs = [
+        final_aggregated_no_time[final_aggregated_no_time["Split"] == s]
+        for s in final_aggregated_no_time["Split"].unique()
+    ]
+    for i, df in enumerate(dfs):
+        plot_calibration_data(
+            df,
+            base_path,
+            save_dir_no_time,
+            title=f"Calibration Curves for {df['Split'].values[0]}",
+            color_name=color_map,
+            group_order=group_order_no_time,
+            fig_width=5,
+            fig_height=5,
+        )
 
     df_pcm_stratified = df_pcm[df_pcm["Split"] == "stratified"]
     df_pcm_scaffold = df_pcm[df_pcm["Split"] == "scaffold_cluster"]
@@ -1820,24 +2116,32 @@ if __name__ == "__main__":
                 unc_type=uct_t,
                 max_rejection_ratio=0.95,
                 group_order=group_order_no_time,
+                fig_width=6,
+                fig_height=5,
             )
 
             plot_auc_comparison(
                 stats_df,
                 cmap=color_map,
+                color_dict=color_dict,
                 save_dir=save_dir_plot,
                 add_to_title="all" + add_to_title,
                 hatches_dict=hatches_dict_no_time,
                 group_order=group_order_no_time,
+                fig_width=4,
+                fig_height=3,
             )
             plot_auc_comparison(
                 stats_df,
                 cmap=color_map,
+                color_dict=color_dict,
                 save_dir=save_dir_plot,
                 add_to_title="all" + add_to_title + "-min-0.5",
                 hatches_dict=hatches_dict_no_time,
                 group_order=group_order_no_time,
                 min_y_axis=0.5,
+                fig_width=4,
+                fig_height=3,
             )
 
             save_stats_df(stats_df, save_dir_plot, add_to_title="all" + add_to_title)
@@ -1855,24 +2159,32 @@ if __name__ == "__main__":
                     unc_type=uct_t,
                     max_rejection_ratio=0.95,
                     group_order=group_order_no_time,
+                    fig_width=6,
+                    fig_height=5,
                 )
                 plot_auc_comparison(
                     stats_df,
                     cmap=color_map,
+                    color_dict=color_dict,
                     save_dir=save_dir_plot,
                     add_to_title=name + add_to_title,
                     hatches_dict=hatches_dict_no_time,
                     group_order=group_order_no_time,
+                    fig_width=2,
+                    fig_height=3,
                 )
 
                 plot_auc_comparison(
                     stats_df,
                     cmap=color_map,
+                    color_dict=color_dict,
                     save_dir=save_dir_plot,
                     add_to_title=name + add_to_title + "-min-0.5",
                     hatches_dict=hatches_dict_no_time,
                     group_order=group_order_no_time,
                     min_y_axis=0.5,
+                    fig_width=2,
+                    fig_height=3,
                 )
 
                 save_stats_df(stats_df, save_dir_plot, add_to_title=name + add_to_title)
@@ -1883,6 +2195,7 @@ if __name__ == "__main__":
         accmetrics,
         save_dir=save_dir_no_time,
         cmap=color_map,
+        group_order=group_order_no_time,
     )
     plot_pairplot(
         df_no_time,
@@ -1890,4 +2203,5 @@ if __name__ == "__main__":
         uctmetrics,
         save_dir=save_dir_no_time,
         cmap=color_map,
+        group_order=group_order_no_time,
     )

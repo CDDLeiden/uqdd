@@ -16,5 +16,5 @@ part=${5:-"SPBe_gpu"}
       conda_env=\"uqdd-118\"; \
   fi && \
   conda init && conda activate \$conda_env && \
-  python metrics_analysis.py --activity_type $activity --project_name $project --color $color --corr_color $corr_color" \
+  python metrics_analysis.py --activity_type $activity --project_name $project  --color $color --corr_color $corr_color" \
   -q SLURM -partition $part -wall 7 -days 7
