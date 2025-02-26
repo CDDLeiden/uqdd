@@ -469,7 +469,7 @@ def evaluate_predictions(
     alea_vars : torch.Tensor
         Aleatoric uncertainty estimates.
     model_type : str, optional
-        Type of model (e.g., "ensemble", "baseline"), by default "ensemble".
+        Type of model (e.g., "ensemble", "pnn"), by default "ensemble".
     logger : Optional[logging.Logger], optional
         Logger instance for logging messages, by default None.
     epi_vars : Optional[torch.Tensor], optional
@@ -981,7 +981,7 @@ def assign_wandb_tags(run: Any, config: Dict[str, Any]) -> Any:
     mt = config.get("MT", False)
     mt_tag = "MT" if mt else "ST"
     wandb_tags = [
-        config.get("model_type", "baseline"),
+        config.get("model_type", "pnn"),
         config.get("data_name", "papyrus"),
         config.get("activity_type", "xc50"),
         config.get("descriptor_protein", None),
@@ -1059,7 +1059,7 @@ def get_dataloader(
 def post_training_save_model(
     model: torch.nn.Module,
     config: Dict[str, Any],
-    model_type: str = "baseline",
+    model_type: str = "pnn",
     onnx: bool = True,
     tracker: str = "wandb",
     run: Optional[Any] = None,
@@ -1076,7 +1076,7 @@ def post_training_save_model(
     config : Dict[str, Any]
         Configuration dictionary.
     model_type : str, optional
-        Type of the model, by default "baseline".
+        Type of the model, by default "pnn".
     onnx : bool, optional
         Whether to save the model in ONNX format, by default True.
     tracker : str, optional
@@ -1159,7 +1159,7 @@ def get_tracker(
 def train_model_e2e(
     config: Dict[str, Any],
     model: Type[torch.nn.Module],
-    model_type: str = "baseline",
+    model_type: str = "pnn",
     model_kwargs: Optional[Dict[str, Any]] = None,
     logger: Optional[logging.Logger] = None,
     seed: int = 42,
@@ -1177,7 +1177,7 @@ def train_model_e2e(
     model : Type[torch.nn.Module]
         Model class to be instantiated and trained.
     model_type : str, optional
-        Type of the model, by default "baseline".
+        Type of the model, by default "pnn".
     model_kwargs : Optional[Dict[str, Any]], optional
         Additional keyword arguments for model initialization, by default None.
     logger : Optional[logging.Logger], optional

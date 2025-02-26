@@ -1,6 +1,6 @@
 import argparse
 
-from uqdd.models.baseline import run_baseline_wrapper, run_baseline_hyperparam
+from uqdd.models.pnn import run_pnn_wrapper, run_pnn_hyperparam
 from uqdd.models.ensemble import run_ensemble_wrapper
 from uqdd.models.mcdropout import run_mcdropout_wrapper
 from uqdd.models.evidential import run_evidential_wrapper, run_evidential_hyperparam
@@ -15,8 +15,8 @@ wandb.sdk.require("core")
 wandb.require("core")
 
 query_dict = {
-    "baseline": run_baseline_wrapper,
-    "baseline_hyperparam": run_baseline_hyperparam,
+    "pnn": run_pnn_wrapper,
+    "pnn_hyperparam": run_pnn_hyperparam,
     "ensemble": run_ensemble_wrapper,
     "mcdropout": run_mcdropout_wrapper,
     "evidential": run_evidential_wrapper,
@@ -123,9 +123,9 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="baseline",
+        default="pnn",
         # default="evidential",
-        choices=["baseline", "ensemble", "mcdropout", "evidential", "eoe", "emc"],
+        choices=["pnn", "ensemble", "mcdropout", "evidential", "eoe", "emc"],
         help="Model name argument",
     )
     parser.add_argument(
@@ -265,10 +265,10 @@ def main():
     seed = args.seed
 
     if sweep_count is not None:
-        if args.model in ["baseline", "evidential"]:
+        if args.model in ["pnn", "evidential"]:
             query_dict[f"{args.model}_hyperparam"](**kwargs)
         else:
-            print("Sweep count only supported for baseline and evidential models.")
+            print("Sweep count only supported for pnn and evidential models.")
     else:
         if repeats > 1:
             for i in range(repeats):

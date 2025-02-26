@@ -10,7 +10,7 @@ from numpy import ndarray
 from torch.nn import Module
 
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, DATASET_DIR
-from uqdd.models.baseline import BaselineDNN
+from uqdd.models.pnn import PNN
 from uqdd.utils import create_logger, save_pickle
 
 from uqdd.models.utils_train import (
@@ -40,7 +40,7 @@ class EnsembleDNN(nn.Module):
     config : dict, optional
         Configuration dictionary.
     model_class : Type[nn.Module], optional
-        The class of the base model to be used in the ensemble, by default BaselineDNN.
+        The class of the base model to be used in the ensemble, by default PNN.
     model_list : List[nn.Module], optional
         A pre-initialized list of models to be used in the ensemble, by default None.
     kwargs : dict
@@ -48,11 +48,11 @@ class EnsembleDNN(nn.Module):
     """
 
     def __init__(
-            self,
-            config: Optional[dict] = None,
-            model_class: Type[nn.Module] = BaselineDNN,
-            model_list: Optional[List[nn.Module]] = None,
-            **kwargs
+        self,
+        config: Optional[dict] = None,
+        model_class: Type[nn.Module] = PNN,
+        model_list: Optional[List[nn.Module]] = None,
+        **kwargs,
     ) -> None:
         super(EnsembleDNN, self).__init__()
         if config is None:
@@ -72,7 +72,9 @@ class EnsembleDNN(nn.Module):
                 models.append(model)
         self.models = nn.ModuleList(models)
 
-    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for the ensemble model.
 
@@ -131,7 +133,9 @@ def log_wandb_ensemble(results_tensor_avg: np.ndarray, config: dict) -> None:
     ]
     n_targets = config.get("n_targets", -1)
     if n_targets > 1:
-        raise NotImplementedError("Multitask training not yet supported for Ensemble Models")
+        raise NotImplementedError(
+            "Multitask training not yet supported for Ensemble Models"
+        )
         # for task in n_targets:
         #     wandb_keys += [f"val/rmse/{task}", f"val/r2/{task}", f"val/evs/{task}"]
 
@@ -169,7 +173,9 @@ def log_wandb_test(test_tensor_avg: np.ndarray, config: dict) -> None:
     n_targets = config.get("n_targets", -1)
 
     if n_targets > 1:  # MT
-        raise NotImplementedError("Multitask training not yet supported for Ensemble Models")
+        raise NotImplementedError(
+            "Multitask training not yet supported for Ensemble Models"
+        )
         # for task in n_targets:
         #     wandb_keys += [
         #         f"test/rmse/task_{task}",
@@ -208,7 +214,7 @@ def process_results_arrs(
     test_arrs: List[np.ndarray],
     config: dict,
     logger: logging.Logger,
-    model_type: str = "ensemble"
+    model_type: str = "ensemble",
 ) -> np.ndarray:
     """
     Processes and logs results from multiple ensemble models.
@@ -272,10 +278,7 @@ def process_results_arrs(
 
 # Function to train one model on a specific GPU
 def train_one_ensemble_member(
-    config: dict,
-    gpu_id: int,
-    model_idx: int,
-    logger: logging.Logger
+    config: dict, gpu_id: int, model_idx: int, logger: logging.Logger
 ) -> tuple[Module, ndarray, float, dict[str, Any]]:
     """
     Trains a single ensemble model instance on a specified GPU.
@@ -306,7 +309,7 @@ def train_one_ensemble_member(
         # Train the model on the specified GPU
         best_model, config_, results_arr, test_arr = train_model_e2e(
             config,
-            model=BaselineDNN,
+            model=PNN,
             model_type="ensemble",
             logger=logger,
             tracker="tensor",
@@ -323,7 +326,9 @@ def train_one_ensemble_member(
         torch.cuda.empty_cache()
 
 
-def run_ensemble(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, dict]:
+def run_ensemble(
+    config: Optional[dict] = None,
+) -> Tuple[nn.Module, nn.Module, dict, dict]:
     """
     Trains and evaluates an ensemble of deep learning models.
 
@@ -359,7 +364,7 @@ def run_ensemble(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, d
     for _ in range(ensemble_size):
         best_model, config_, results_arr, test_arr = train_model_e2e(
             config,
-            model=BaselineDNN,
+            model=PNN,
             model_type="ensemble",
             logger=logger,
             tracker="tensor",

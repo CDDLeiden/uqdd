@@ -14,9 +14,9 @@ from uqdd.models.utils_train import (
 )
 
 
-class BaselineDNN(nn.Module):
+class PNN(nn.Module):
     """
-    A baseline deep neural network (DNN) for regression or classification tasks using
+    A Probabilistic neural network (PNN) for regression or classification tasks using
     chemical and (optionally) protein descriptors as input.
 
     Parameters
@@ -56,16 +56,17 @@ class BaselineDNN(nn.Module):
     forward(inputs: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         Performs forward pass through the model.
     """
+
     def __init__(
-            self,
-            config: Optional[dict] = None,
-            logger: Optional[logging.Logger] = None,
-            aleavar_layer_included: bool = True,
-            **kwargs,
+        self,
+        config: Optional[dict] = None,
+        logger: Optional[logging.Logger] = None,
+        aleavar_layer_included: bool = True,
+        **kwargs,
     ) -> None:
-        super(BaselineDNN, self).__init__()
+        super(PNN, self).__init__()
         if config is None:
-            config = get_model_config(model_type="baseline", **kwargs)
+            config = get_model_config(model_type="pnn", **kwargs)
         self.config = config
 
         chem_input_dim = config.get("chem_input_dim", None)
@@ -90,7 +91,7 @@ class BaselineDNN(nn.Module):
         self.aleavar_layer = None
         self.output_layer = None
         self.logger = (
-            create_logger(name="baseline", file_level="debug", stream_level="info")
+            create_logger(name="pnn", file_level="debug", stream_level="info")
             if not logger
             else logger
         )
@@ -155,7 +156,7 @@ class BaselineDNN(nn.Module):
 
     @staticmethod
     def create_mlp(
-            input_dim: int, layer_dims: List[int], dropout: float
+        input_dim: int, layer_dims: List[int], dropout: float
     ) -> nn.Sequential:
         """
         Creates a multi-layer perceptron (MLP) with ReLU activations and dropout.
@@ -187,7 +188,11 @@ class BaselineDNN(nn.Module):
         return nn.Sequential(*modules)  # , layer_dims[-1]
 
     def init_layers(
-        self, config: dict, chem_input_dim: Optional[int], prot_input_dim: Optional[int], output_dim: int
+        self,
+        config: dict,
+        chem_input_dim: Optional[int],
+        prot_input_dim: Optional[int],
+        output_dim: int,
     ) -> None:
         """
         Initializes the feature extractors and regressor/classifier layers.
@@ -247,9 +252,9 @@ class BaselineDNN(nn.Module):
             )
 
 
-def run_baseline(config: Optional[dict] = None) -> nn.Module:
+def run_pnn(config: Optional[dict] = None) -> nn.Module:
     """
-    Runs training for the baseline model and returns the trained model.
+    Runs training for the PNN model and returns the trained model.
 
     Parameters
     ----------
@@ -259,21 +264,21 @@ def run_baseline(config: Optional[dict] = None) -> nn.Module:
     Returns
     -------
     nn.Module
-        Trained baseline DNN model.
+        Trained PNN model.
     """
     best_model, _, _, _ = train_model_e2e(
         config,
-        model=BaselineDNN,
-        model_type="baseline",
+        model=PNN,
+        model_type="pnn",
         logger=LOGGER,
     )
 
     return best_model
 
 
-def run_baseline_wrapper(**kwargs) -> nn.Module:
+def run_pnn_wrapper(**kwargs) -> nn.Module:
     """
-    Wrapper function for running the baseline model with logging.
+    Wrapper function for running the pnn model with logging.
 
     Parameters
     ----------
@@ -283,18 +288,18 @@ def run_baseline_wrapper(**kwargs) -> nn.Module:
     Returns
     -------
     nn.Module
-        Trained baseline model.
+        Trained pnn model.
     """
     global LOGGER
-    LOGGER = create_logger("baseline", file_level="debug", stream_level="info")
+    LOGGER = create_logger("pnn", file_level="debug", stream_level="info")
 
-    config = get_model_config("baseline", **kwargs)
-    return run_baseline(config=config)
+    config = get_model_config("pnn", **kwargs)
+    return run_pnn(config=config)
 
 
-def run_baseline_hyperparam(**kwargs) -> None:
+def run_pnn_hyperparam(**kwargs) -> None:
     """
-    Runs a hyperparameter sweep for the baseline model using Weights & Biases.
+    Runs a hyperparameter sweep for the pnn model using Weights & Biases.
 
     Parameters
     ----------
@@ -308,15 +313,11 @@ def run_baseline_hyperparam(**kwargs) -> None:
     None
     """
     global LOGGER
-    LOGGER = create_logger(
-        name="baseline-sweep", file_level="debug", stream_level="info"
-    )
+    LOGGER = create_logger(name="pnn-sweep", file_level="debug", stream_level="info")
 
     sweep_count = kwargs.pop("sweep_count")
     wandb_project_name = kwargs.pop("wandb_project_name")
-    config = get_sweep_config(
-        "baseline", **kwargs, wandb_project_name=wandb_project_name
-    )
+    config = get_sweep_config("pnn", **kwargs, wandb_project_name=wandb_project_name)
     config["project"] = wandb_project_name
 
     sweep_id = wandb.sweep(
@@ -325,7 +326,7 @@ def run_baseline_hyperparam(**kwargs) -> None:
     )
     print(f"Running sweep with SWEEP_ID: {sweep_id}")
 
-    wandb.agent(sweep_id, function=run_baseline, count=sweep_count)
+    wandb.agent(sweep_id, function=run_pnn, count=sweep_count)
 
 
 # if __name__ == "__main__":
@@ -338,12 +339,12 @@ def run_baseline_hyperparam(**kwargs) -> None:
 #     desc_chem = "ecfp2048"
 #     median_scaling = False
 #     ext = "pkl"
-#     wandb_project_name = "baseline-test"
+#     wandb_project_name = "pnn-test"
 #     sweep_count = 0  # 250
 #     aleatoric = True
 #     # epochs=1
 #     #
-#     run_baseline_wrapper(
+#     run_pnn_wrapper(
 #         data_name=data_name,
 #         activity_type=activity,
 #         n_targets=n_targets,
@@ -361,7 +362,7 @@ def run_baseline_hyperparam(**kwargs) -> None:
 #     #
 #     sweep_count = 5
 #     epochs = 5
-#     run_baseline_hyperparam(
+#     run_pnn_hyperparam(
 #         sweep_count=sweep_count,
 #         epochs=epochs,
 #         data_name=data_name,

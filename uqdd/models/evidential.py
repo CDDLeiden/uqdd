@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from uqdd import DEVICE
-from uqdd.models.baseline import BaselineDNN
+from uqdd.models.pnn import PNN
 from uqdd.models.loss import nig_nll
 from uqdd.utils import create_logger
 
@@ -253,7 +253,7 @@ class Dirichlet(nn.Module):
         return alpha
 
 
-class EvidentialDNN(BaselineDNN):
+class EvidentialDNN(PNN):
     """
     Evidential Deep Neural Network (DNN) for regression and classification.
 

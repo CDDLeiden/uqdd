@@ -9,7 +9,7 @@ from uqdd import DEVICE, MODELS_DIR
 # from uqdd.utils import get_config
 from uqdd.utils import load_df, create_logger
 from uqdd.models.utils_models import load_model, get_model_config, calculate_means
-from uqdd.models.baseline import BaselineDNN
+from uqdd.models.pnn import PNN
 from uqdd.models.ensemble import EnsembleDNN
 from uqdd.models.mcdropout import mc_predict
 from uqdd.models.evidential import (
@@ -158,7 +158,7 @@ def preprocess_runs(
 # Get model class and predict function
 def get_model_class(model_type: str):
     if model_type.lower() in ["baseline", "mcdropout"]:
-        model_class = BaselineDNN
+        model_class = PNN
     elif model_type.lower() == "ensemble":
         model_class = EnsembleDNN
     elif model_type.lower() in ["evidential", "emc"]:

@@ -1,7 +1,7 @@
 {
     "xc50": {
         "random": {
-            "model_type": "baseline",
+            "model_type": "pnn",
             "loss": "gaussnll",
             "aleatoric": true,
             "chem_layers": [512],
@@ -19,7 +19,7 @@
             "max_norm": 50.0
         },
         "scaffold_cluster": {
-            "model_type": "baseline",
+            "model_type": "pnn",
             "loss": "gaussnll",
             "aleatoric": true,
             "chem_layers": [512],
@@ -37,7 +37,7 @@
             "max_norm": 50.0
         },
         "time": {
-            "model_type": "baseline",
+            "model_type": "pnn",
             "loss": "gaussnll",
             "aleatoric": true,
             "chem_layers": [512],
@@ -57,7 +57,7 @@
     },
     "kx": {
         "random": {
-        "model_type": "baseline",
+        "model_type": "pnn",
         "loss": "gaussnll",
         "aleatoric": true,
         "chem_layers": [256],
@@ -75,7 +75,7 @@
         "max_norm": 50.0
         },
         "scaffold_cluster": {
-            "model_type": "baseline",
+            "model_type": "pnn",
             "loss": "gaussnll",
             "aleatoric": true,
             "chem_layers": [512],
@@ -93,7 +93,7 @@
             "max_norm": 50.0
         },
         "time": {
-            "model_type": "baseline",
+            "model_type": "pnn",
             "loss": "gaussnll",
             "aleatoric": true,
             "chem_layers": [256],

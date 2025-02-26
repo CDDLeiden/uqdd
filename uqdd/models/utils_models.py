@@ -141,14 +141,14 @@ def get_desc_len(
     return tuple(lengths)
 
 
-def get_model_config(model_type: str = "baseline", **kwargs) -> Dict:
+def get_model_config(model_type: str = "pnn", **kwargs) -> Dict:
     """
     Retrieves the configuration dictionary for model training.
 
     Parameters:
     -----------
-    model_type : str, default="baseline"
-        The type of model configuration to load (e.g., "baseline", "ensemble", "mcdropout").
+    model_type : str, default="pnn"
+        The type of model configuration to load (e.g., "pnn", "ensemble", "mcdropout").
     **kwargs : dict
         Additional parameters to override default configuration values.
 
@@ -158,7 +158,7 @@ def get_model_config(model_type: str = "baseline", **kwargs) -> Dict:
         The model configuration dictionary.
     """
     assert model_type in [
-        "baseline",
+        "pnn",
         "ensemble",
         "mcdropout",
         "evidential",
@@ -180,13 +180,13 @@ def get_model_config(model_type: str = "baseline", **kwargs) -> Dict:
     )
 
 
-def get_sweep_config(model_name: str = "baseline", **kwargs) -> Dict:
+def get_sweep_config(model_name: str = "pnn", **kwargs) -> Dict:
     """
     Retrieves the sweep configuration for hyperparameter tuning.
 
     Parameters:
     -----------
-    model_name : str, default="baseline"
+    model_name : str, default="pnn"
         The name of the model to retrieve sweep configurations for.
     **kwargs : dict
         Additional parameters to override default sweep configurations.
@@ -205,7 +205,7 @@ def get_sweep_config(model_name: str = "baseline", **kwargs) -> Dict:
         the value from `kwargs` will take precedence.
     """
     assert model_name in [
-        "baseline",
+        "pnn",
         "ensemble",
         "mcdropout",
         "evidential",
@@ -486,7 +486,7 @@ def build_lr_scheduler(
 def save_model(
     config: Dict[str, Any],
     model: nn.Module,
-    model_name: str = f"{TODAY}-baseline_random_ankh-base_ecfp2048",
+    model_name: str = f"{TODAY}-pnn_random_ankh-base_ecfp2048",
     data_specific_path: Optional[str] = None,
     desc_prot_len: int = 0,
     desc_chem_len: int = 1024,
@@ -755,7 +755,7 @@ def get_model_name(config: Dict[str, Any], run: Optional[wandb.run] = None) -> s
         descriptor_protein = config.get("descriptor_protein", None)
         descriptor_chemical = config.get("descriptor_chemical", None)
         split_type = config.get("split_type", "random")
-        model_type = config.get("model_type", "baseline")
+        model_type = config.get("model_type", "pnn")
         multitask = config.get("MT", False)
         seed = config.get("seed", 42)
 

@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from uqdd import DEVICE
-from uqdd.models.baseline import BaselineDNN
+from uqdd.models.pnn import PNN
 from uqdd.utils import create_logger
 
 from uqdd.models.utils_train import (
@@ -79,11 +79,11 @@ def mc_predict(
     return outputs_all.cpu(), targets.cpu(), aleatoric_all.cpu()
 
 
-def run_mcdropout(config: Optional[Dict[str, Any]] = None) -> Tuple[
-    nn.Module, Optional[Any], Dict[str, Any], Dict[str, Any]
-]:
+def run_mcdropout(
+    config: Optional[Dict[str, Any]] = None
+) -> Tuple[nn.Module, Optional[Any], Dict[str, Any], Dict[str, Any]]:
     """
-    Trains and evaluates a BaselineDNN model with Monte Carlo Dropout for uncertainty quantification.
+    Trains and evaluates a PNN model with Monte Carlo Dropout for uncertainty quantification.
 
     Parameters
     ----------
@@ -92,8 +92,8 @@ def run_mcdropout(config: Optional[Dict[str, Any]] = None) -> Tuple[
 
     Returns
     -------
-    Tuple[nn.Module (BaselineDNN), Optional[Any], Dict[str, Any], Dict[str, Any]]
-        - Trained BaselineDNN model.
+    Tuple[nn.Module (PNN), Optional[Any], Dict[str, Any], Dict[str, Any]]
+        - Trained PNN model.
         - Isotonic recalibration model (if applicable).
         - Evaluation metrics.
         - Visualization plots.
@@ -105,7 +105,7 @@ def run_mcdropout(config: Optional[Dict[str, Any]] = None) -> Tuple[
     num_mc_samples = config.get("num_mc_samples", 100)
     best_model, config, _, _ = train_model_e2e(
         config,
-        model=BaselineDNN,
+        model=PNN,
         model_type="mcdropout",
         logger=LOGGER,
     )
@@ -154,7 +154,7 @@ def run_mcdropout_wrapper(**kwargs: Any):
 
     Returns
     -------
-        - Trained BaselineDNN model.
+        - Trained PNN model.
         - Isotonic recalibration model (if applicable).
         - Evaluation metrics.
         - Visualization plots.
