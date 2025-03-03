@@ -3,8 +3,9 @@
 activity=${1:-"kx"}
 project=${2:-"2025-02-11-kx-all"}
 color=${3:-"tab10_r"}
-corr_color=${4:-"YlGnBu"}
-part=${5:-"SPBe_gpu"}
+color_2=${4:-"Paired"}
+corr_color=${5:-"YlGnBu"}
+part=${6:-"DESMOND"}
 
 /home/bkhalil/Repos-others/gsubmitter/cmdsubmitter.py \
   -cmd "cd /home/bkhalil/Repos/uqdd/ && \
@@ -16,5 +17,5 @@ part=${5:-"SPBe_gpu"}
       conda_env=\"uqdd-118\"; \
   fi && \
   conda init && conda activate \$conda_env && \
-  python metrics_analysis.py --activity_type $activity --project_name $project  --color $color --corr_color $corr_color" \
+  python metrics_analysis.py --activity_type $activity --project_name $project  --color $color --color_2 $color_2 --corr_color $corr_color" \
   -q SLURM -partition $part -wall 7 -days 7

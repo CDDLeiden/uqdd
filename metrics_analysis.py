@@ -77,16 +77,19 @@ string_cols = ["wandb project", "wandb run", "model name"]
 order_by = ["Split", "Model type"]
 
 group_order = [
+    "stratified_pnn",
     "stratified_ensemble",
     "stratified_eoe",
     "stratified_evidential",
     "stratified_emc",
     "stratified_mcdropout",
+    "scaffold_cluster_pnn",
     "scaffold_cluster_ensemble",
     "scaffold_cluster_eoe",
     "scaffold_cluster_evidential",
     "scaffold_cluster_emc",
     "scaffold_cluster_mcdropout",
+    "time_pnn",
     "time_ensemble",
     "time_eoe",
     "time_evidential",
@@ -95,11 +98,13 @@ group_order = [
 ]
 
 group_order_no_time = [
+    "stratified_pnn",
     "stratified_ensemble",
     "stratified_eoe",
     "stratified_evidential",
     "stratified_emc",
     "stratified_mcdropout",
+    "scaffold_cluster_pnn",
     "scaffold_cluster_ensemble",
     "scaffold_cluster_eoe",
     "scaffold_cluster_evidential",
@@ -609,7 +614,7 @@ def plot_metrics(
 
     fig = plt.figure(figsize=(total_width, total_height))
     gs = gridspec.GridSpec(
-        1, 1, figure=fig, left=0.1, right=0.75, top=0.9, bottom=0.15
+        1, 1, figure=fig, left=0.1, right=0.75, top=0.9, bottom=0.2
     )  # Main plot area
 
     ax = fig.add_subplot(gs[0])  # Main plot area
@@ -732,6 +737,8 @@ def plot_metrics(
     )
     # ax.set_xlabel("Metrics")
     # ax.set_ylabel("Values")
+    # start the ylabel from minimum 0.0
+    ax.set_ylim(bottom=0.0)
 
     if save_dir:
         metrics_names = "_".join(metrics)
@@ -1741,7 +1748,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--color", type=str, default="tab10_r", help="name of the color map"
     )
-
+    # add second color pallete for rmse rejection and calibration curves
+    parser.add_argument(
+        "--color_2", type=str, default=None, help="name of the color map"
+    )
     parser.add_argument(
         "--corr_color", type=str, default="YlGnBu", help="name of the color map"
     )
@@ -1753,18 +1763,20 @@ if __name__ == "__main__":
     project_name = args.project_name
     # LEGEND_ON = args.legend_on
     color_map = args.color
+    color_map_2 = args.color_2
+    color_map_2 = color_map if color_map_2 is None else color_map_2
     corr_cmap = args.corr_color
 
     ############################# Testing ################################
-    # color_map = None
-    # color_map = "tableau-colorblind10"
+    # # color_map = None
+    # # color_map = "tableau-colorblind10"
     # data_name = "papyrus"
     # color_map = "tab10_r"
     # corr_cmap = "YlGnBu"
-    # activity_type = "kx"
+    # activity_type = "xc50"
     # type_n_targets = "all"
     # # project_name = '2025-01-08-xc50-all'
-    # project_name = "2025-02-19-kx-test"
+    # project_name = "test"
     # ############################## Testing ################################
 
     project_out_name = project_name
@@ -1773,6 +1785,7 @@ if __name__ == "__main__":
 
     file_1 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_ensemble_mcdp_{activity_type}/metrics.csv"
     file_2 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_evidential_{activity_type}/metrics.csv"
+    file_3 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_pnn_{activity_type}/metrics.csv"
 
     save_dir = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}/{color_map}/"
     save_dir_no_time = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}-no-time/{color_map}/"
@@ -1780,7 +1793,8 @@ if __name__ == "__main__":
 
     df_1 = pd.read_csv(file_1, header=0)
     df_2 = pd.read_csv(file_2, header=0)
-    df_main = pd.concat([df_1, df_2])
+    df_3 = pd.read_csv(file_3, header=0)
+    df_main = pd.concat([df_1, df_2, df_3])
 
     # # replace random with stratified for the random split
     df_main["Split"] = df_main["Split"].apply(
@@ -2051,7 +2065,7 @@ if __name__ == "__main__":
         base_path,
         save_dir_no_time,
         title="Calibration Curves for Models",
-        color_name=color_map,
+        color_name=color_map_2,
         group_order=group_order_no_time,
         fig_width=5,
         fig_height=5,
@@ -2067,7 +2081,7 @@ if __name__ == "__main__":
             base_path,
             save_dir_no_time,
             title=f"Calibration Curves for {df['Group'].values[0]}",
-            color_name=color_map,
+            color_name=color_map_2,
             group_order=group_order_no_time,
             fig_width=5,
             fig_height=5,
@@ -2083,7 +2097,7 @@ if __name__ == "__main__":
             base_path,
             save_dir_no_time,
             title=f"Calibration Curves for {df['Split'].values[0]}",
-            color_name=color_map,
+            color_name=color_map_2,
             group_order=group_order_no_time,
             fig_width=5,
             fig_height=5,
@@ -2109,7 +2123,7 @@ if __name__ == "__main__":
             stats_df = plot_rmse_rejection_curves(
                 df_no_time,
                 base_path,
-                cmap=color_map,
+                cmap=color_map_2,
                 save_dir_plot=save_dir_plot,
                 add_to_title="all" + add_to_title,
                 normalize_rmse=normalize_rmse,
@@ -2152,7 +2166,7 @@ if __name__ == "__main__":
                 stats_df = plot_rmse_rejection_curves(
                     df,
                     base_path,
-                    cmap=color_map,
+                    cmap=color_map_2,
                     save_dir_plot=save_dir_plot,
                     add_to_title=name + add_to_title,
                     normalize_rmse=normalize_rmse,
@@ -2194,7 +2208,7 @@ if __name__ == "__main__":
         "Pairplot for Accuracy Metrics",
         accmetrics,
         save_dir=save_dir_no_time,
-        cmap=color_map,
+        cmap=color_map_2,
         group_order=group_order_no_time,
     )
     plot_pairplot(
@@ -2202,6 +2216,6 @@ if __name__ == "__main__":
         "Pairplot for Uncertainty Metrics",
         uctmetrics,
         save_dir=save_dir_no_time,
-        cmap=color_map,
+        cmap=color_map_2,
         group_order=group_order_no_time,
     )

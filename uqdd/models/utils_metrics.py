@@ -215,7 +215,7 @@ def process_preds(
     y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
     y_std = epi_vars.sqrt()
     # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
-    y_true = targets  # .squeeze()
+    y_true = targets.squeeze()
 
     if task_idx is not None:
         # For MTL, select predictions for the specific task
@@ -268,9 +268,9 @@ def get_preds_export_path(data_specific_path: str, model_name: str) -> Path:
 def create_df_preds(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    y_eps: np.ndarray,
     y_err: np.ndarray,
     y_alea: Optional[np.ndarray] = None,
+    y_eps: Optional[np.ndarray] = None,
     export: bool = True,
     data_specific_path: Optional[str] = None,
     model_name: Optional[str] = None,
@@ -309,9 +309,9 @@ def create_df_preds(
         {
             "y_true": y_true,
             "y_pred": y_pred,
-            "y_eps": y_eps,
             "y_err": y_err,
             "y_alea": y_alea,
+            "y_eps": y_eps,
         }
     )
 
