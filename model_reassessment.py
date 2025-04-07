@@ -5,20 +5,14 @@ import argparse
 import glob
 
 from uqdd import DEVICE, MODELS_DIR
-
-# from uqdd.utils import get_config
 from uqdd.utils import load_df, create_logger
-from uqdd.models.utils_models import load_model, get_model_config, calculate_means
+from uqdd.models.utils_models import load_model, get_model_config
 from uqdd.models.pnn import PNN
 from uqdd.models.ensemble import EnsembleDNN
 from uqdd.models.mcdropout import mc_predict
-from uqdd.models.evidential import (
-    EvidentialDNN,
-    ev_predict,
-    ev_predict_params_nll,
-)
+from uqdd.models.evidential import EvidentialDNN, ev_predict, ev_nll
 from uqdd.models.eoe import EoEDNN
-from uqdd.models.emc import emc_predict, emc_predict_params_nll
+from uqdd.models.emc import emc_predict, emc_nll
 
 # METRICS
 from uqdd.models.utils_train import (
@@ -40,14 +34,36 @@ import ast
 #     if isinstance(val, str):
 #         return ast.literal_eval(val)
 #     return val
+#
+# def evid_nll(evidential_model, test_dataloader, model_type="evidential", device=DEVICE):
+#     # TODO reimplement this function for correct averaging over parameters for eoe and emc.
+#     if model_type in ["evidential", "eoe"]:
+#         return ev_predict_params_nll(evidential_model, test_dataloader, device=device)
+#
+#     elif model_type == "emc":
+#         return emc_predict_params_nll(evidential_model, test_dataloader, device=device)
+#
+#     else:
+#         return None
 
 
-def evid_nll(evidential_model, test_dataloader, model_type="evidential", device=DEVICE):
+def nll_evidentials(
+    evidential_model,
+    test_dataloader,
+    model_type="evidential",
+    num_mc_samples=100,
+    device=DEVICE,
+):
     if model_type in ["evidential", "eoe"]:
-        return ev_predict_params_nll(evidential_model, test_dataloader, device=device)
+        return ev_nll(evidential_model, test_dataloader, device=device)
 
     elif model_type == "emc":
-        return emc_predict_params_nll(evidential_model, test_dataloader, device=device)
+        return emc_nll(
+            evidential_model,
+            test_dataloader,
+            num_mc_samples=num_mc_samples,
+            device=device,
+        )
 
     else:
         return None
@@ -203,15 +219,16 @@ def get_preds(model, dataloaders, model_type, subset="test", num_mc_samples=100)
     else:
         preds, labels, alea_vars = preds_res
         epi_vars = None
-    if model_type in ["eoe", "emc"]:
-        preds, alea_vars, epi_vars = calculate_means(preds, alea_vars, epi_vars)
+    # if model_type in ["eoe", "emc"]:
+    #     preds, alea_vars, epi_vars = calculate_means(preds, alea_vars, epi_vars)
     return preds, labels, alea_vars, epi_vars
 
 
-def pkl_preds_export(preds, labels, alea_vars, epi_vars, outpath):
+def pkl_preds_export(preds, labels, alea_vars, epi_vars, outpath, model_type):
+    # def pkl_preds_export(y_preds, y_true, y_err, y_alea, y_eps, outpath):
     # preds, labels = predict(model, dataloaders["test"], return_targets=True)
-    y_true, y_pred, y_eps, y_err, y_alea = process_preds(
-        preds, labels, alea_vars, epi_vars, None
+    y_true, y_pred, y_err, y_alea, y_eps = process_preds(
+        preds, labels, alea_vars, epi_vars, None, model_type
     )
     df = create_df_preds(
         y_true=y_true,
@@ -291,10 +308,15 @@ def reassess_metrics(
                 num_mc_samples=num_mc_samples,
             )
             # if model_type in ["evidential"]:  # , "eoe", "emc"
-            # calculate evidential nll
-            nll = evid_nll(
-                model, dataloaders["test"], model_type=model_type, device=DEVICE
+            # TODO: calculate evidential nll
+            nll = nll_evidentials(
+                model,
+                dataloaders["test"],
+                model_type=model_type,
+                num_mc_samples=num_mc_samples,
+                device=DEVICE,
             )
+            # nll = None
             # if nll and nll > 3.0:
             #     # pass
             #     nll = evid_nll(
@@ -303,7 +325,7 @@ def reassess_metrics(
             # print(f"Evidential NLL: {nll}")
 
             df = pkl_preds_export(
-                preds, labels, alea_vars, epi_vars, model_fig_out_path
+                preds, labels, alea_vars, epi_vars, model_fig_out_path, model_type
             )
 
             # Calculate the metrics
@@ -333,6 +355,13 @@ def reassess_metrics(
                 subset="val",
                 num_mc_samples=num_mc_samples,
             )
+            nll = nll_evidentials(
+                model,
+                dataloaders["val"],
+                model_type=model_type,
+                num_mc_samples=num_mc_samples,
+                device=DEVICE,
+            )
 
             iso_recal_model = recalibrate_model(
                 preds_val,
@@ -346,12 +375,11 @@ def reassess_metrics(
                 epi_test=epi_vars,
                 uct_logger=uct_logger,
                 figpath=model_fig_out_path,
+                nll=nll,
             )
 
             # Log the metrics to the CSV file
             uct_logger.csv_log()
-    #
-    # csv_nll_post_processing(csv_out_path)
 
 
 if __name__ == "__main__":
@@ -382,12 +410,14 @@ if __name__ == "__main__":
     runs_file_name = args.runs_file_name
 
     ############################## Testing ################################
-    # activity_type = "kx"
-    # project_name = "test"
-    # # project_name = "runs_ensemble_mcdp_xc50"
-    # runs_file_name = "runs_pnn_kx.csv"
+    # activity_type = "xc50"
+    # # project_name = "test"
+    # project_name = "runs_pnn_xc50"
+    # # runs_file_name = "runs_evidential_kx.csv"
     # # runs_file_name = "runs_ensemble_mcdp_xc50.csv"
-    # # "/users/home/bkhalil/Repos/uqdd/uqdd/data/runs/runs_evidential_old_kx.csv"
+    # # runs_file_name = "runs_test.csv"
+    # runs_file_name = "runs_pnn_xc50.csv"
+    # "/users/home/bkhalil/Repos/uqdd/uqdd/data/runs/runs_evidential_old_kx.csv"
     #######################################################################
     data_name = "papyrus"
     type_n_targets = "all"
@@ -446,7 +476,7 @@ if __name__ == "__main__":
     print("Runs_df preprocessed")
 
     reassess_metrics(runs_df, figs_out_path, csv_out_path, project_out_name, logger)
-    #
+
     # # Reassessing metrics and recalibration of the pretrained models
     # for index, row in runs_df.iterrows():
     #     model_path = row["model_path"]
