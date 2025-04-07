@@ -9,9 +9,7 @@ from uqdd.models.utils_models import (
     get_model_config,
     get_sweep_config,
 )
-from uqdd.models.utils_train import (
-    train_model_e2e,
-)
+from uqdd.models.utils_train import train_model_e2e, predict
 
 
 class PNN(nn.Module):
@@ -252,7 +250,7 @@ class PNN(nn.Module):
             )
 
 
-def run_pnn(config: Optional[dict] = None) -> nn.Module:
+def run_pnn(config: Optional[dict] = None) -> nn.Module:  # uq: bool = False
     """
     Runs training for the PNN model and returns the trained model.
 
@@ -261,17 +259,47 @@ def run_pnn(config: Optional[dict] = None) -> nn.Module:
     config : Optional[dict], optional
         Configuration dictionary for model training, by default None.
 
+    uq : bool
+        Whether to use aleatoric uncertainty estimation, by default
+
     Returns
     -------
     nn.Module
         Trained PNN model.
     """
-    best_model, _, _, _ = train_model_e2e(
+    best_model, config, _, _ = train_model_e2e(
         config,
         model=PNN,
         model_type="pnn",
         logger=LOGGER,
     )
+
+    # if uq:
+    #     dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
+    #     preds, labels, alea_vars = predict(
+    #         best_model, dataloaders["test"], device=DEVICE
+    #     )
+    #     # Then comes the predict metrics part
+    #     metrics, plots, uct_logger = evaluate_predictions(
+    #         config, preds, labels, alea_vars, "pnn", LOGGER
+    #     )
+    #     # RECALIBRATION # Get Calibration / Validation Set
+    #     preds_val, labels_val, alea_vars_val = predict(
+    #         best_model, dataloaders["val"], device=DEVICE
+    #     )
+    #     iso_recal_model = recalibrate_model(
+    #         preds_val,
+    #         labels_val,
+    #         alea_vars_val,
+    #         preds,
+    #         labels,
+    #         alea_vars,
+    #         config=config,
+    #         uct_logger=uct_logger,
+    #     )
+    #     uct_logger.wandb_log()
+    #     wandb.finish()
+    #     return best_model, iso_recal_model, metrics, plots
 
     return best_model
 

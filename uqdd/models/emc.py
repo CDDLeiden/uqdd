@@ -1,10 +1,17 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Any
 import wandb
 import torch
 import torch.nn as nn
+from torch import Tensor
 
 from uqdd import DEVICE
-from uqdd.models.evidential import EvidentialDNN, ev_predict, ev_predict_params_nll
+from uqdd.models.evidential import (
+    EvidentialDNN,
+    ev_predict,
+    ev_uncertainty,
+    ev_predict_params,
+    ev_nll,
+)
 from uqdd.models.loss import nig_nll
 from uqdd.models.mcdropout import enable_dropout
 from uqdd.utils import create_logger
@@ -16,7 +23,59 @@ from uqdd.models.utils_train import (
     get_dataloader,
 )
 
-from uqdd.models.utils_models import get_model_config, calculate_means
+from uqdd.models.utils_models import get_model_config, calculate_means, stack_vars
+
+
+def emc_predict_params(
+    ev_model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    num_mc_samples: int = 10,
+    device: torch.device = DEVICE,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """
+    Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
+    While Averaging over the calculated means and uncertainties.
+
+    Parameters
+    ----------
+    ev_model : nn.Module
+        The evidential model with dropout layers.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader for the dataset to be evaluated.
+    num_mc_samples : int, optional
+        Number of Monte Carlo forward passes, by default 10.
+    device : torch.device, optional
+        The device to run the model on, by default DEVICE.
+
+    Returns
+    -------
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        - mu
+        - v
+        - alpha
+        - beta
+        - Targets
+    """
+    mus, vs, alphas, betas = [], [], [], []
+    # targets = None
+    for _ in range(num_mc_samples):
+        ev_model.eval()
+        enable_dropout(ev_model)
+        mu, v, alpha, beta, targets = ev_predict_params(
+            ev_model, dataloader, device=device, set_on_eval=False
+        )
+        mus.append(mu)
+        vs.append(v)
+        alphas.append(alpha)
+        betas.append(beta)
+    mus, vs, alphas, betas = stack_vars(mus, vs, alphas, betas)
+    mus, vs, alphas, betas = calculate_means(mus, vs, alphas, betas)
+
+    return mus, vs, alphas, betas, targets
+
+    # alea_vars, epist_vars = ev_uncertainty(vs, alphas, betas)
+    #
+    # return mus.cpu(), targets.cpu(), alea_vars.cpu(), epist_vars.cpu()
 
 
 def emc_predict(
@@ -24,9 +83,10 @@ def emc_predict(
     dataloader: torch.utils.data.DataLoader,
     num_mc_samples: int = 10,
     device: torch.device = DEVICE,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """
     Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
+    While Averaging over the calculated means and uncertainties.
 
     Parameters
     ----------
@@ -47,53 +107,102 @@ def emc_predict(
         - Aleatoric uncertainties [batch_size, num_tasks, num_mc_samples]
         - Epistemic uncertainties [batch_size, num_tasks, num_mc_samples]
     """
-    outputs_all, aleatoric_all, epistemic_all = [], [], []  # targets_all = []
-    for _ in range(num_mc_samples):
-        ev_model.eval()
-        enable_dropout(ev_model)
-        preds, labels, alea, epistemic = ev_predict(
-            ev_model, dataloader, device=device, set_on_eval=False
-        )
-        outputs_all.append(preds)
-        aleatoric_all.append(alea)
-        epistemic_all.append(epistemic)
+    mus, vs, alphas, betas, targets = emc_predict_params(
+        ev_model, dataloader, num_mc_samples, device
+    )
+    alea_vars, epist_vars = ev_uncertainty(vs, alphas, betas)
 
-    outputs_all = torch.stack(outputs_all, dim=2)  # .mean(dim=2)
-    aleatoric_all = torch.stack(aleatoric_all, dim=2)  # .mean(dim=2)
-    epistemic_all = torch.stack(epistemic_all, dim=2)  # .mean(dim=2)
-
-    return outputs_all.cpu(), labels.cpu(), aleatoric_all.cpu(), epistemic_all.cpu()
+    return mus, targets, alea_vars, epist_vars
 
 
-def emc_predict_params_nll(
-    ev_model: nn.Module,
+def emc_nll(
+    model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
     num_mc_samples: int = 10,
     device: torch.device = DEVICE,
 ):
-    # mus, vs, alphas, betas = [], [], [], []
-    test_nll = 0.0
-    for _ in range(num_mc_samples):
-        ev_model.eval()
-        enable_dropout(ev_model)
+    """
+    Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
+    """
+    mus, vs, alphas, betas, targets_all = emc_predict_params(
+        model, dataloader, num_mc_samples, device
+    )
+    nll = nig_nll(mus, vs, alphas, betas, targets_all).item()
+    return nll
 
-        nll = ev_predict_params_nll(
-            ev_model, dataloader, device=device, set_on_eval=False
-        )
 
-        test_nll += nll
-        # mus.append(mu)
-        # vs.append(v)
-        # alphas.append(alpha)
-        # betas.append(beta)
-    return test_nll / num_mc_samples
-
-    # mus = torch.stack(mus, dim=2)
-    # vs = torch.stack(vs, dim=2)
-    # alphas = torch.stack(alphas, dim=2)
-    # betas = torch.stack(betas, dim=2)
-    #
-    # return mus.cpu(), vs.cpu(), alphas.cpu(), betas.cpu(), targets.cpu()
+#
+# def emc_predict_params(
+#     ev_model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     num_mc_samples: int = 10,
+#     device: torch.device = DEVICE,
+#     return_params: bool = False,
+# ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+#     """
+#     Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
+#     While Averaging over the distribution parameters.
+#
+#     Parameters
+#     ----------
+#     ev_model : nn.Module
+#         The evidential model with dropout layers.
+#     dataloader : torch.utils.data.DataLoader
+#         DataLoader for the dataset to be evaluated.
+#     num_mc_samples : int, optional
+#         Number of Monte Carlo forward passes, by default 10.
+#     device : torch.device, optional
+#         The device to run the model on, by default DEVICE.
+#
+#     Returns
+#     -------
+#     Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+#
+#     """
+#     mus, vs, alphas, betas = [], [], [], []
+#     for _ in range(num_mc_samples):
+#         ev_model.eval()
+#         enable_dropout(ev_model)
+#         mu, v, alpha, beta, targets = ev_predict_params(
+#             ev_model, dataloader, device=device, set_on_eval=False
+#         )
+#         mus.append(mu)
+#         vs.append(v)
+#         alphas.append(alpha)
+#         betas.append(beta)
+#
+#     mus = torch.stack(mus, dim=2)
+#     vs = torch.stack(vs, dim=2)
+#     alphas = torch.stack(alphas, dim=2)
+#     betas = torch.stack(betas, dim=2)
+#
+#     mus, vs, alphas, betas = calculate_means(mus, vs, alphas, betas)
+#     # TODO return parameters if necessary for further analysis
+#     if return_params:
+#         return mus.cpu(), vs.cpu(), alphas.cpu(), betas.cpu()
+#     alea_vars, epist_vars = ev_uncertainty(mus, vs, alphas, betas)
+#     outputs = mus
+#
+#     return outputs.cpu(), targets.cpu(), alea_vars.cpu(), epist_vars.cpu()
+#
+#
+# def emc_predict_params_nll(
+#     ev_model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     num_mc_samples: int = 10,
+#     device: torch.device = DEVICE,
+# ):
+#     # mus, vs, alphas, betas = [], [], [], []
+#     test_nll = 0.0
+#     for _ in range(num_mc_samples):
+#         ev_model.eval()
+#         enable_dropout(ev_model)
+#
+#         nll = ev_predict_params_nll(
+#             ev_model, dataloader, device=device, set_on_eval=False
+#         )
+#         test_nll += nll
+#     return test_nll / num_mc_samples
 
 
 def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, dict]:
@@ -123,10 +232,20 @@ def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, 
         logger=LOGGER,
     )
     dataloaders = get_dataloader(config, device=DEVICE, logger=logger)
+
+    # preds, labels, alea_vars, epi_vars = emc_predict(
+    #     best_model, dataloaders["test"], num_mc_samples=num_mc_samples, device=DEVICE
+    # )
+    # preds, alea_vars, epi_vars = calculate_means(preds, alea_vars, epi_vars)
+
     preds, labels, alea_vars, epi_vars = emc_predict(
-        best_model, dataloaders["test"], num_mc_samples=num_mc_samples, device=DEVICE
+        best_model,
+        dataloaders["test"],
+        num_mc_samples=num_mc_samples,
+        device=DEVICE,
     )
-    preds, alea_vars, epi_vars = calculate_means(preds, alea_vars, epi_vars)
+    nll = emc_nll(best_model, dataloaders["test"], num_mc_samples, DEVICE)
+
     # Then comes the predict metrics part
     metrics, plots, uct_logger = evaluate_predictions(
         config,
@@ -137,13 +256,21 @@ def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, 
         LOGGER,
         epi_vars,
         wandb_push=False,
+        nll=nll,
     )
     # RECALIBRATION
+    # preds_val, labels_val, alea_vars_val, epi_vars_val = emc_predict(
+    #     best_model, dataloaders["val"], num_mc_samples=num_mc_samples, device=DEVICE
+    # )
+    # preds_val, alea_vars_val, epi_vars_val = calculate_means(
+    #     preds_val, alea_vars_val, epi_vars_val
+    # )
+
     preds_val, labels_val, alea_vars_val, epi_vars_val = emc_predict(
-        best_model, dataloaders["val"], num_mc_samples=num_mc_samples, device=DEVICE
-    )
-    preds_val, alea_vars_val, epi_vars_val = calculate_means(
-        preds_val, alea_vars_val, epi_vars_val
+        best_model,
+        dataloaders["val"],
+        num_mc_samples=num_mc_samples,
+        device=DEVICE,
     )
     iso_recal_model = recalibrate_model(
         preds_val,
@@ -156,6 +283,7 @@ def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, 
         epi_val=epi_vars_val,
         epi_test=epi_vars,
         uct_logger=uct_logger,
+        nll=nll,
     )
     uct_logger.wandb_log()
     wandb.finish()

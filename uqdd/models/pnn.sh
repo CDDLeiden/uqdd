@@ -20,10 +20,10 @@ echo "Script started at: $(date)"
 ext="pkl"
 task_type="regression"
 
-wandb_project="baseline-test" #"${today}-baseline" # "2024-04-30-baseline" #"${today}-baseline" #"2024-04-16-baseline"
-logname="${wandb_project}-baseline.txt"
+wandb_project="pnn-test" #"${today}-baseline" # "2024-04-30-baseline" #"${today}-baseline" #"2024-04-16-baseline"
+#logname="${wandb_project}-pnn.txt"
 
-python model_parser.py --model baseline --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb_project_name $wandb_project
+python model_parser.py --model pnn --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb_project_name $wandb_project
 
 # Report end time
 echo "Script ended at: $(date)"

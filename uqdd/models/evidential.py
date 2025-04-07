@@ -27,6 +27,89 @@ from uqdd.models.utils_models import (
 from typing import Tuple, Optional
 
 
+def ev_uncertainty(v: Tensor, alpha: Tensor, beta: Tensor) -> Tuple[Tensor, Tensor]:
+    """
+    Computes the aleatoric and epistemic uncertainties from the Normal Inverse Gamma (NIG) distribution.
+
+    Parameters
+    ----------
+    v : Tensor
+        Variance parameter.
+    alpha : Tensor
+        Shape parameter.
+    beta : Tensor
+        Scale parameter.
+
+    Returns
+    -------
+    Tuple[Tensor, Tensor]
+        Aleatoric and epistemic uncertainties.
+    """
+    alea_vars = beta / (alpha - 1)  # aleatoric
+    epist_var = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
+
+    return alea_vars, epist_var
+
+
+def ev_predict_params(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device = DEVICE,
+    set_on_eval: bool = True,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """
+    Performs evidential prediction using the provided model and dataloader.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The trained evidential deep learning model.
+    dataloader : torch.utils.data.DataLoader
+        The dataloader containing the test dataset.
+    device : torch.device, optional
+        The device to run inference on, by default the available CUDA device or CPU.
+    set_on_eval : bool, optional
+        Whether to set the model in evaluation mode, by default True.
+
+    Returns
+    -------
+        Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+        - mu
+        - v
+        - alpha
+        - beta
+        - Targets
+    """
+    if set_on_eval:
+        model.eval()
+
+    mus, vs, alphas, betas, targets_all = [], [], [], [], []
+
+    with torch.no_grad():
+        for inputs, targets in tqdm(
+            dataloader, total=len(dataloader), desc="Evidential prediction"
+        ):
+            inputs = tuple(x.to(device) for x in inputs)
+            outputs = model(inputs)
+
+            mu, v, alpha, beta = outputs
+
+            mus.append(mu)
+            vs.append(v)
+            alphas.append(alpha)
+            betas.append(beta)
+            targets_all.append(targets)
+
+        mus, vs, alphas, betas, targets_all = (
+            torch.cat(mus, dim=0),
+            torch.cat(vs, dim=0),
+            torch.cat(alphas, dim=0),
+            torch.cat(betas, dim=0),
+            torch.cat(targets_all, dim=0),
+        )
+        return mus, vs, alphas, betas, targets_all
+
+
 def ev_predict(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -43,8 +126,7 @@ def ev_predict(
     dataloader : torch.utils.data.DataLoader
         The dataloader containing the test dataset.
     device : torch.device, optional
-        The device to run inference on, by default DEVICE.
-    set_on_eval : bool, optional
+    set_on_eval: bool, optional
         Whether to set the model in evaluation mode, by default True.
 
     Returns
@@ -52,90 +134,241 @@ def ev_predict(
     Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
         Model outputs, targets, aleatoric uncertainties, and epistemic uncertainties.
     """
-    if set_on_eval:
-        model.eval()
-    outputs_all, targets_all = [], []
-    alea_all, epistemic_all = [], []
-    with torch.no_grad():
-        for inputs, targets in tqdm(
-            dataloader, total=len(dataloader), desc="Evidential prediction"
-        ):
-            inputs = tuple(x.to(device) for x in inputs)
-            outputs = model(inputs)  # , alea_vars
-
-            mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
-            alea_vars = beta / (alpha - 1)  # aleatoric
-            epist_var = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
-            outputs = mu
-
-            outputs_all.append(outputs)
-            targets_all.append(targets)
-            alea_all.append(alea_vars)
-            epistemic_all.append(epist_var)
-
-    outputs_all = torch.cat(outputs_all, dim=0)
-    targets_all = torch.cat(targets_all, dim=0)
-    alea_all = torch.cat(alea_all, dim=0)
-    epistemic_all = torch.cat(epistemic_all, dim=0)
-
-    return outputs_all, targets_all, alea_all, epistemic_all
+    mus, vs, alphas, betas, targets_all = ev_predict_params(
+        model, dataloader, device, set_on_eval
+    )
+    alea_vars, epist_var = ev_uncertainty(vs, alphas, betas)
+    return mus, targets_all, alea_vars, epist_var
 
 
-def ev_predict_params_nll(
+def ev_nll(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
     device: torch.device = DEVICE,
-    set_on_eval: bool = True,
-) -> torch.Tensor:
+) -> float:
     """
     Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
 
-    Parameters
-    ----------
+    Parameters:
+    -----------
     model : nn.Module
         The trained evidential deep learning model.
     dataloader: torch.utils.data.DataLoader
         The dataloader containing the test dataset.
     device: torch.device, optional
         The device to run inference on, by default DEVICE.
-    set_on_eval: bool, optional
-        Whether to set the model in evaluation mode, by default True.
 
-    Returns
+    Returns:
     -------
-
+    float
+        The negative log-likelihood (NLL) of the NIG distribution
     """
-    if set_on_eval:
-        model.eval()
-    test_nll = 0.0
-    # mus, vs, alphas, betas = [], [], [], []
-    # all_targets = []
-    with torch.no_grad():
-        for inputs, targets in tqdm(
-            dataloader, total=len(dataloader), desc="Evidential prediction"
-        ):
-            inputs = tuple(x.to(device) for x in inputs)
-            outputs = model(inputs)  # , alea_vars
+    mus, vs, alphas, betas, targets_all = ev_predict_params(model, dataloader, device)
+    nll = nig_nll(mus, vs, alphas, betas, targets_all).item()
+    return nll
 
-            mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+    # if return_params:
+    #
+    # else:
+    #     alea_vars, epist_var = ev_uncertainty(vs, alphas, betas)
+    #     return mus, targets_all, alea_vars, epist_var
 
-            nll = nig_nll(mu, v, alpha, beta, targets)
-            test_nll += nll.item()
-            # mus.append(mu)
-            # vs.append(v)
-            # alphas.append(alpha)
-            # betas.append(beta)
-            # all_targets.append(targets)
-    test_nll /= len(dataloader)
+    #         if return_params:
+    #             mus.append(mu)
+    #             vs.append(v)
+    #             alphas.append(alpha)
+    #             betas.append(beta)
+    #             targets_all.append(targets)
+    #         else:
+    #             alea_vars, epist_var = ev_uncertainty(mu, v, alpha, beta)
+    #             outputs_all.append(mu)
+    #             targets_all.append(targets)
+    #             alea_all.append(alea_vars)
+    #             epistemic_all.append(epist_var)
+    #
+    # if return_params:
+    #     return (
+    #         torch.cat(mus, dim=0),
+    #         torch.cat(vs, dim=0),
+    #         torch.cat(alphas, dim=0),
+    #         torch.cat(betas, dim=0),
+    #         torch.cat(targets_all, dim=0),
+    #     )
+    # else:
+    #     alea_vars, epist_var = ev_uncertainty(mu, v, alpha, beta)
+    #     return (
+    #         torch.cat(outputs_all, dim=0),
+    #         torch.cat(targets_all, dim=0),
+    #         torch.cat(alea_all, dim=0),
+    #         torch.cat(epistemic_all, dim=0),
+    #     )
 
-    return test_nll
-    # mus = torch.cat(mus, dim=0)
-    # vs = torch.cat(vs, dim=0)
-    # alphas = torch.cat(alphas, dim=0)
-    # betas = torch.cat(betas, dim=0)
-    # all_targets = torch.cat(all_targets, dim=0)
 
-    # return mus.cpu(), vs.cpu(), alphas.cpu(), betas.cpu(), all_targets.cpu()
+# def ev_predict(
+#     model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     device: torch.device = DEVICE,
+#     set_on_eval: bool = True,
+#     return_params: bool = False,
+# ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+#     """
+#     Performs evidential prediction using the provided model and dataloader.
+#
+#     Parameters
+#     ----------
+#     model : nn.Module
+#         The trained evidential deep learning model.
+#     dataloader : torch.utils.data.DataLoader
+#         The dataloader containing the test dataset.
+#     device : torch.device, optional
+#         The device to run inference on, by default DEVICE.
+#     set_on_eval : bool, optional
+#         Whether to set the model in evaluation mode, by default True.
+#
+#     Returns
+#     -------
+#     Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+#         Model outputs, targets, aleatoric uncertainties, and epistemic uncertainties.
+#     """
+#     if set_on_eval:
+#         model.eval()
+#     outputs_all, targets_all = [], []
+#     alea_all, epistemic_all = [], []
+#
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#             dataloader, total=len(dataloader), desc="Evidential prediction"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             outputs = model(inputs)  # , alea_vars
+#
+#             mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+#
+#             alea_vars, epist_var = ev_uncertainty(mu, v, alpha, beta)
+#             outputs = mu
+#
+#             outputs_all.append(outputs)
+#             targets_all.append(targets)
+#             alea_all.append(alea_vars)
+#             epistemic_all.append(epist_var)
+#
+#     outputs_all = torch.cat(outputs_all, dim=0)
+#     targets_all = torch.cat(targets_all, dim=0)
+#     alea_all = torch.cat(alea_all, dim=0)
+#     epistemic_all = torch.cat(epistemic_all, dim=0)
+#
+#     return outputs_all, targets_all, alea_all, epistemic_all
+
+
+# def ev_predict_params(
+#     model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     device: torch.device = DEVICE,
+#     set_on_eval: bool = True,
+# ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+#     """
+#     Performs evidential prediction using the provided model and dataloader.
+#
+#     Parameters
+#     ----------
+#     model : nn.Module
+#         The trained evidential deep learning model.
+#     dataloader : torch.utils.data.DataLoader
+#         The dataloader containing the test dataset.
+#     device : torch.device, optional
+#         The device to run inference on, by default DEVICE.
+#     set_on_eval : bool, optional
+#         Whether to set the model in evaluation mode, by default True.
+#
+#     Returns
+#     -------
+#     Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+#         Evidential Model parameters (mu, v, alpha, beta).
+#     """
+#     if set_on_eval:
+#         model.eval()
+#     mus, vs, alphas, betas, all_targets = [], [], [], [], []
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#             dataloader, total=len(dataloader), desc="Evidential prediction"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             outputs = model(inputs)  # , alea_vars
+#
+#             mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+#
+#             mus.append(mu)
+#             vs.append(v)
+#             alphas.append(alpha)
+#             betas.append(beta)
+#             all_targets.append(targets)
+#
+#     mus = torch.cat(mus, dim=0)
+#     vs = torch.cat(vs, dim=0)
+#     alphas = torch.cat(alphas, dim=0)
+#     betas = torch.cat(betas, dim=0)
+#     all_targets = torch.cat(all_targets, dim=0)
+#
+#     return mus, vs, alphas, betas, all_targets
+
+#
+# def ev_predict_params_nll(
+#     model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     device: torch.device = DEVICE,
+#     set_on_eval: bool = True,
+# ) -> torch.Tensor:
+#     """
+#     Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
+#
+#     Parameters
+#     ----------
+#     model : nn.Module
+#         The trained evidential deep learning model.
+#     dataloader: torch.utils.data.DataLoader
+#         The dataloader containing the test dataset.
+#     device: torch.device, optional
+#         The device to run inference on, by default DEVICE.
+#     set_on_eval: bool, optional
+#         Whether to set the model in evaluation mode, by default True.
+#
+#     Returns
+#     -------
+#
+#     """
+#     if set_on_eval:
+#         model.eval()
+#     test_nll = 0.0
+#     # mus, vs, alphas, betas = [], [], [], []
+#     # all_targets = []
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#             dataloader, total=len(dataloader), desc="Evidential prediction"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             outputs = model(inputs)  # , alea_vars
+#
+#             mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+#
+#             nll = nig_nll(
+#                 mu, v, alpha, beta, targets
+#             )  # TODO: we need to average in eoe here - eoe is already averaged in forward
+#             test_nll += nll.item()
+#             # mus.append(mu)
+#             # vs.append(v)
+#             # alphas.append(alpha)
+#             # betas.append(beta)
+#             # all_targets.append(targets)
+#     test_nll /= len(dataloader)
+#
+#     return test_nll
+#     # mus = torch.cat(mus, dim=0)
+#     # vs = torch.cat(vs, dim=0)
+#     # alphas = torch.cat(alphas, dim=0)
+#     # betas = torch.cat(betas, dim=0)
+#     # all_targets = torch.cat(all_targets, dim=0)
+#
+#     # return mus.cpu(), vs.cpu(), alphas.cpu(), betas.cpu(), all_targets.cpu()
 
 
 # Adopted and Modified from https://github.com/teddykoker/evidential-learning-pytorch
@@ -156,7 +389,8 @@ class NormalInvGamma(nn.Module):
         self.dense = nn.Linear(in_features, out_units * 4)
         self.out_units = out_units
 
-    def evidence(self, x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
+    @staticmethod
+    def evidence(x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
         """
         Computes evidence using softplus activation.
 
@@ -216,7 +450,8 @@ class Dirichlet(nn.Module):
         self.dense = nn.Linear(in_features, out_units)
         self.out_units = int(out_units)
 
-    def evidence(self, x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
+    @staticmethod
+    def evidence(x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
         """
         Computes evidence using softplus activation.
 
@@ -354,6 +589,7 @@ def run_evidential(
         preds, labels, alea_vars, epi_vars = ev_predict(
             best_model, dataloaders["test"], device=device
         )
+        nll = ev_nll(best_model, dataloaders["test"], device=device)
         # Then comes the predict metrics part
         metrics, plots, uct_logger = evaluate_predictions(
             config,
@@ -364,11 +600,14 @@ def run_evidential(
             logger=LOGGER,
             epi_vars=epi_vars,
             wandb_push=False,
+            nll=nll,
         )
         # RECALIBRATION
         preds_val, labels_val, alea_vars_val, epi_vars_vals = ev_predict(
-            best_model, dataloaders["val"], device=DEVICE
+            best_model, dataloaders["val"], device=device
         )
+        nll = ev_nll(best_model, dataloaders["val"], device=device)
+
         iso_recal_model = recalibrate_model(
             preds_val,
             labels_val,
@@ -380,6 +619,7 @@ def run_evidential(
             epi_val=epi_vars_vals,
             epi_test=epi_vars,
             uct_logger=uct_logger,
+            nll=nll,
         )
         uct_logger.wandb_log()
     else:

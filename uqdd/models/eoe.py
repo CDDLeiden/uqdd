@@ -1,12 +1,16 @@
+from typing import Tuple, Optional, Dict, Any, List
 import wandb
 import torch
 import torch.nn as nn
 
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE
-from uqdd.models.evidential import EvidentialDNN, ev_predict
+from uqdd.models.evidential import (
+    EvidentialDNN,
+    ev_predict,
+    ev_nll,
+)
 from uqdd.models.ensemble import process_results_arrs
 from uqdd.utils import create_logger
-
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
@@ -15,10 +19,12 @@ from uqdd.models.utils_train import (
     get_dataloader,
     post_training_save_model,
 )
-
-from uqdd.models.utils_models import get_model_config, set_seed, calculate_means
-
-from typing import Tuple, Optional, Dict, Any, List
+from uqdd.models.utils_models import (
+    get_model_config,
+    set_seed,
+    calculate_means,
+    stack_vars,
+)
 
 
 class EoEDNN(nn.Module):
@@ -39,9 +45,10 @@ class EoEDNN(nn.Module):
     """
 
     def __init__(
-            self, config: Optional[Dict[str, Any]] = None,
-            model_list: Optional[List[nn.Module]] = None,
-            **kwargs
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        model_list: Optional[List[nn.Module]] = None,
+        **kwargs,
     ):
         super(EoEDNN, self).__init__()
         self.model_list = model_list
@@ -65,7 +72,9 @@ class EoEDNN(nn.Module):
                 seed += 1
         self.models = nn.ModuleList(models)
 
-    def forward(self, inputs: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the ensemble of evidential neural networks.
 
@@ -93,15 +102,15 @@ class EoEDNN(nn.Module):
             alphas.append(alpha)
             betas.append(beta)
 
-            # outputs.append(output)
-        mus = torch.stack(mus, dim=2)
-        vs = torch.stack(vs, dim=2)
-        alphas = torch.stack(alphas, dim=2)
-        betas = torch.stack(betas, dim=2)
+        mus, vs, alphas, betas = stack_vars(mus, vs, alphas, betas)
+        mus, vs, alphas, betas = calculate_means(mus, vs, alphas, betas)
+
         return mus, vs, alphas, betas
 
 
-def run_eoe(config: Optional[Dict[str, Any]] = None) -> Tuple[nn.Module, Any, Dict[str, Any], Dict[str, Any]]:
+def run_eoe(
+    config: Optional[Dict[str, Any]] = None
+) -> Tuple[nn.Module, Any, Dict[str, Any], Dict[str, Any]]:
     """
     Train an ensemble of Evidential Neural Networks (EoE) and perform uncertainty quantification.
 
@@ -164,10 +173,12 @@ def run_eoe(config: Optional[Dict[str, Any]] = None) -> Tuple[nn.Module, Any, Di
 
     dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
 
-    preds, labels, alea_vars, epi_vars = ev_predict(
+    preds, labels, alea_vars, epist_var = ev_predict(
         eoe_model, dataloaders["test"], device=DEVICE
     )
-    alea_vars, epi_vars, preds = calculate_means(alea_vars, epi_vars, preds)
+    nll = ev_nll(eoe_model, dataloaders["test"], device=DEVICE)
+
+    # alea_vars, epi_vars, preds = calculate_means(alea_vars, epi_vars, preds)
 
     metrics, plots, uct_logger = evaluate_predictions(
         config_,
@@ -176,16 +187,19 @@ def run_eoe(config: Optional[Dict[str, Any]] = None) -> Tuple[nn.Module, Any, Di
         alea_vars,
         "eoe",
         logger,
-        epi_vars,
+        epist_var,
         wandb_push=False,
         verbose=True,
+        nll=nll,
     )
+
     preds_val, labels_val, alea_vars_val, epi_vars_val = ev_predict(
         eoe_model, dataloaders["val"], device=DEVICE
     )
-    alea_vars_val, epi_vars_val, preds_val = calculate_means(
-        alea_vars_val, epi_vars_val, preds_val
-    )
+    nll = ev_nll(eoe_model, dataloaders["val"], device=DEVICE)
+    # alea_vars_val, epi_vars_val, preds_val = calculate_means(
+    #     alea_vars_val, epi_vars_val, preds_val
+    # )
 
     iso_recal_model = recalibrate_model(
         preds_val,
@@ -196,8 +210,9 @@ def run_eoe(config: Optional[Dict[str, Any]] = None) -> Tuple[nn.Module, Any, Di
         alea_vars,
         config=config_,
         epi_val=epi_vars_val,
-        epi_test=epi_vars,
+        epi_test=epist_var,
         uct_logger=uct_logger,
+        nll=nll,  # TODO calculate nll inside recalibrate model before and after recalibration
     )
 
     uct_logger.wandb_log()
@@ -229,21 +244,20 @@ def run_eoe_wrapper(**kwargs):
     return run_eoe(config=config)
 
 
-#
-# if __name__ == "__main__":
-#     # vars
-#     eoe_model, iso_recal_model, metrics, plots = run_eoe_wrapper(
-#         data_name="papyrus",
-#         activity_type="kx",
-#         n_targets=-1,
-#         descriptor_protein="ankh-large",
-#         descriptor_chemical="ecfp2048",
-#         median_scaling=False,
-#         split_type="time",
-#         ext="pkl",
-#         task_type="regression",
-#         wandb_project_name="eoe-test",
-#         ensemble_size=5,
-#         epochs=5,
-#         seed=42,
-#     )
+if __name__ == "__main__":
+    # vars
+    eoe_model, iso_recal_model, metrics, plots = run_eoe_wrapper(
+        data_name="papyrus",
+        activity_type="kx",
+        n_targets=-1,
+        descriptor_protein="ankh-large",
+        descriptor_chemical="ecfp2048",
+        median_scaling=False,
+        split_type="random",
+        ext="pkl",
+        task_type="regression",
+        wandb_project_name="eoe-test",
+        ensemble_size=5,
+        epochs=5,
+        seed=42,
+    )

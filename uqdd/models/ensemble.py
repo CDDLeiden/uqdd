@@ -210,8 +210,8 @@ def fill_to_max_epochs(array: np.ndarray, max_epochs: int) -> np.ndarray:
 
 
 def process_results_arrs(
-    result_arrs: List[np.ndarray],
-    test_arrs: List[np.ndarray],
+    result_arrs: List[np.ndarray | float],
+    test_arrs: List[np.ndarray | float],
     config: dict,
     logger: logging.Logger,
     model_type: str = "ensemble",
@@ -221,9 +221,9 @@ def process_results_arrs(
 
     Parameters
     ----------
-    result_arrs : List[np.ndarray]
+    result_arrs : List[np.ndarray | float]
         List of training results from ensemble models.
-    test_arrs : List[np.ndarray]
+    test_arrs : List[np.ndarray | float]
         List of test results from ensemble models.
     config : dict
         Configuration dictionary containing experiment settings.
