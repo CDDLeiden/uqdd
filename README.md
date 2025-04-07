@@ -138,7 +138,7 @@ The package provides several scripts to train and test different models. The mai
 
 The `model_parser.py` script allows you to specify various options for data, model, and training configuration. The following options are available:
 
-- `--model`: Model type (baseline, ensemble, mcdropout, evidential)
+- `--model`: Model type (pnn, ensemble, mcdropout, evidential)
 - `--data_name`: Dataset name (papyrus, chembl, max_curated)
 - `--n_targets`: Number of targets to train on (-1 for all targets)
 - `--activity_type`: Activity type (xc50, kx) 
