@@ -1745,7 +1745,6 @@ def clustering(
     df_clean.reset_index(inplace=True, drop=True)
 
     # TODO : checking mcs file existing then loading it instead of recalculation
-
     mcs_np = hierarchical_clustering(
         df_clean,
         smiles_col=smiles_col,

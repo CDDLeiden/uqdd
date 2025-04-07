@@ -286,7 +286,6 @@ def check_duplicates(
        A  B  C
     1  2  5  8
     """
-    # df = df[[x, y]].
     if not isinstance(cols, list):
         cols = [cols]
     assert all([col in df.columns for col in cols]), (
@@ -493,7 +492,7 @@ def load_pickle(filepath: Union[str, Path]) -> Any:
 def save_df(
     df: pd.DataFrame,
     file_path: Union[str, None] = None,
-    output_path: str = "./",
+    output_path: str | Path = "./",
     filename: str = "exported_file",
     ext: str = "csv",
     **kwargs,

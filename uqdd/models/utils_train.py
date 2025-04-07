@@ -1,6 +1,16 @@
 import logging
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Union, Callable, Any, Type, List
+from typing import (
+    Tuple,
+    Optional,
+    Dict,
+    Union,
+    Callable,
+    Any,
+    Type,
+    List,
+    LiteralString,
+)
 
 import numpy as np
 import wandb
@@ -449,7 +459,7 @@ def evaluate_predictions(
     wandb_push: bool = False,
     run_name: Optional[str] = None,
     project_name: Optional[str] = None,
-    figpath: Optional[str] = None,
+    figpath: Optional[LiteralString | str | bytes | Path] = None,
     export_preds: bool = True,
     verbose: bool = True,
     csv_path: Optional[str] = None,
@@ -514,8 +524,8 @@ def evaluate_predictions(
     )
 
     # preds, labels = predict(model, dataloaders["test"], return_targets=True)
-    y_true, y_pred, y_eps, y_err, y_alea = process_preds(
-        preds, labels, alea_vars, epi_vars, None
+    y_true, y_pred, y_err, y_alea, y_eps = process_preds(
+        preds, labels, alea_vars, epi_vars, None, model_type
     )
     _ = create_df_preds(
         y_true,
@@ -569,8 +579,8 @@ def evaluate_predictions(
         tasks = get_tasks(data_name, activity_type, n_targets)
         for task_idx in range(len(tasks)):
             task_name = tasks[task_idx]
-            y_true, y_pred, y_eps, y_err, y_alea = process_preds(
-                preds, labels, alea_vars, epi_vars, task_idx
+            y_true, y_pred, y_err, y_alea, y_eps = process_preds(
+                preds, labels, alea_vars, epi_vars, task_idx, model_type
             )
             taskmetrics, taskplots = uct_metrics_logger(
                 y_pred=y_pred,
@@ -1271,7 +1281,8 @@ def recalibrate_model(
     epi_val: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
     epi_test: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
     uct_logger: Optional[Any] = None,
-    figpath: Optional[Union[str, Path]] = None,
+    figpath: Optional[str | Path | bytes | LiteralString] = None,
+    nll: Optional[float] = None,
 ) -> Any:
     """
     Recalibrates uncertainty estimates using validation and test predictions.
@@ -1300,6 +1311,8 @@ def recalibrate_model(
         Logger for uncertainty quantification metrics, by default None.
     figpath : Optional[Union[str, Path]], optional
         Path to save calibration plots, by default None.
+    nll : Optional[float], optional
+        Negative log-likelihood value, by default None.
 
     Returns
     -------
@@ -1308,15 +1321,19 @@ def recalibrate_model(
     """
     model_name = config.get("model_name", "ensemble")
     data_specific_path = config.get("data_specific_path", None)
-
+    model_type = config.get("model_type", None)
     figures_path = figpath or (FIGS_DIR / data_specific_path / model_name)
 
-    # Validation Set # TODO need to fix this
-    y_true_val, y_pred_val, y_std_val, y_err_val, y_alea_val = process_preds(
-        preds_val, labels_val, alea_vars_val, epi_vars=epi_val
+    # Validation Set
+    y_true_val, y_pred_val, y_err_val, y_alea_val, y_eps_val = process_preds(
+        preds_val, labels_val, alea_vars_val, epi_vars=epi_val, model_type=model_type
     )
-    y_true_test, y_pred_test, y_std_test, y_err_test, y_alea_test = process_preds(
-        preds_test, labels_test, alea_vars_test, epi_vars=epi_test
+    y_true_test, y_pred_test, y_err_test, y_alea_test, y_eps_test = process_preds(
+        preds_test,
+        labels_test,
+        alea_vars_test,
+        epi_vars=epi_test,
+        model_type=model_type,
     )
 
     iso_recal_model = recalibrate(  # , std_recal

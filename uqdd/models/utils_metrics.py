@@ -37,7 +37,7 @@ from scipy.integrate import quad
 from bisect import bisect_left
 
 string_types = (type(b""), type(""))
-sns.set(style="white")
+sns.set_theme(style="white")
 
 
 def calc_nanaware_metrics(
@@ -171,6 +171,7 @@ def process_preds(
     alea_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
     epi_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
     task_idx: Optional[int] = None,
+    model_type: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Process predictions to extract mean, standard deviation, align with targets,
@@ -188,60 +189,173 @@ def process_preds(
         Epistemic uncertainty estimates (from probabilistic models like Evidential Learning), by default None.
     task_idx : Optional[int], optional
         Index of the specific task to process in a multi-task learning setting, by default None.
+    model_type : Optional[str], optional
+        Type of model used for predictions (e.g., ensemble, mcdp, etc.), by default None.
 
     Returns
     -------
     Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
         - `y_true` : The filtered true target values.
-        - `y_pred` : The processed predictions (mean for ensembles).
-        - `y_std` : The computed standard deviations for predictions.
+        - `y_pred` : The processed predictions (e.g. mean for ensembles).
         - `y_err` : The absolute errors between predictions and targets.
-        - `alea_vars` : The processed aleatoric uncertainties.
+        - `y_alea` : The computed standard deviations for predictions.
+        - `y_eps` : The processed aleatoric uncertainties.
     """
-    if alea_vars is None:
-        vars_ = torch.zeros_like(targets)
-        # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
-    else:
-        if epi_vars is None:
-            # ensemble and mcdp case so we need to take mean
-            vars_ = alea_vars.mean(dim=-1)  # .squeeze()
-        else:  # evidential case no need to take mean
-            vars_ = alea_vars
+    if model_type == "pnn":
+        y_pred = predictions  # .mean(dim=-1)
+        y_alea = alea_vars  # .mean(dim=-1)
+        # epistemic is then Zerolike aleatoric
+        y_eps = torch.zeros_like(alea_vars)
 
-    if epi_vars is None:  # once again ensemble and mcdp case
-        epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
-        predictions = predictions.mean(dim=-1)  # .squeeze()
-    # Get the predictions mean and std
-    y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
-    y_std = epi_vars.sqrt()
-    # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
-    y_true = targets.squeeze()
+    elif model_type in ["ensemble", "mcdropout"]:
+        y_pred = predictions.mean(dim=-1)
+        y_alea = alea_vars.mean(dim=-1)
+        y_eps = predictions.var(dim=-1)
+
+    elif model_type in ["evidential", "eoe", "emc", "pnn"]:
+        y_pred = predictions  # .mean(dim=-1)
+        y_alea = alea_vars  # .mean(dim=-1)
+        y_eps = epi_vars  # .mean(dim=-1)
+
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    # CHECK
+    y_true = targets
 
     if task_idx is not None:
         # For MTL, select predictions for the specific task
-        y_pred, y_std, y_true, vars_ = (
-            y_pred[:, task_idx],
-            y_std[:, task_idx],
+        y_true, y_pred, y_alea, y_eps = (
             y_true[:, task_idx],
-            vars_[:, task_idx],
+            y_pred[:, task_idx],
+            y_alea[:, task_idx],
+            y_eps[:, task_idx],
         )
 
     nan_mask = ~torch.isnan(y_true)
-    y_pred, y_std, y_true, vars_ = (
-        y_pred[nan_mask],
-        y_std[nan_mask],
+    y_true, y_pred, y_alea, y_eps = (
         y_true[nan_mask],
-        vars_[nan_mask],
+        y_pred[nan_mask],
+        y_alea[nan_mask],
+        y_eps[nan_mask],
     )
 
     # Calculate the error
     y_err = y_pred - y_true
 
-    y_pred, y_std, y_true, y_err, vars_ = map(
-        lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)
+    y_true, y_pred, y_err, y_alea, y_eps = map(
+        lambda x: x.cpu().numpy(), (y_true, y_pred, y_err, y_alea, y_eps)
     )
 
-    return y_true, y_pred, y_std, y_err, vars_
+    # return y_true, y_pred, y_std, y_err, y_eps
+    return y_true, y_pred, y_err, y_alea, y_eps
+    # if alea_vars is None:
+    #     vars_ = torch.zeros_like(targets)
+    #     # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
+    # else:
+    #     if epi_vars is None:
+    #         # ensemble and mcdp case so we need to take mean
+    #         if model_type in ["ensemble", "mcdp"]:
+    #             alea_vars = alea_vars.mean(dim=-1)
+    #
+    #         vars_ = alea_vars.mean(dim=-1)  # .squeeze()
+    #     else:  # evidential case no need to take mean
+    #         vars_ = alea_vars
+    #
+    # if epi_vars is None:  # once again ensemble and mcdp case
+    #     epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
+    #     predictions = predictions.mean(dim=-1)  # .squeeze()
+    # # Get the predictions mean and std
+    # y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
+    # y_std = epi_vars.sqrt()
+    # # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
+    # # squeeze y_true only if the y_pred is a one dimensional array
+    # if len(y_pred.shape) == 1:
+    #     y_true = targets.squeeze()
+    # else:
+    #     y_true = targets
+
+
+# def _process_preds(
+#     predictions: Union[torch.Tensor, np.ndarray],
+#     targets: Union[torch.Tensor, np.ndarray],
+#     alea_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+#     epi_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+#     task_idx: Optional[int] = None,
+#     model_type: Optional[str] = None,
+# ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+#     """
+#     Process predictions to extract mean, standard deviation, align with targets,
+#     and compute the absolute error between predictions and targets.
+#
+#     Parameters
+#     ----------
+#     predictions : Union[torch.Tensor, np.ndarray]
+#         The model predictions with dimensions [samples, tasks, ensemble members].
+#     targets : Union[torch.Tensor, np.ndarray]
+#         The true target values.
+#     alea_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+#         Aleatoric uncertainty estimates, by default None.
+#     epi_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+#         Epistemic uncertainty estimates (from probabilistic models like Evidential Learning), by default None.
+#     task_idx : Optional[int], optional
+#         Index of the specific task to process in a multi-task learning setting, by default None.
+#
+#     Returns
+#     -------
+#     Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+#         - `y_true` : The filtered true target values.
+#         - `y_pred` : The processed predictions (mean for ensembles).
+#         - `y_std` : The computed standard deviations for predictions.
+#         - `y_err` : The absolute errors between predictions and targets.
+#         - `alea_vars` : The processed aleatoric uncertainties.
+#     """
+#     if alea_vars is None:
+#         vars_ = torch.zeros_like(targets)
+#         # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
+#     else:
+#         if epi_vars is None:
+#             # ensemble and mcdp case so we need to take mean
+#             vars_ = alea_vars.mean(dim=-1)  # .squeeze()
+#         else:  # evidential case no need to take mean
+#             vars_ = alea_vars
+#
+#     if epi_vars is None:  # once again ensemble and mcdp case
+#         epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
+#         predictions = predictions.mean(dim=-1)  # .squeeze()
+#     # Get the predictions mean and std
+#     y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
+#     y_std = epi_vars.sqrt()
+#     # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
+#     # squeeze y_true only if the y_pred is a one dimensional array
+#     if len(y_pred.shape) == 1:
+#         y_true = targets.squeeze()
+#     else:
+#         y_true = targets
+#     if task_idx is not None:
+#         # For MTL, select predictions for the specific task
+#         y_pred, y_std, y_true, vars_ = (
+#             y_pred[:, task_idx],
+#             y_std[:, task_idx],
+#             y_true[:, task_idx],
+#             vars_[:, task_idx],
+#         )
+#
+#     nan_mask = ~torch.isnan(y_true)
+#     y_pred, y_std, y_true, vars_ = (
+#         y_pred[nan_mask],
+#         y_std[nan_mask],
+#         y_true[nan_mask],
+#         vars_[nan_mask],
+#     )
+#
+#     # Calculate the error
+#     y_err = y_pred - y_true
+#
+#     y_pred, y_std, y_true, y_err, vars_ = map(
+#         lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)
+#     )
+#
+#     return y_true, y_pred, y_std, y_err, vars_
 
 
 def get_preds_export_path(data_specific_path: str, model_name: str) -> Path:
@@ -272,7 +386,7 @@ def create_df_preds(
     y_alea: Optional[np.ndarray] = None,
     y_eps: Optional[np.ndarray] = None,
     export: bool = True,
-    data_specific_path: Optional[str] = None,
+    data_specific_path: Optional[str | Path] = None,
     model_name: Optional[str] = None,
     logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
@@ -557,7 +671,7 @@ def plot_pred_intervals(
     y_pred : np.ndarray
         Predicted values.
     y_std : np.ndarray
-        Standard deviation of predictions.
+        Standard deviation / Uncertainty of predictions.
     y_true : np.ndarray
         True values.
     n_subset : int, optional
@@ -1912,7 +2026,7 @@ class MetricsTable:
         obs_props: Optional[np.ndarray] = None,
         recal_model: Optional[IsotonicRegression] = None,
         nll: Optional[float] = None,
-    ) -> Tuple[Dict[str, Any], Dict[str, plt.Figure]]:
+    ) -> tuple[dict[str, Any] | dict[str, float], dict[Any, Image]]:
         """
         Computes and logs metrics to the table.
 
@@ -1947,6 +2061,8 @@ class MetricsTable:
             A tuple containing the computed metrics and generated plots.
         """
         # y_pred, y_std, y_true, y_err, y_alea = self.not_nan_filter(y_pred, y_std, y_true, y_err)
+        if y_eps is None:
+            y_eps = np.zeros_like(y_std)
         metrics, plots = self.calculate_metrics(
             y_pred=y_pred,
             y_std=y_std,
@@ -1992,7 +2108,7 @@ class MetricsTable:
         y_pred : np.ndarray
             Predicted values.
         y_std : np.ndarray
-            Standard deviation (aleatoric uncertainty).
+            Standard deviation / aleatoric uncertainty.
         y_true : np.ndarray
             True target values.
         y_err : np.ndarray
@@ -2044,7 +2160,7 @@ class MetricsTable:
 
             # calculate other uqtools metrics
             uqmetrics, uqplots = calculate_uqtools_metrics(
-                y_std,
+                y_std + y_eps,
                 y_err,
                 Nbins=100,  # 100
                 include_bootstrap=True,
@@ -2589,7 +2705,7 @@ def recalibrate(
     # save metrics after recalibration with isotonic regression
     recal_metrics_path = Path(save_dir) / "recal_metrics_iso.pkl"
     save_pickle(recal_metrics, recal_metrics_path)
-
+    # TODO : Add evidential NLL as an argument here.
     return iso_recal_model  # std_recal  # , metrics, plots
 
 

@@ -285,14 +285,7 @@ def build_datasets(
             logger=logger,
             device=device,
         )
-    elif data_name == "tdc":
-        from uqdd.data.data_tdc import get_datasets
 
-        datasets = get_datasets()
-    elif data_name == "other":
-        from uqdd.data.data_other import get_datasets
-
-        datasets = get_datasets()
     else:
         raise ValueError(
             f"Unknown data name: {data_name}"
@@ -609,7 +602,7 @@ def add_prefix_to_state_dict_keys(
 
 
 def load_model(
-    model_class: nn.Module,
+    model_class: nn.Module | Any,
     model_path: str,
     prefix_to_state_keys: Optional[str] = None,
     **model_kwargs,
@@ -815,3 +808,20 @@ def calculate_means(*tensors: torch.Tensor) -> List[torch.Tensor]:
         A list containing the mean-reduced tensors.
     """
     return [torch.mean(tensor, dim=2) for tensor in tensors]
+
+
+def stack_vars(*tensors: List[torch.Tensor]) -> List[torch.Tensor]:
+    """
+    Stacks multiple tensors along the last dimension.
+
+    Parameters:
+    -----------
+    tensors : torch.Tensor
+        One or more tensors to stack.
+
+    Returns:
+    --------
+    List[torch.Tensor]
+        A list containing the stacked tensors.
+    """
+    return [torch.stack(tensor, dim=2) for tensor in tensors]
