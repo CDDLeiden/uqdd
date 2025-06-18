@@ -1,5 +1,5 @@
 <a id="readme-top"></a>
-# Uncertainty Estimation for proteochemometric bioactivity prediction models using Deep Learning 
+# Hybrid Uncertainty Quantification for Bioactivity Assessment
 
 
 [![python](https://img.shields.io/badge/-Python_3.8_%7C_3.9_%7C_3.10_%7C_3.11-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -41,82 +41,51 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-This repo represents a comparative study, applying and comparing various Uncertainty Estimation methods
+This repository accompanies the paper _"Combining Bayesian and Evidential Uncertainty Quantification (UQ) for Improved Bioactivity Modelling"_. It supports the study on hybrid UQ models. We introduce and benchmark two novel hybrid models—**EOE (Ensemble of Evidential networks)** and **EMC (Evidential MC Dropout)**—which combine the strengths of Bayesian and evidential learning paradigms. These models are evaluated against established UQ baselines on curated subsets of the **Papyrus++** dataset for both **xC50** and **Kx** bioactivity endpoints.
 
+Our comprehensive evaluation includes metrics for performance (e.g., RMSE), calibration, probabilistic scoring, and decision utility (e.g., RRC-AUC). The findings highlight EOE10 as a robust and computationally efficient model, outperforming deep ensembles in several uncertainty-aware settings.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- GETTING STARTED -->
 ## Getting Started
-
-This is an example of how you may give instructions on setting up your project locally.
-To get a local copy up and running follow these simple example steps.
-
-## Project Folder Structure
-
-```
-uqdd/
-│── README.md
-│── LICENSE
-│── environment.yml
-│── .gitignore
-│── uqdd/  # Source Code Directory
-│   ├── data/
-│   │   ├── data_papyrus.py
-│   │   ├── data_chembl.py
-│   │   ├── data_max_curated.py
-│   │   ├── utils_data.py
-│   │   ├── utils_chem.py
-│   │   ├── utils_assay.py
-│   │   ├── utils_prot.py
-│   ├── models/
-│   │   ├── pnn.py
-│   │   ├── evidential.py
-│   │   ├── ensemble.py
-│   │   ├── mcdropout.py
-│   │   ├── utils_metrics.py
-│   │   ├── utils_models.py
-│   │   ├── utils_train.py
-│   ├── config/
-│   │   ├── pnn.json
-│   │   ├── evidential.json
-│   │   ├── ensemble.json
-│   │   ├── mcdropout.json
-│   │   ├── eoe.json
-│   │   ├── emc.json
-│   │   ├── papyrus.json
-│   ├── experiments/ 
-│   │   ├── run_experiments.py
-│   │   ├── benchmark_results.py
-│   ├── logs/
-│   ├── figures/
-│   ├── tests/
-│   │   ├── test_data.py
-│   │   ├── test_models.py
-│   │   ├── test_features.py
-│   │   ├── test_experiments.py
-│── notebooks/  # Jupyter Notebooks for Exploratory Analysis
-│   ├── data_analysis.ipynb
-│   ├── model_performance.ipynb
-│── docs/  # Documentation
-│── results/  # Processed Results and Outputs
-```
-
 ### Prerequisites
 
+We recommend using a virtual environment (e.g. conda) to manage dependencies.
 
-
+- Conda (Miniconda or Anaconda)
+- Python ≥ 3.8
+- PyTorch ≥ 2.0
+- RDKit
+- Weights & Biases (wandb)
+- scikit-learn, numpy, pandas, seaborn, matplotlib
 
 ### Installation
 
+**Create and activate the Conda environment:**
+    Use the `environment.yml` file to create the Conda environment. This file lists all necessary Python packages and dependencies.
+    ```bash
+    conda env create -f environment.yml
+    conda activate uqdd-env
+    ```
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+## Project Folder Structure
 
-
-<!-- USAGE EXAMPLES -->
-## Usage
-
+The project is organized as follows:
+```
+├── .gitignore
+├── LICENSE
+├── README.md
+├── environment.yml
+├── uqdd/  # Source Code Directory
+│   ├── config/  # Configuration files for models and data
+│   ├── data/    # Scripts and utilities for data processing
+│   └── models/  # Model implementations and training scripts
+├── notebooks/  # Jupyter Notebooks for exploratory analysis and results
+ visualization
+└── scripts/ # For generating the visualizations tested in notebooks/ but in more automated way
+```
 
 ### Data Processing
 Run the following scripts to preprocess the datasets:
@@ -207,6 +176,7 @@ python uqdd/models/model_parser.py --model emc --num_mc_samples 100 --data_name 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
+
 <!-- LICENSE -->
 ## License
 
@@ -231,17 +201,6 @@ K.S. acknowledges funding from the ELLIS Unit Linz. The ELLIS Unit Linz, the LIT
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-<!-- ROADMAP -->
-## Roadmap
-
-- [X] Start README content
-- [X] Add back to top links
-- [ ] Add Env setup
-- [ ] Add 
-
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
 
 <!-- CITATION -->
 ## Citation
@@ -250,9 +209,9 @@ If you find this work useful, please cite the following paper:
 
 ```bibtex
 @article{Khalil2025,
-  title={Uncertainty Quantification in Bioactivity Assessment Using Ensemble, MC Dropout, Evidential, and Hybrid Models},
-  author={Khalil, Bola and Schweighofer, Kajetan and Dyubankova, Natalia and Klambauer, Guenter and van Westen, Gerard J.P. and Van Vlijmen, Herman},
-  journal={arXiv},
+  title={Combining Bayesian and Evidential Uncertainty Quantification for Improved Bioactivity Modelling},
+  author={Khalil, Bola and Schweighofer, Kajetan and Dyubankova, Natalia and van Westen, Gerard J.P. and van Vlijmen, Herman},
+  journal={Nature Machine Intelligence},
   year={2025}
 }
 ```
