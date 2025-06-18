@@ -1,10 +1,25 @@
+import logging
+from pathlib import Path
+from typing import (
+    Tuple,
+    Optional,
+    Dict,
+    Union,
+    Callable,
+    Any,
+    Type,
+    List,
+    LiteralString,
+)
+
 import numpy as np
 import wandb
 import torch
+from numpy import ndarray, dtype
 
 from tqdm import tqdm
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, TODAY, FIGS_DIR
-from uqdd.data.utils_data import get_tasks  # , save_pickle, get_topx,
+from uqdd.data.utils_data import get_tasks
 
 from uqdd.models.loss import build_loss
 from uqdd.models.utils_metrics import (
@@ -34,23 +49,53 @@ from uqdd.models.utils_models import (
 from uqdd.utils import create_logger
 
 
-def evidential_processing(outputs):  # , alea_all, epi_all
-    # if len(outputs) == 4:  # Evidential model
-    # mu, v, alpha, beta = (d.squeeze() for d in outputs)
+def evidential_processing(
+    outputs: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Processes the outputs of an evidential regression model to compute aleatoric and epistemic uncertainty.
+
+    Parameters:
+    -----------
+    outputs : Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        Model outputs consisting of mu (mean), v (precision), alpha, and beta parameters.
+
+    Returns:
+    --------
+    Tuple[torch.Tensor, torch.Tensor]
+        Aleatoric and epistemic uncertainty estimates.
+    """
     mu, v, alpha, beta = outputs
     alea_vars = beta / (alpha - 1)  # aleatoric
     epi_vars = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
     return alea_vars, epi_vars
-    # return None, None
-    # alea_all.append(alea_vars)
-    # epi_all.append(epi_vars)
-    #
-    # outputs = mu
-
-    # return outputs, alea_all
 
 
-def model_forward(model, inputs, targets, lossfname="evidential_regression"):
+def model_forward(
+    model: torch.nn.Module,
+    inputs: Tuple[torch.Tensor, ...],
+    targets: torch.Tensor,
+    lossfname: str = "evidential_regression",
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Tuple]:
+    """
+    Performs a forward pass through the model and processes outputs for different loss functions.
+
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The neural network model.
+    inputs : Tuple[torch.Tensor, ...]
+        Input data as a tuple of tensors.
+    targets : torch.Tensor
+        Target values.
+    lossfname : str, optional
+        The loss function name ("evidential_regression", "gaussnll", etc.), by default "evidential_regression".
+
+    Returns:
+    --------
+    Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Tuple]
+        Model outputs, aleatoric uncertainty, epistemic uncertainty, and loss function arguments.
+    """
     if lossfname.lower() == "evidential_regression":
         outputs = model(inputs)
         alea_vars, epi_vars = evidential_processing(outputs)
@@ -66,20 +111,49 @@ def model_forward(model, inputs, targets, lossfname="evidential_regression"):
         return outputs, vars_, None, args
 
 
-# def apply_model_aleatoric_option()
 def train(
-    model,
-    dataloader,
-    loss_fn,
-    optimizer,
-    device=DEVICE,
-    epoch=0,
-    max_norm=None,
-    lossfname="evidential_regression",
-    tracker="wandb",  # pbar=None,
-    subset="train",
-):
-    # max_norm = 10.0
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    loss_fn: Callable,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device = DEVICE,
+    epoch: int = 0,
+    max_norm: Optional[float] = None,
+    lossfname: str = "evidential_regression",
+    tracker: str = "wandb",
+    subset: str = "train",
+) -> ndarray[Any, dtype[Any]] | float | Any:
+    """
+    Trains the model for one epoch.
+
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The neural network model.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader providing batches of training data.
+    loss_fn : Callable
+        The loss function.
+    optimizer : torch.optim.Optimizer
+        The optimizer for updating model parameters.
+    device : torch.device, optional
+        The device on which to train the model, by default DEVICE.
+    epoch : int, optional
+        The current training epoch, by default 0.
+    max_norm : Optional[float], optional
+        Gradient clipping norm, by default None.
+    lossfname : str, optional
+        Loss function name, by default "evidential_regression".
+    tracker : str, optional
+        Tracking tool for logging, e.g., "wandb" or "tensor", by default "wandb".
+    subset : str, optional
+        Subset name (e.g., "train"), by default "train".
+
+    Returns:
+    --------
+    float
+        Average loss for the epoch.
+    """
     model.train()
     total_loss = 0.0
     targets_all = []
@@ -93,31 +167,10 @@ def train(
         inputs = tuple(x.to(device) for x in inputs)
         targets = targets.to(device)
         optimizer.zero_grad()
-        # outputs, vars_ = model(inputs)
 
         outputs, alea_vars, epi_vars, args = model_forward(
             model, inputs, targets, lossfname=lossfname
         )
-        # if lossfname.lower() == "evidential_regression":
-        #     outputs = model(inputs)
-        #     vars_, epis_ = evidential_processing(outputs)
-        #
-        #     epis_all.append(epis_)
-        #
-        #     args = (outputs, targets)
-        # elif lossfname.lower() == "gaussnll":
-        #     outputs, vars_ = model(inputs)
-        #     args = (outputs, targets, vars_)
-        # else:
-        #     outputs, vars_ = model(inputs)
-        #     args = (outputs, targets)
-        # if outputs.dim() > targets.dim():
-        #     _, _, num_repeats = outputs.shape
-        #     targets = targets.repeat(num_repeats, 1).t()
-        # t = t.unsqueeze(2).expand(-1,-1,5)
-        # args = (
-        #     (outputs, targets, vars_) if lossfname == "gaussnll" else (outputs, targets)
-        # )
         loss = loss_fn(*args)
         loss.backward()
 
@@ -127,15 +180,14 @@ def train(
         if max_norm is not None:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
         optimizer.step()
-        total_loss += loss.item()  # * outputs.size(0)
-        # outputs, vars_all = evidential_processing(outputs, vars_all)
+        total_loss += loss.item()
         targets_all.append(targets)
         outputs = (
             outputs[0] if lossfname.lower() == "evidential_regression" else outputs
-        )  # Because it gets 4 outputs
+        )
         outputs_all.append(outputs)
 
-    total_loss /= num_batches  # len(dataloader.dataset)
+    total_loss /= num_batches
     targets_all = torch.cat(targets_all, dim=0)
     outputs_all = torch.cat(outputs_all, dim=0)
 
@@ -196,16 +248,45 @@ def train(
 
 
 def evaluate(
-    model,
-    dataloader,
-    loss_fn,
-    device=DEVICE,
-    metrics_per_task=False,
-    subset="val",  # can be "train", "val" or "test"
-    epoch: int | None = 0,
-    lossfname="evidential_regression",
-    tracker="wandb",
-):
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    loss_fn: Callable,
+    device: torch.device = DEVICE,
+    metrics_per_task: bool = False,
+    subset: str = "val",
+    epoch: Optional[int] = 0,
+    lossfname: str = "evidential_regression",
+    tracker: str = "wandb",
+) -> ndarray[Any, dtype[np.generic | Any]] | ndarray[Any, dtype[Any]] | float | Any:
+    """
+    Evaluates the model on the validation or test dataset.
+
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The neural network model.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader providing validation/test data.
+    loss_fn : Callable
+        The loss function.
+    device : torch.device, optional
+        The device on which to evaluate the model, by default DEVICE.
+    metrics_per_task : bool, optional
+        Whether to compute metrics per task (for multitask learning), by default False.
+    subset : str, optional
+        Subset name (e.g., "val" or "test"), by default "val".
+    epoch : Optional[int], optional
+        The current evaluation epoch, by default 0.
+    lossfname : str, optional
+        Loss function name, by default "evidential_regression".
+    tracker : str, optional
+        Tracking tool for logging, e.g., "wandb" or "tensor", by default "wandb".
+
+    Returns:
+    --------
+    float
+        Average loss for the evaluation.
+    """
     model.eval()
     total_loss = 0.0
     targets_all = []
@@ -222,12 +303,6 @@ def evaluate(
                 model, inputs, targets, lossfname=lossfname
             )
 
-            # outputs, vars_ = model(inputs)
-            # args = (
-            #     (outputs, targets, vars_)
-            #     if lossfname.lower() == "gaussnll"
-            #     else (outputs, targets)
-            # )
             loss = loss_fn(*args)
 
             vars_all.append(alea_vars.detach())
@@ -324,7 +399,31 @@ def evaluate(
     return total_loss
 
 
-def predict(model, dataloader, device=DEVICE, set_on_eval=True):
+def predict(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: Union[torch.device, str] = DEVICE,
+    set_on_eval: bool = True,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Performs predictions using the trained model.
+
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The trained model.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader providing test data.
+    device : torch.device, optional
+        The device on which to perform inference, by default DEVICE.
+    set_on_eval : bool, optional
+        Whether to set the model to evaluation mode, by default True.
+
+    Returns:
+    --------
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        Predicted values, ground truth labels, and estimated uncertainties.
+    """
     if set_on_eval:
         model.eval()
     outputs_all = []
@@ -350,31 +449,66 @@ def predict(model, dataloader, device=DEVICE, set_on_eval=True):
 
 
 def evaluate_predictions(
-    config,
-    preds,
-    labels,
-    alea_vars,  # TODO to decide whether to include this in the metrics part
-    model_type="ensemble",
-    logger=None,
-    epi_vars=None,
-    wandb_push=False,
-    run_name=None,
-    project_name=None,
-    figpath=None,
-    export_preds=True,
-    verbose=True,
-    csv_path=None,
-):
+    config: Dict[str, Any],
+    preds: torch.Tensor,
+    labels: torch.Tensor,
+    alea_vars: torch.Tensor,
+    model_type: str = "ensemble",
+    logger: Optional[logging.Logger] = None,
+    epi_vars: Optional[torch.Tensor] = None,
+    wandb_push: bool = False,
+    run_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+    figpath: Optional[LiteralString | str | bytes | Path] = None,
+    export_preds: bool = True,
+    verbose: bool = True,
+    csv_path: Optional[str] = None,
+    nll: Optional[float] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
+    """
+    Evaluates predictions, computes uncertainty metrics, and optionally logs results.
+
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing model and dataset settings.
+    preds : torch.Tensor
+        Model predictions.
+    labels : torch.Tensor
+        Ground truth labels.
+    alea_vars : torch.Tensor
+        Aleatoric uncertainty estimates.
+    model_type : str, optional
+        Type of model (e.g., "ensemble", "pnn"), by default "ensemble".
+    logger : Optional[logging.Logger], optional
+        Logger instance for logging messages, by default None.
+    epi_vars : Optional[torch.Tensor], optional
+        Epistemic uncertainty estimates, by default None.
+    wandb_push : bool, optional
+        Whether to log results to Weights & Biases, by default False.
+    run_name : Optional[str], optional
+        Name of the Weights & Biases run, by default None.
+    project_name : Optional[str], optional
+        Weights & Biases project name, by default None.
+    figpath : Optional[str], optional
+        Path to save generated figures, by default None.
+    export_preds : bool, optional
+        Whether to export predictions as CSV, by default True.
+    verbose : bool, optional
+        Whether to print additional information, by default True.
+    csv_path : Optional[str], optional
+        Path to save prediction CSV file, by default None.
+
+    Returns:
+    --------
+    Tuple[Dict[str, Any], Dict[str, Any], Any]
+        Dictionary of metrics, dictionary of plots, and the metrics logger object.
+    """
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
     n_targets = config.get("n_targets", -1)
     multitask = config.get("MT", False)
     data_specific_path = get_data_specific_path(config, logger=logger)
-    #     config.get(
-    #     "data_specific_path", Path(data_name) / activity_type / get_topx(n_targets)
-    # ))
-    # model_name = config.get("model_name", model_type)
-    # model_name += "_MT" if multitask else ""
 
     model_name = get_model_name(config)
 
@@ -382,7 +516,6 @@ def evaluate_predictions(
         model_type=model_type,
         config=config,
         add_plots_to_table=True,
-        # * we can turn on if we want to see them in wandb * #
         logger=logger,
         run_name=run_name,
         project_name=project_name,
@@ -391,8 +524,8 @@ def evaluate_predictions(
     )
 
     # preds, labels = predict(model, dataloaders["test"], return_targets=True)
-    y_true, y_pred, y_eps, y_err, y_alea = process_preds(
-        preds, labels, alea_vars, epi_vars, None
+    y_true, y_pred, y_err, y_alea, y_eps = process_preds(
+        preds, labels, alea_vars, epi_vars, None, model_type
     )
     _ = create_df_preds(
         y_true,
@@ -416,6 +549,7 @@ def evaluate_predictions(
         y_eps=y_eps,
         task_name=task_name,
         figpath=figpath,
+        nll=nll,
     )
 
     # getting calibration props
@@ -445,8 +579,8 @@ def evaluate_predictions(
         tasks = get_tasks(data_name, activity_type, n_targets)
         for task_idx in range(len(tasks)):
             task_name = tasks[task_idx]
-            y_true, y_pred, y_eps, y_err, y_alea = process_preds(
-                preds, labels, alea_vars, epi_vars, task_idx
+            y_true, y_pred, y_err, y_alea, y_eps = process_preds(
+                preds, labels, alea_vars, epi_vars, task_idx, model_type
             )
             taskmetrics, taskplots = uct_metrics_logger(
                 y_pred=y_pred,
@@ -481,15 +615,42 @@ def evaluate_predictions(
 
 
 def initial_evaluation(
-    model,
-    train_loader,
-    val_loader,
-    loss_fn,
-    device=DEVICE,
-    epoch=0,
-    lossfname="",
-    tracker="wandb",  # pbar=None,
-):
+    model: torch.nn.Module,
+    train_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    loss_fn: Callable,
+    device: torch.device = DEVICE,
+    epoch: int = 0,
+    lossfname: str = "",
+    tracker: str = "wandb",
+) -> Tuple[float, float]:
+    """
+    Performs an initial evaluation of the model on training and validation sets.
+
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The model to be evaluated.
+    train_loader : torch.utils.data.DataLoader
+        DataLoader for training data.
+    val_loader : torch.utils.data.DataLoader
+        DataLoader for validation data.
+    loss_fn : Callable
+        Loss function used for evaluation.
+    device : torch.device, optional
+        Device to run the model on, by default DEVICE.
+    epoch : int, optional
+        Current epoch number, by default 0.
+    lossfname : str, optional
+        Loss function name, by default "".
+    tracker : str, optional
+        Tracker for logging results, by default "wandb".
+
+    Returns:
+    --------
+    Tuple[float, float]
+        Training loss and validation loss.
+    """
     val_loss = evaluate(
         model,
         val_loader,
@@ -516,50 +677,50 @@ def initial_evaluation(
 
 
 def run_one_epoch(
-    model,
-    train_loader,
-    val_loader,
-    loss_fn,
-    optimizer,
-    lr_scheduler,
-    epoch=0,
-    device=DEVICE,
-    max_norm=None,
-    lossfname="",
-    tracker="wandb",
-):
+    model: torch.nn.Module,
+    train_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    loss_fn: Callable,
+    optimizer: torch.optim.Optimizer,
+    lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
+    epoch: int = 0,
+    device: torch.device = DEVICE,
+    max_norm: Optional[float] = None,
+    lossfname: str = "",
+    tracker: str = "wandb",
+) -> Tuple[int, float, float]:
     """
-    Run a single epoch of training and evaluation.
+    Executes one training epoch including evaluation and learning rate scheduling.
 
-    Parameters
-    ----------
+    Parameters:
+    -----------
     model : torch.nn.Module
         The model to be trained and evaluated.
     train_loader : torch.utils.data.DataLoader
-        Data Loader for training data.
+        DataLoader for training data.
     val_loader : torch.utils.data.DataLoader
-        Data Loader for validation data.
-    loss_fn : torch.nn.Module
+        DataLoader for validation data.
+    loss_fn : Callable
         Loss function used for training and evaluation.
     optimizer : torch.optim.Optimizer
-        model optimizer parameter updates.
-    lr_scheduler : torch.optim.lr_scheduler._LRScheduler
+        Optimizer for updating model parameters.
+    lr_scheduler : Optional[torch.optim.lr_scheduler._LRScheduler]
         Learning rate scheduler.
     epoch : int, optional
-        Current epoch number. Default is 0.
+        Current epoch number, by default 0.
     device : torch.device, optional
-        Device to run the model on. Default is DEVICE var.
-    max_norm : float, optional
-        Maximum norm value for gradient clipping. Default is None.
+        Device to run the model on, by default DEVICE.
+    max_norm : Optional[float], optional
+        Maximum norm value for gradient clipping, by default None.
     lossfname : str, optional
-        Loss function name. Default is "".
+        Loss function name, by default "".
     tracker : str, optional
-        Tracker to log the results. Default is "wandb". Other option is "tensor".
+        Tracker to log results, by default "wandb".
 
-    Returns
-    -------
-    float
-        Validation loss for the epoch.
+    Returns:
+    --------
+    Tuple[int, float, float]
+        The epoch number, training loss, and validation loss.
     """
     # pbar = None
     if epoch == 0:
@@ -602,72 +763,49 @@ def run_one_epoch(
     return epoch, train_loss, val_loss
 
 
-# def wandb_epoch_logger(
-#     epoch,
-#     train_loss,
-#     train_rmse,
-#     train_r2,
-#     train_evs,
-#     val_loss,
-#     val_rmse,
-#     val_r2,
-#     val_evs,
-# ):
-#     wandb.log(
-#         data={
-#             "epoch": epoch,
-#             "train/loss": train_loss,
-#             "train/rmse": train_rmse,
-#             "train/r2": train_r2,
-#             "train/evs": train_evs,
-#             "val/loss": val_loss,
-#             "val/rmse": val_rmse,
-#             "val/r2": val_r2,
-#             "val/evs": val_evs,
-#         }
-#     )
-#
-#
-# def wandb_test_logger(
-#     test_loss,
-#     test_rmse,
-#     test_r2,
-#     test_evs,
-#     tasks_rmse=None,
-#     tasks_r2=None,
-#     tasks_evs=None,
-# ):
-#     wandb.log(
-#         data={
-#             "test/loss": test_loss,
-#             "test/rmse": test_rmse,
-#             "test/r2": test_r2,
-#             "test/evs": test_evs,
-#         }
-#     )
-#     if tasks_rmse is not None:
-#         for task_idx in range(len(tasks_rmse)):
-#             wandb.log(
-#                 data={
-#                     f"test/task_{task_idx}/rmse": tasks_rmse[task_idx],
-#                     f"test/task_{task_idx}/r2": tasks_r2[task_idx],
-#                     f"test/task_{task_idx}/evs": tasks_evs[task_idx],
-#                 }
-#             )
-
-
 def train_model(
-    model,
-    config,
-    train_loader,
-    val_loader,
-    n_targets=-1,
-    seed=42,
-    device=DEVICE,
-    logger=None,
-    max_norm=None,  # 10.0
-    tracker="wandb",
-):
+    model: torch.nn.Module,
+    config: Dict[str, Any],
+    train_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    n_targets: int = -1,
+    seed: int = 42,
+    device: torch.device = DEVICE,
+    logger: Optional[logging.Logger] = None,
+    max_norm: Optional[float] = None,
+    tracker: str = "wandb",
+) -> Tuple[torch.nn.Module, Callable, np.ndarray]:
+    """
+    Trains the model with the specified configuration.
+
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The model to be trained.
+    config : Dict[str, Any]
+        Configuration dictionary containing hyperparameters.
+    train_loader : torch.utils.data.DataLoader
+        DataLoader for training data.
+    val_loader : torch.utils.data.DataLoader
+        DataLoader for validation data.
+    n_targets : int, optional
+        Number of targets for multitask learning, by default -1.
+    seed : int, optional
+        Random seed for reproducibility, by default 42.
+    device : torch.device, optional
+        Device to run the model on, by default DEVICE.
+    logger : Optional[logging.Logger], optional
+        Logger instance for logging messages, by default None.
+    max_norm : Optional[float], optional
+        Maximum norm for gradient clipping, by default None.
+    tracker : str, optional
+        Tracker for logging, by default "wandb".
+
+    Returns:
+    --------
+    Tuple[torch.nn.Module, Callable, np.ndarray]
+        Trained model, loss function, and recorded metrics.
+    """
     try:
         set_seed(seed)
         multitask = n_targets > 1
@@ -736,14 +874,6 @@ def train_model(
                     best_val_loss = vloss
                     early_stop_counter = 0
                     config = ckpt(model, config)
-                    # if tracker is wandb we want to update the wandb config with the ckpt path and name
-                    # if tracker.lower() == "wandb" and i == 0:
-                    #     wandb.config.update(config)
-                    #     i += 1
-                    # best_model = model
-                    # save the best model state dict to var
-                    # torch.save(model.state_dict(), MODELS_DIR / "best_model_ckpt.pth")
-                    # best_model_params = copy.deepcopy(model.state_dict())
 
                 else:
                     early_stop_counter += 1
@@ -759,53 +889,7 @@ def train_model(
                     f"The following exception occurred inside the epoch loop {e}"
                 )
 
-        # TODO train once on validation set - check b and best_model before and after
-        # b = best_model.state_dict()
         best_model = load_ckpt(model, config)
-        # TODO : check here how the hell trainig on validation increases the loss
-        # 1st: 2.250059547168868
-        # 2nd: 2.280138745903969
-        #
-        # # best_model = model.load_state_dict(best_model_params)
-        # # Just for the testing - One iteration is not sufficient.
-        # At some point doing cross-validation here is better.
-        # val_loss = evaluate(
-        #     best_model,
-        #     val_loader,
-        #     loss_fn,
-        #     device,
-        #     False,
-        #     "val",
-        #     epoch + 1,
-        #     lossfname,
-        #     tracker=tracker,
-        # )
-        # print(f"1st: {val_loss}")
-        # _ = train(
-        #     best_model,
-        #     val_loader,
-        #     loss_fn,
-        #     optimizer,
-        #     device,
-        #     epoch + 2,
-        #     max_norm=max_norm,
-        #     lossfname=lossfname,
-        #     tracker=tracker,
-        #     subset="val",
-        # )
-        # # Just for the testing
-        # val_loss = evaluate(
-        #     best_model,
-        #     val_loader,
-        #     loss_fn,
-        #     device,
-        #     False,
-        #     "val",
-        #     epoch + 3,
-        #     lossfname,
-        #     tracker=tracker,
-        # )
-        # print(f"2nd: {val_loss}")
         if tracker.lower() == "tensor":
             # stack all the list of arrays on dim 1
             results_arr = np.stack(results_arr, axis=0)
@@ -816,14 +900,39 @@ def train_model(
 
 
 def run_model(
-    config,
-    model,
-    dataloaders,
-    device=DEVICE,
-    logger=None,  # create_logger("run_model"),
-    max_norm=None,  # 10.0
-    tracker="wandb",
-):
+    config: Dict[str, Any],
+    model: torch.nn.Module,
+    dataloaders: Dict[str, torch.utils.data.DataLoader],
+    device: torch.device = DEVICE,
+    logger: Optional[logging.Logger] = None,
+    max_norm: Optional[float] = None,
+    tracker: str = "wandb",
+) -> Tuple[torch.nn.Module, float, np.ndarray]:
+    """
+    Runs the full training and evaluation cycle.
+
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing hyperparameters.
+    model : torch.nn.Module
+        Model to train and evaluate.
+    dataloaders : Dict[str, torch.utils.data.DataLoader]
+        Dictionary of dataloaders for train, validation, and test sets.
+    device : torch.device, optional
+        Device to run the model on, by default DEVICE.
+    logger : Optional[logging.Logger], optional
+        Logger instance, by default None.
+    max_norm : Optional[float], optional
+        Maximum norm for gradient clipping, by default None.
+    tracker : str, optional
+        Tracker for logging, by default "wandb".
+
+    Returns:
+    --------
+    Tuple[torch.nn.Module, float, np.ndarray]
+        Best trained model, test loss, and recorded training statistics.
+    """
     if logger is None:
         logger = create_logger("run_model")
     seed = config.get("seed", 42)
@@ -858,37 +967,31 @@ def run_model(
         tracker=tracker,
     )
 
-    # TODO FOR TESTING
-    # outputs_all, targets_all, vars_all = predict(best_model, dataloaders["test"], aleatoric=aleatoric, device=device)
-
     return best_model, test_loss, results_arr
 
 
-# def model_vmap(models, x):
-#     # https://pytorch.org/tutorials//intermediate/ensembling.html#using-vmap-to-vectorize-the-ensemble
-#     from torch.func import stack_module_state
-#     params, buffers = stack_module_state(models)
-#
-#     from torch.func import functional_call
-#     import copy
-#
-#     base_model = copy.deepcopy(models[0])
-#     base_model = base_model.to('meta')
-#
-#     def fmodel(params, buffers, x):
-#         return functional_call(base_model, (params, buffers), (x,))
-#
-#     from torch import vmap
-#     predictions1_vmap = vmap(fmodel)(params, buffers, minibatches)
+def assign_wandb_tags(run: Any, config: Dict[str, Any]) -> Any:
+    """
+    Assigns metadata tags to a Weights & Biases (wandb) run.
 
+    Parameters:
+    -----------
+    run : Any
+        The Weights & Biases run object.
+    config : Dict[str, Any]
+        Configuration dictionary.
 
-def assign_wandb_tags(run, config):
+    Returns:
+    --------
+    Any
+        Updated wandb run object with assigned tags.
+    """
     median_scaling = config.get("median_scaling", False)
     m_tag = "median_scaling" if median_scaling else "no_median_scaling"
     mt = config.get("MT", False)
     mt_tag = "MT" if mt else "ST"
     wandb_tags = [
-        config.get("model_type", "baseline"),
+        config.get("model_type", "pnn"),
         config.get("data_name", "papyrus"),
         config.get("activity_type", "xc50"),
         config.get("descriptor_protein", None),
@@ -909,10 +1012,27 @@ def assign_wandb_tags(run, config):
 
 
 def get_dataloader(
-    config,
-    device=DEVICE,
-    logger=None,
-):
+    config: Dict[str, Any],
+    device: Union[torch.device, str] = DEVICE,
+    logger: Optional[logging.Logger] = None,
+) -> Dict[str, torch.utils.data.DataLoader]:
+    """
+    Creates dataloaders for training, validation, and testing.
+
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing dataset parameters.
+    device : torch.device, optional
+        Device to load the dataset on, by default DEVICE.
+    logger : Optional[logging.Logger], optional
+        Logger instance, by default None.
+
+    Returns:
+    --------
+    Dict[str, torch.utils.data.DataLoader]
+        Dictionary containing train, validation, and test dataloaders.
+    """
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
     n_targets = config.get("n_targets", -1)
@@ -947,39 +1067,51 @@ def get_dataloader(
 
 
 def post_training_save_model(
-    model,
-    config,
-    model_type="baseline",
-    onnx=True,
-    tracker="wandb",
-    run=None,
-    logger=None,
-    write_model=True,
-):
+    model: torch.nn.Module,
+    config: Dict[str, Any],
+    model_type: str = "pnn",
+    onnx: bool = True,
+    tracker: str = "wandb",
+    run: Optional[Any] = None,
+    logger: Optional[logging.Logger] = None,
+    write_model: bool = True,
+) -> str:
+    """
+    Saves the trained model and its configuration.
+
+    Parameters:
+    -----------
+    model : torch.nn.Module
+        The trained model.
+    config : Dict[str, Any]
+        Configuration dictionary.
+    model_type : str, optional
+        Type of the model, by default "pnn".
+    onnx : bool, optional
+        Whether to save the model in ONNX format, by default True.
+    tracker : str, optional
+        Tracker to log model information, by default "wandb".
+    run : Optional[Any], optional
+        Wandb run instance, by default None.
+    logger : Optional[logging.Logger], optional
+        Logger instance, by default None.
+    write_model : bool, optional
+        Whether to save the model file, by default True.
+
+    Returns:
+    --------
+    str
+        Name of the saved model.
+    """
+
     config["model_type"] = model_type
     model_name = get_model_name(config, run=run)
     data_specific_path = get_data_specific_path(config, logger=logger)
     config["data_specific_path"] = data_specific_path
-    # data_name = config.get("data_name", "papyrus")
-    # activity_type = config.get("activity_type", "xc50")
-    # n_targets = config.get("n_targets", -1)
 
-    # split_type = config.get("split_type", "random")
-    #
-    # model_name = (
-    #     f"{TODAY}-{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}"
-    # )
-    # if run:
-    #     model_name += f"_{run.name}"
-    # model_name += f"{run.name}" if tracker.lower() == "wandb" else ""
     descriptor_protein = config.get("descriptor_protein", None)
     descriptor_chemical = config.get("descriptor_chemical", None)
     desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein, descriptor_chemical)
-
-    # config["model_name"] = model_name
-    # data_specific_path = Path(data_name) / activity_type / get_topx(n_targets)
-    # if logger:
-    #     logger.debug(f"Data specific path: {data_specific_path}")
 
     if write_model:
         save_model(
@@ -996,7 +1128,24 @@ def post_training_save_model(
     return model_name
 
 
-def get_tracker(config, tracker="wandb"):
+def get_tracker(
+    config: Optional[Dict[str, Any]], tracker: str = "wandb"
+) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
+    """
+    Initializes and retrieves a tracking instance.
+
+    Parameters:
+    -----------
+    config : Optional[Dict[str, Any]]
+        Configuration dictionary, if applicable.
+    tracker : str, optional
+        Tracker type ("wandb" or other), by default "wandb".
+
+    Returns:
+    --------
+    Tuple[Optional[Any], Optional[Dict[str, Any]]]
+        Tracking run instance and updated config.
+    """
     if tracker.lower() == "wandb":
         if config is not None:
             run = wandb.init(
@@ -1015,38 +1164,48 @@ def get_tracker(config, tracker="wandb"):
         run = None
 
     return run, config
-    # if tracker.lower() == "wandb":
-    #     if config is not None:
-    #         wandb_project_name = config.get(
-    #             "wandb_project_name", "test-project"
-    #         )  # add it to config only in baseline not the sweep
-    #         run = wandb.init(
-    #             config=config, dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name, reinit=False
-    #         )
-    #     else:  # TODO check the effect here?
-    #         run = wandb.init(config=config, dir=WANDB_DIR, mode=WANDB_MODE)
-    #
-    #     config = wandb.config
 
 
 def train_model_e2e(
-    config,
-    model,
-    model_type="baseline",
-    model_kwargs=None,
-    logger=None,
-    seed=42,
-    device=DEVICE,
-    tracker="wandb",
-    write_model=True,
-):
-    # start_time = datetime.now()
-    # logger = (
-    #     create_logger(name=model_type, file_level="debug", stream_level="info")
-    #     if not logger
-    #     else logger
-    # )
+    config: Dict[str, Any],
+    model: Type[torch.nn.Module],
+    model_type: str = "pnn",
+    model_kwargs: Optional[Dict[str, Any]] = None,
+    logger: Optional[logging.Logger] = None,
+    seed: int = 42,
+    device: torch.device = DEVICE,
+    tracker: str = "wandb",
+    write_model: bool = True,
+) -> Tuple[torch.nn.Module, Dict[str, Any], np.ndarray, float]:
+    """
+    Trains a model end-to-end, including dataset preparation, training, and evaluation.
 
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing training parameters.
+    model : Type[torch.nn.Module]
+        Model class to be instantiated and trained.
+    model_type : str, optional
+        Type of the model, by default "pnn".
+    model_kwargs : Optional[Dict[str, Any]], optional
+        Additional keyword arguments for model initialization, by default None.
+    logger : Optional[logging.Logger], optional
+        Logger instance, by default None.
+    seed : int, optional
+        Random seed for reproducibility, by default 42.
+    device : torch.device, optional
+        Device for training, by default DEVICE.
+    tracker : str, optional
+        Tracker for logging progress, by default "wandb".
+    write_model : bool, optional
+        Whether to save the trained model, by default True.
+
+    Returns:
+    --------
+    Tuple[torch.nn.Module, Dict[str, Any], np.ndarray, float]
+        Trained model, updated config, recorded training statistics, and test loss.
+    """
     if model_kwargs is None:
         model_kwargs = {}
 
@@ -1109,76 +1268,72 @@ def train_model_e2e(
     )
 
     return best_model, config, results_arr, test_loss
-    # return best_model, dataloaders, config, logger, results_arr
-
-    # logger.info(f"{model_type} - start time: {start_time}")
-    # # Adding WANDB TAGS to the tracker if.
-    # if tracker.lower() == "wandb":
-    #     run = assign_wandb_tags(run, config)
-    #     # m_tag = "median_scaling" if median_scaling else "no_median_scaling"
-    #     # mt_tag = "MT" if mt else "ST"
-    #     # wandb_tags = [
-    #     #     model_type,
-    #     #     data_name,
-    #     #     activity_type,
-    #     #     descriptor_protein,
-    #     #     descriptor_chemical,
-    #     #     split_type,
-    #     #     task_type,
-    #     #     m_tag,
-    #     #     mt_tag,
-    #     #     f"max_norm={max_norm}",
-    #     #     TODAY,
-    #     #     tags
-    #     # ]
-    #     # # filter out None values
-    #     # wandb_tags = [tag for tag in wandb_tags if tag]
-    #     # run.tags += tuple(wandb_tags)
-
-    # datasets = build_datasets(
-    #     data_name,
-    #     n_targets,
-    #     activity_type,
-    #     split_type,
-    #     descriptor_protein,
-    #     descriptor_chemical,
-    #     median_scaling,
-    #     task_type,
-    #     ext,
-    #     logger,
-    #     device=device,
-    # )
-    # batch_size = config.get("batch_size", 128)
-    # dataloaders = build_loader(datasets, batch_size, shuffle=False)
-    # logger.info(f"Model: {model_}")
-    # logger.debug(f"{model_type} - end time: {datetime.now()}")
-    # logger.debug(f"{model_type} - duration: {datetime.now() - start_time}")
 
 
 def recalibrate_model(
-    preds_val,
-    labels_val,
-    alea_vars_val,
-    preds_test,
-    labels_test,
-    alea_vars_test,
-    config,
-    epi_val=None,
-    epi_test=None,
-    uct_logger=None,
-    figpath=None,
-):
+    preds_val: Union[np.ndarray, torch.Tensor, List[float]],
+    labels_val: Union[np.ndarray, torch.Tensor, List[float]],
+    alea_vars_val: Union[np.ndarray, torch.Tensor, List[float]],
+    preds_test: Union[np.ndarray, torch.Tensor, List[float]],
+    labels_test: Union[np.ndarray, torch.Tensor, List[float]],
+    alea_vars_test: Union[np.ndarray, torch.Tensor, List[float]],
+    config: Dict[str, Any],
+    epi_val: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
+    epi_test: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
+    uct_logger: Optional[Any] = None,
+    figpath: Optional[str | Path | bytes | LiteralString] = None,
+    nll: Optional[float] = None,
+) -> Any:
+    """
+    Recalibrates uncertainty estimates using validation and test predictions.
+
+    Parameters
+    ----------
+    preds_val : Union[np.ndarray, torch.Tensor, List[float]]
+        Predictions on the validation set.
+    labels_val : Union[np.ndarray, torch.Tensor, List[float]]
+        True labels for the validation set.
+    alea_vars_val : Union[np.ndarray, torch.Tensor, List[float]]
+        Aleatoric uncertainties for validation predictions.
+    preds_test : Union[np.ndarray, torch.Tensor, List[float]]
+        Predictions on the test set.
+    labels_test : Union[np.ndarray, torch.Tensor, List[float]]
+        True labels for the test set.
+    alea_vars_test : Union[np.ndarray, torch.Tensor, List[float]]
+        Aleatoric uncertainties for test predictions.
+    config : Dict[str, Any]
+        Configuration dictionary containing model and dataset settings.
+    epi_val : Optional[Union[np.ndarray, torch.Tensor, List[float]]], optional
+        Epistemic uncertainties for validation predictions, by default None.
+    epi_test : Optional[Union[np.ndarray, torch.Tensor, List[float]]], optional
+        Epistemic uncertainties for test predictions, by default None.
+    uct_logger : Optional[Any], optional
+        Logger for uncertainty quantification metrics, by default None.
+    figpath : Optional[Union[str, Path]], optional
+        Path to save calibration plots, by default None.
+    nll : Optional[float], optional
+        Negative log-likelihood value, by default None.
+
+    Returns
+    -------
+    Any
+        The recalibration model used for adjusting uncertainty estimates.
+    """
     model_name = config.get("model_name", "ensemble")
     data_specific_path = config.get("data_specific_path", None)
-
+    model_type = config.get("model_type", None)
     figures_path = figpath or (FIGS_DIR / data_specific_path / model_name)
 
-    # Validation Set # TODO need to fix this
-    y_true_val, y_pred_val, y_std_val, y_err_val, y_alea_val = process_preds(
-        preds_val, labels_val, alea_vars_val, epi_vars=epi_val
+    # Validation Set
+    y_true_val, y_pred_val, y_err_val, y_alea_val, y_eps_val = process_preds(
+        preds_val, labels_val, alea_vars_val, epi_vars=epi_val, model_type=model_type
     )
-    y_true_test, y_pred_test, y_std_test, y_err_test, y_alea_test = process_preds(
-        preds_test, labels_test, alea_vars_test, epi_vars=epi_test
+    y_true_test, y_pred_test, y_err_test, y_alea_test, y_eps_test = process_preds(
+        preds_test,
+        labels_test,
+        alea_vars_test,
+        epi_vars=epi_test,
+        model_type=model_type,
     )
 
     iso_recal_model = recalibrate(  # , std_recal
@@ -1194,135 +1349,5 @@ def recalibrate_model(
         savefig=True,
         save_dir=figures_path,
         uct_logger=uct_logger,
-    )  # y_std_val, # y_std_test,
-    # # TODO add task_name
-    # model_dir = (
-    #     MODELS_DIR / "saved_models" / data_specific_path
-    #     if data_specific_path
-    #     else MODELS_DIR / "saved_models"
-    # )
-    # model_dir.mkdir(exist_ok=True)
-    # model_name = config.get("model_name", "ensemble") + "_recalibrate_model.pkl"
-    # # pickle save the model to model_dir
-    # save_pickle(recal_model, model_dir / model_name)
-
-    # Test Set
-    # return recal_model
+    )
     return iso_recal_model
-
-
-#
-
-# def _run_model_e2e(
-#     model,
-#     model_type="baseline",
-#     config=None,
-#     data_kwargs=None,
-#     wandb_project_name="baseline-test",
-#     model_save_name=f"{TODAY}-baseline_random_ankh-base_ecfp2048",
-#     logger=None,
-#     **kwargs,
-# ):
-#     # data_name="papyrus",
-#     # activity_type="xc50",
-#     # n_targets=-1,
-#     # descriptor_protein=None,
-#     # descriptor_chemical=None,
-#     # label_scaling_func=None,
-#     # split_type="random",
-#     # ext="pkl",
-#     if data_kwargs is None:
-#         data_kwargs = {
-#             "data_name": "papyrus",
-#             "activity_type": "xc50",
-#             "n_targets": -1,
-#             "descriptor_protein": None,
-#             "descriptor_chemical": None,
-#             "label_scaling_func": None,
-#             "split_type": "random",
-#             "ext": "pkl",
-#         }
-#     (
-#         dataloaders,
-#         config,
-#         logger,
-#         desc_prot_len,
-#         desc_chem_len,
-#         start_time,
-#         data_specific_path,
-#     ) = premodel_init(
-#         config,
-#         model_type,
-#         **data_kwargs,
-#         logger=logger,
-#         **kwargs,
-#     )
-#     # data_name,
-#     # activity_type,
-#     # n_targets,
-#     # descriptor_protein,
-#     # descriptor_chemical,
-#     # label_scaling_func,
-#     # split_type,
-#     # ext,
-#
-#     with wandb.init(
-#         dir=WANDB_DIR, mode=WANDB_MODE, project=wandb_project_name, config=config
-#     ):
-#         config = wandb.config
-#         best_model, test_loss = run_model(
-#             config,
-#             model,
-#             dataloaders,
-#             data_kwargs.get("n_targets", -1),
-#             DEVICE,
-#             logger,
-#         )
-#         logger.info(f"Test Loss: {test_loss}")
-#
-#         save_model(
-#             config=config,
-#             model=best_model,
-#             model_name=model_save_name,
-#             data_specific_path=data_specific_path,
-#             desc_prot_len=desc_prot_len,
-#             desc_chem_len=desc_chem_len,
-#             onnx=True,
-#         )
-#
-#     return best_model, test_loss
-#     #
-#     # seed = 42
-#     # set_seed(seed)
-#     #
-#     # config = get_model_config(model_type, **kwargs) if not config else config
-#     # logger = (
-#     #     create_logger(name=model_type, file_level="debug", stream_level="info")
-#     #     if not logger
-#     #     else logger
-#     # )
-#     #
-#     # start_time = datetime.now()
-#     # logger.info(f"{model_type} - start time: {start_time}")
-#     #
-#     # # get datasets
-#     # datasets = build_datasets(
-#     #     data_name=data_name,
-#     #     n_targets=n_targets,
-#     #     activity_type=activity_type,
-#     #     split_type=split_type,
-#     #     desc_prot=descriptor_protein,
-#     #     desc_chem=descriptor_chemical,
-#     #     label_scaling_func=label_scaling_func,
-#     #     ext=ext,
-#     #     logger=logger,
-#     # )
-#     #
-#     # desc_prot_len, desc_chem_len = get_desc_len(descriptor_protein), get_desc_len(
-#     #     descriptor_chemical
-#     # )
-#     # logger.info(f"Chemical descriptor {descriptor_chemical} of length: {desc_chem_len}")
-#     # logger.info(f"Protein descriptor {descriptor_protein} of length: {desc_prot_len}")
-#     #
-#     # # Load the dataset
-#     # dataloaders = build_loader(datasets, batch_size, shuffle=True)

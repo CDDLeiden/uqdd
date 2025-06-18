@@ -1,7 +1,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, Optional, List, Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -17,21 +17,19 @@ import wandb
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
 
 from openpyxl import load_workbook
-from openpyxl.drawing.image import Image as XLImage
+from wandb import Image
 
-from uqdd import FIGS_DIR, TODAY, DATA_DIR
+from uqdd import FIGS_DIR, DATA_DIR
 from matplotlib.ticker import MaxNLocator
 
-# from uqdd.data.utils_data import save_pickle, save_df
+
 from uqdd.utils import create_logger, save_df, save_pickle
-from uqdd.utils_chem import smi_to_pil_image
 
 import math
 
 import scipy.stats as ss
 
 from sklearn.linear_model import LinearRegression
-from scipy.stats import pearsonr
 from scipy.stats import spearmanr
 from scipy.stats import norm
 from scipy.stats import bootstrap
@@ -39,31 +37,33 @@ from scipy.integrate import quad
 from bisect import bisect_left
 
 string_types = (type(b""), type(""))
-sns.set(style="white")
+sns.set_theme(style="white")
 
 
-def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
+def calc_nanaware_metrics(
+    tensor: torch.Tensor,
+    nan_mask: torch.Tensor,
+    all_tasks_agg: Union[bool, str] = False,
+) -> torch.Tensor:
     """
-    Aggregate a tensor by excluding NaN values based on a nan_mask.
+    Calculates metrics while handling NaN values in the input tensor.
 
-    Calculates the mean of the non-NaN values along the specified dimension.
-    Optionally, it can aggregate the mean across all tasks.
-
-    Parameters
-    ----------
+    Parameters:
+    -----------
     tensor : torch.Tensor
-        The input tensor to be aggregated.
+        The input tensor containing numerical values.
     nan_mask : torch.Tensor
-        A boolean mask indicating the NaN values in the tensor.
-    all_tasks_agg : bool or str, optional
-        Determines whether to aggregate across all tasks. If False (default),
-        returns the mean for each task. If 'mean', returns the mean of all tasks.
-        If 'sum', returns the sum of all tasks.
+        A boolean mask indicating NaN values in the tensor.
+    all_tasks_agg : Union[bool, str], optional
+        Determines aggregation behavior:
+        - False: Returns mean per task.
+        - "mean": Returns mean across all tasks.
+        - "sum": Returns sum across all tasks.
 
-    Returns
-    -------
+    Returns:
+    --------
     torch.Tensor
-        The aggregated tensor based on the specified aggregation method.
+        The aggregated tensor based on the specified method.
 
     Notes
     -----
@@ -95,9 +95,6 @@ def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
 
     tensor_means = sum_values / valid_counts.clamp(min=1)  # Avoid division by zero
 
-    # If we want to aggregate across all tasks, we do so here.
-    # if not all_tasks_agg:
-    #     return tensor_means
     if all_tasks_agg == "mean":
         return torch.nanmean(tensor_means)
     elif all_tasks_agg == "sum":
@@ -105,22 +102,25 @@ def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
     return tensor_means
 
 
-def calc_regr_metrics(targets, outputs, metrics_per_task=False):
+def calc_regr_metrics(
+    targets: torch.Tensor, outputs: torch.Tensor, metrics_per_task: bool = False
+) -> Tuple[float, float, float]:
     """
-    Calculates regression metrics between targets and outputs, including RMSE, R^2, and EVS.
+    Computes regression metrics including RMSE, R^2, and explained variance.
 
-    Parameters
-    ----------
+    Parameters:
+    -----------
     targets : torch.Tensor
-        The true target values.
+        True target values.
     outputs : torch.Tensor
-        The predicted output values by the model.
+        Model-predicted values.
     metrics_per_task : bool, optional
-        Whether to calculate the metrics per task in a multi-task learning scenario.
-    Returns
-    -------
-    tuple of np.ndarray
-        The calculated metrics (RMSE, R^2, EVS) for each task.
+        Whether to compute metrics per task in a multi-task setting.
+
+    Returns:
+    --------
+    Tuple[float, float, float]
+        RMSE, R^2, and explained variance scores.
     """
     # Handle extra dimensions (ensembles) by averaging ensemble predictions
     if outputs.dim() > targets.dim():
@@ -149,12 +149,7 @@ def calc_regr_metrics(targets, outputs, metrics_per_task=False):
                 rmse[i] = mean_squared_error(task_t, task_o, squared=False)
                 r2[i] = r2_score(task_t, task_o)
                 evs[i] = explained_variance_score(task_t, task_o)
-        #     # nan_mask = ~torch.isnan(task_t)
-        #     task_t, task_o = task_t[valid_mask].numpy(), task_o[valid_mask].numpy()
-        #     rmse.append(mean_squared_error(task_t, task_o, squared=False))
-        #     r2.append(r2_score(task_t, task_o))
-        #     evs.append(explained_variance_score(task_t, task_o))
-        # rmse, r2, evs = np.array(rmse), np.array(r2), np.array(evs)
+
     else:
         # Calculate metrics for all tasks
         nan_mask = ~torch.isnan(targets)
@@ -168,223 +163,269 @@ def calc_regr_metrics(targets, outputs, metrics_per_task=False):
 
     # return rmse, r2, evs
     return float(rmse), float(r2), float(evs)
-    # Detect multitask learning scenario
-    # is_multitask = targets.shape[1] > 1
-
-    # targets = targets.squeeze().flatten()
-    # outputs = outputs.squeeze().flatten()
-    # nan_mask = torch.isnan(targets)
-    # targets = targets[~nan_mask]
-    # outputs = outputs[~nan_mask]
-    #
-    # targets = targets.detach().cpu().numpy()
-    # outputs = outputs.detach().cpu().numpy()
-    #
-    # # # Adjust dimensions if necessary (for MTL to STL comparison)
-    # # if targets.dim() < outputs.dim():
-    # #     targets = targets.unsqueeze(-1)
-    # # targets.requires_grad_(False)
-    # # outputs.requires_grad_(False)
-    # # targets = targets.detach()
-    # # outputs = outputs.detach()
-    # #
-    # # targets = targets.cpu().numpy()
-    # # outputs = outputs.cpu().numpy()
-    # # targets = targets.detach().numpy()
-    # # outputs = outputs.detach().numpy()
-    #
-    # # no reduction here because we want to calc per task metrics
-    # rmse = mean_squared_error(
-    #     targets,
-    #     outputs,
-    #     squared=False,
-    #     # , multioutput="uniform_average" # it doesn't matter as we take mean over prediction
-    # )
-    # r2 = r2_score(targets, outputs)  # , multioutput="uniform_average"
-    # evs = explained_variance_score(targets, outputs)  # , multioutput="uniform_average"
-
-
-# def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
-#     """
-#     Calculates the loss for non-NaN values between outputs and targets using a given loss function.
-#
-#     Parameters
-#     ----------
-#     outputs : torch.Tensor
-#         Predicted outputs from the model.
-#     targets : torch.Tensor
-#         True target values.
-#     nan_mask : torch.Tensor
-#         A boolean mask indicating NaN values in the targets.
-#     loss_fn : function
-#         A loss function compatible with torch.Tensors and supports 'none' reduction.
-#
-#     Returns
-#     -------
-#     torch.Tensor
-#         The aggregated loss value excluding NaNs.
-#     """
-#     valid_targets = torch.where(
-#         ~nan_mask, targets, torch.tensor(0.0, device=targets.device)
-#     )
-#     valid_outputs = torch.where(
-#         ~nan_mask, outputs, torch.tensor(0.0, device=outputs.device)
-#     )
-#
-#     loss_per_task = loss_fn(valid_outputs, valid_targets)
-#     loss = calc_nanaware_metrics(loss_per_task, nan_mask, all_tasks_agg="sum")
-#
-#     return loss
-
-# targets[nan_mask], outputs[nan_mask] = 0.0, 0.0
-#
-# loss_per_task = loss_fn(outputs, targets)
-#
-# # Now we only include the non-Nan targets in the mean calc.
-# loss = calc_nanaware_metrics(
-#     tensor=loss_per_task, nan_mask=nan_mask, all_tasks_agg="sum"
-# )
-# # task_losses = torch.sum(loss_per_task, dim=1) / torch.sum(~nan_mask, dim=1)
-# # loss = torch.sum(task_losses)
-# return loss
 
 
 def process_preds(
-    predictions: torch.Tensor,
-    targets: torch.Tensor,
-    alea_vars: torch.Tensor = None,
-    epi_vars: torch.Tensor = None,
-    task_idx: Union[int, None] = None,
-):
+    predictions: Union[torch.Tensor, np.ndarray],
+    targets: Union[torch.Tensor, np.ndarray],
+    alea_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+    epi_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+    task_idx: Optional[int] = None,
+    model_type: Optional[str] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Process predictions to extract mean, standard deviation, and align with targets,
+    Process predictions to extract mean, standard deviation, align with targets,
     and compute the absolute error between predictions and targets.
 
     Parameters
     ----------
-    predictions : torch.Tensor
+    predictions : Union[torch.Tensor, np.ndarray]
         The model predictions with dimensions [samples, tasks, ensemble members].
-    targets : torch.Tensor
+    targets : Union[torch.Tensor, np.ndarray]
         The true target values.
-    alea_vars :  torch.Tensor, optional
-        Aleatoric part of uncertainty
-    epi_vars : torch.Tensor, optional
-        Epistemic part of uncertainty - if calculated by probabilistic model (Evidential model)
-    task_idx : int, optional
-        Index of the specific task to process in a multi-task learning setting.
+    alea_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+        Aleatoric uncertainty estimates, by default None.
+    epi_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+        Epistemic uncertainty estimates (from probabilistic models like Evidential Learning), by default None.
+    task_idx : Optional[int], optional
+        Index of the specific task to process in a multi-task learning setting, by default None.
+    model_type : Optional[str], optional
+        Type of model used for predictions (e.g., ensemble, mcdp, etc.), by default None.
 
     Returns
     -------
-    tuple
-        A tuple containing arrays for predictions mean, standard deviation, targets,
-        and absolute error, filtered to exclude NaN values.
+    Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        - `y_true` : The filtered true target values.
+        - `y_pred` : The processed predictions (e.g. mean for ensembles).
+        - `y_err` : The absolute errors between predictions and targets.
+        - `y_alea` : The computed standard deviations for predictions.
+        - `y_eps` : The processed aleatoric uncertainties.
     """
-    if alea_vars is None:
-        vars_ = torch.zeros_like(targets)
-        # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
-    else:
-        if epi_vars is None:
-            # ensemble and mcdp case so we need to take mean
-            vars_ = alea_vars.mean(dim=-1)  # .squeeze()
-        else:  # evidential case no need to take mean
-            vars_ = alea_vars
+    if model_type == "pnn":
+        y_pred = predictions  # .mean(dim=-1)
+        y_alea = alea_vars  # .mean(dim=-1)
+        # epistemic is then Zerolike aleatoric
+        y_eps = torch.zeros_like(alea_vars)
 
-    if epi_vars is None:  # once again ensemble and mcdp case
-        epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
-        predictions = predictions.mean(dim=-1)  # .squeeze()
-    # Get the predictions mean and std
-    y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
-    y_std = epi_vars.sqrt()
-    # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
-    y_true = targets  # .squeeze()
-    # if vars_ is not None:
-    #     vars_ = vars_.mean(dim=-1).squeeze()
-    # else:  # Empty Tensor
-    #     vars_ = torch.zeros_like(targets)
+    elif model_type in ["ensemble", "mcdropout"]:
+        y_pred = predictions.mean(dim=-1)
+        y_alea = alea_vars.mean(dim=-1)
+        y_eps = predictions.var(dim=-1)
+
+    elif model_type in ["evidential", "eoe", "emc", "pnn"]:
+        y_pred = predictions  # .mean(dim=-1)
+        y_alea = alea_vars  # .mean(dim=-1)
+        y_eps = epi_vars  # .mean(dim=-1)
+
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    # CHECK
+    y_true = targets
+
     if task_idx is not None:
         # For MTL, select predictions for the specific task
-        y_pred, y_std, y_true, vars_ = (
-            y_pred[:, task_idx],
-            y_std[:, task_idx],
+        y_true, y_pred, y_alea, y_eps = (
             y_true[:, task_idx],
-            vars_[:, task_idx],
+            y_pred[:, task_idx],
+            y_alea[:, task_idx],
+            y_eps[:, task_idx],
         )
 
     nan_mask = ~torch.isnan(y_true)
-    y_pred, y_std, y_true, vars_ = (
-        y_pred[nan_mask],
-        y_std[nan_mask],
+    y_true, y_pred, y_alea, y_eps = (
         y_true[nan_mask],
-        vars_[nan_mask],
+        y_pred[nan_mask],
+        y_alea[nan_mask],
+        y_eps[nan_mask],
     )
-    # solve shape issues between y_pred and y_true in case y_true dimensions (e.g. (14088,) are less than y_pred (e.g. (14088,10))
-    # if y_pred.dim() > y_true.dim():
-    #     y_true = y_true.unsqueeze(-1).expand_as(
-    #         y_pred
-    #     )  # Fastest as already expanded here
+
     # Calculate the error
     y_err = y_pred - y_true
-    # .abs()  # IT IS SOOO HIGH WHY? - Not really only during testing the script was high
-    # Convert to numpy arrays
-    y_pred, y_std, y_true, y_err, vars_ = map(
-        lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)
+
+    y_true, y_pred, y_err, y_alea, y_eps = map(
+        lambda x: x.cpu().numpy(), (y_true, y_pred, y_err, y_alea, y_eps)
     )
 
-    return y_true, y_pred, y_std, y_err, vars_
+    # return y_true, y_pred, y_std, y_err, y_eps
+    return y_true, y_pred, y_err, y_alea, y_eps
+    # if alea_vars is None:
+    #     vars_ = torch.zeros_like(targets)
+    #     # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
+    # else:
+    #     if epi_vars is None:
+    #         # ensemble and mcdp case so we need to take mean
+    #         if model_type in ["ensemble", "mcdp"]:
+    #             alea_vars = alea_vars.mean(dim=-1)
+    #
+    #         vars_ = alea_vars.mean(dim=-1)  # .squeeze()
+    #     else:  # evidential case no need to take mean
+    #         vars_ = alea_vars
+    #
+    # if epi_vars is None:  # once again ensemble and mcdp case
+    #     epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
+    #     predictions = predictions.mean(dim=-1)  # .squeeze()
+    # # Get the predictions mean and std
+    # y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
+    # y_std = epi_vars.sqrt()
+    # # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
+    # # squeeze y_true only if the y_pred is a one dimensional array
+    # if len(y_pred.shape) == 1:
+    #     y_true = targets.squeeze()
+    # else:
+    #     y_true = targets
 
 
-def get_preds_export_path(data_specific_path, model_name):
+# def _process_preds(
+#     predictions: Union[torch.Tensor, np.ndarray],
+#     targets: Union[torch.Tensor, np.ndarray],
+#     alea_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+#     epi_vars: Optional[Union[torch.Tensor, np.ndarray]] = None,
+#     task_idx: Optional[int] = None,
+#     model_type: Optional[str] = None,
+# ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+#     """
+#     Process predictions to extract mean, standard deviation, align with targets,
+#     and compute the absolute error between predictions and targets.
+#
+#     Parameters
+#     ----------
+#     predictions : Union[torch.Tensor, np.ndarray]
+#         The model predictions with dimensions [samples, tasks, ensemble members].
+#     targets : Union[torch.Tensor, np.ndarray]
+#         The true target values.
+#     alea_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+#         Aleatoric uncertainty estimates, by default None.
+#     epi_vars : Optional[Union[torch.Tensor, np.ndarray]], optional
+#         Epistemic uncertainty estimates (from probabilistic models like Evidential Learning), by default None.
+#     task_idx : Optional[int], optional
+#         Index of the specific task to process in a multi-task learning setting, by default None.
+#
+#     Returns
+#     -------
+#     Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+#         - `y_true` : The filtered true target values.
+#         - `y_pred` : The processed predictions (mean for ensembles).
+#         - `y_std` : The computed standard deviations for predictions.
+#         - `y_err` : The absolute errors between predictions and targets.
+#         - `alea_vars` : The processed aleatoric uncertainties.
+#     """
+#     if alea_vars is None:
+#         vars_ = torch.zeros_like(targets)
+#         # alea_vars_mean, alea_vars_vars = calc_aleatoric_mean_var_notnan(alea_vars, targets)
+#     else:
+#         if epi_vars is None:
+#             # ensemble and mcdp case so we need to take mean
+#             vars_ = alea_vars.mean(dim=-1)  # .squeeze()
+#         else:  # evidential case no need to take mean
+#             vars_ = alea_vars
+#
+#     if epi_vars is None:  # once again ensemble and mcdp case
+#         epi_vars = predictions.var(dim=-1)  # .squeeze()  # (dim=2)
+#         predictions = predictions.mean(dim=-1)  # .squeeze()
+#     # Get the predictions mean and std
+#     y_pred = predictions  # predictions.mean(dim=-1).squeeze()  # (dim=2)
+#     y_std = epi_vars.sqrt()
+#     # y_std = np.minimum(y_std, 1e3) # clip the unc for vis
+#     # squeeze y_true only if the y_pred is a one dimensional array
+#     if len(y_pred.shape) == 1:
+#         y_true = targets.squeeze()
+#     else:
+#         y_true = targets
+#     if task_idx is not None:
+#         # For MTL, select predictions for the specific task
+#         y_pred, y_std, y_true, vars_ = (
+#             y_pred[:, task_idx],
+#             y_std[:, task_idx],
+#             y_true[:, task_idx],
+#             vars_[:, task_idx],
+#         )
+#
+#     nan_mask = ~torch.isnan(y_true)
+#     y_pred, y_std, y_true, vars_ = (
+#         y_pred[nan_mask],
+#         y_std[nan_mask],
+#         y_true[nan_mask],
+#         vars_[nan_mask],
+#     )
+#
+#     # Calculate the error
+#     y_err = y_pred - y_true
+#
+#     y_pred, y_std, y_true, y_err, vars_ = map(
+#         lambda x: x.cpu().numpy(), (y_pred, y_std, y_true, y_err, vars_)
+#     )
+#
+#     return y_true, y_pred, y_std, y_err, vars_
+
+
+def get_preds_export_path(data_specific_path: str, model_name: str) -> Path:
+    """
+    Constructs the file path for exporting prediction results.
+
+    Parameters:
+    -----------
+    data_specific_path : str
+        Path to the dataset-specific directory.
+    model_name : str
+        Name of the trained model.
+
+    Returns:
+    --------
+    Path
+        Path where the predictions CSV file will be saved.
+    """
     path = DATA_DIR / "predictions" / Path(data_specific_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path / f"{model_name}_preds.csv"
 
 
 def create_df_preds(
-    y_true,
-    y_pred,
-    y_eps,
-    y_err,
-    y_alea=None,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_err: np.ndarray,
+    y_alea: Optional[np.ndarray] = None,
+    y_eps: Optional[np.ndarray] = None,
     export: bool = True,
-    data_specific_path: str = None,
-    model_name: str = None,
-    logger: logging.Logger = None,
+    data_specific_path: Optional[str | Path] = None,
+    model_name: Optional[str] = None,
+    logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
     """
-    Create a DataFrame from prediction data and optionally export it.
+    Creates a DataFrame containing predictions, uncertainties, and errors.
 
-    Parameters
-    ----------
-    logger
-    y_true : array-like
-        The true target values.
-    y_pred : array-like
-        The predicted values.
-    y_eps : array-like
-        The epistemic uncertainty part.
-    y_err : array-like
-        The prediction errors.
-    y_alea : array-like or None
-        Aleatoric uncertainty part.
+    Parameters:
+    -----------
+    y_true : np.ndarray
+        Ground-truth target values.
+    y_pred : np.ndarray
+        Predicted values.
+    y_eps : np.ndarray
+        Epistemic uncertainty estimates.
+    y_err : np.ndarray
+        Prediction errors.
+    y_alea : Optional[np.ndarray], optional
+        Aleatoric uncertainty estimates, by default None.
     export : bool, optional
-        Whether to export the DataFrame as a CSV file.
-    data_specific_path : str, optional
-        The specific data directory path for exporting.
-    model_name : str, optional
-        The name of the model for the export file name.
+        Whether to export the DataFrame as a CSV file, by default True.
+    data_specific_path : Optional[str], optional
+        Path for saving the CSV file, by default None.
+    model_name : Optional[str], optional
+        Name of the model, by default None.
+    logger : Optional[logging.Logger], optional
+        Logger instance, by default None.
 
-    Returns
-    -------
+    Returns:
+    --------
     pd.DataFrame
-        The DataFrame containing the prediction data.
+        DataFrame containing the predictions and uncertainty estimates.
     """
     df = pd.DataFrame(
         {
             "y_true": y_true,
             "y_pred": y_pred,
-            "y_eps": y_eps,
             "y_err": y_err,
             "y_alea": y_alea,
+            "y_eps": y_eps,
         }
     )
 
@@ -397,16 +438,39 @@ def create_df_preds(
 
 
 def plot_true_vs_preds(
-    y_pred,
-    y_true,
-    n_subset=None,
-    # ax=None,
-    distant_threshold=3,  # Define the threshold for distant points in terms of RMSE
-    savefig=False,  # Whether to save the figure
-    save_dir=None,  # Directory to save the figure
-    task_name=None,
-    **kwargs,
-):
+    y_pred: np.ndarray,
+    y_true: np.ndarray,
+    n_subset: Optional[int] = None,
+    distant_threshold: float = 3.0,
+    savefig: bool = False,
+    save_dir: Optional[Path] = None,
+    task_name: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Generates a scatter plot comparing true vs. predicted values.
+
+    Parameters:
+    -----------
+    y_pred : np.ndarray
+        Predicted values.
+    y_true : np.ndarray
+        True values.
+    n_subset : Optional[int], optional
+        Number of samples to plot, by default None.
+    distant_threshold : float, optional
+        Threshold to identify distant points, by default 3.0.
+    savefig : bool, optional
+        Whether to save the figure, by default False.
+    save_dir : Optional[Path], optional
+        Directory to save the figure, by default None.
+    task_name : Optional[str], optional
+        Name of the task, by default None.
+
+    Returns:
+    --------
+    plt.Figure
+        The generated scatter plot figure.
+    """
     if n_subset is not None and n_subset < len(y_true):
         # Randomly select indices if subset_size is specified and less than the total number of points
         rng = np.random.default_rng(42)
@@ -523,11 +587,7 @@ def plot_true_vs_preds(
         * 100
     )
     distant_percentage = np.mean(data["Distant"]) * 100
-    # legend_text = [
-    #     f'±1 RMSE ({rmse:.2f}): {within_1_rmse:.2f}%',
-    #     f'±2 RMSE ({2 * rmse:.2f}): {within_2_rmse:.2f}%',
-    #     f'> {distant_threshold} RMSE: {distant_percentage:.2f}%'
-    # ]
+
     legend_elements = [
         plt.Line2D(
             [0],
@@ -567,24 +627,6 @@ def plot_true_vs_preds(
         labelspacing=0.5,
         borderaxespad=0.5,
     )
-    # )
-    # # Set the provided ax for the JointGrid
-    # if ax is not None:
-    #     g.fig = plt.gcf()
-    #     g.ax_joint = ax
-    #
-    #     # Adjust the grids to match the ax
-    #     for ax_name in ["ax_marg_x", "ax_marg_y", "ax_joint"]:
-    #         g.fig.axes.remove(getattr(g, ax_name))
-    #
-    #     ax_joint_pos = g.ax_joint.get_position()
-    #     ax_marg_x_pos = g.ax_marg_x.get_position()
-    #     ax_marg_y_pos = g.ax_marg_y.get_position()
-    #
-    #     g.fig.add_axes(ax)
-    #     g.ax_joint.set_position(ax_joint_pos)
-    #     g.ax_marg_x.set_position(ax_marg_x_pos)
-    #     g.ax_marg_y.set_position(ax_marg_y_pos)
 
     if savefig:
         g.savefig(
@@ -611,156 +653,42 @@ def plot_true_vs_preds(
     return g.figure
 
 
-#     data["Color"] = pd.cut(
-#         data["Difference"], bins=[-np.inf, 1, 2, np.inf], labels=["<=1", ">1", ">2"]
-#     )
-#
-#     data.to_csv("/home/bkhalil/Repos/uqdd/data.csv")
-#     # If ax is None, create a new figure and axes
-#     if ax is None:
-#         fig, ax = plt.subplots(figsize=(6, 4))
-#
-#     # Create the jointplot
-#     g = sns.jointplot(
-#         data=data,
-#         x="True Values",
-#         y="Predicted Values",
-#         kind="reg",
-#         hue="Color",
-#         palette={"<=1": "blue", ">1": "orange", ">2": "red"},
-#         marginal_kws={"bins": 20, "fill": True},
-#         scatter_kws={"alpha": alpha},
-#         ax=ax,
-#         **kwargs,
-#     )
-#
-#     # Annotate RMSE on the plot
-#     g.ax_joint.annotate(
-#         f"RMSE: {rmse:.2f}",
-#         xy=(0.95, 0.05),
-#         xycoords="axes fraction",
-#         ha="right",
-#         va="bottom",
-#     )
-#
-#     plt.show()
-#
-#     # return g
-#     g = sns.JointGrid(
-#         data=data,
-#         x="True Values",
-#         y="Predicted Values",
-#         hue="Color",
-#         palette={"<=1": "blue", ">1": "orange", ">2": "red"},
-#     )
-#     g.plot_joint(
-#         sns.regplot,
-#         scatter_kws={"alpha": alpha, "hue": "Color"},
-#     )
-#     g.plot_marginals(sns.histplot, bins=20, fill=True, kde=True)
-#     # Add the regression line
-#     sns.regplot(
-#         data=data,
-#         x="True Values",
-#         y="Predicted Values",
-#         ax=g.ax_joint,
-#         scatter=False,
-#         color="red",
-#     )
-#
-#     g.ax_joint.annotate(
-#         f"RMSE: {rmse:.2f}",
-#         xy=(0.95, 0.05),
-#         xycoords="axes fraction",
-#         ha="right",
-#         va="bottom",
-#     )
-#
-#
-# def _plot_true_vs_preds(
-#     y_pred,
-#     y_true,
-#     n_subset=None,
-#     ax=None,
-#     **kwargs,
-# ):
-#     if n_subset  is not None and n_subset < len(y_true):
-#         # Randomly select indices if subset_size is specified and less than the total number of points
-#         # random generator
-#         rng = np.random.default_rng(42)
-#         indices = rng.choice(len(y_true), size=n_subset, replace=False)
-#
-#         y_true_subset = y_true[indices]
-#         y_preds_subset = y_pred[indices]
-#     else:
-#         # Use all points if no subset_size is specified or if subset_size is larger than available points
-#         y_true_subset = y_true
-#         y_preds_subset = y_pred
-#
-#     # Sort the subset based on y_true for better visualization
-#     sorted_indices = np.argsort(y_true_subset)
-#     sorted_y_true = y_true_subset[sorted_indices]
-#     sorted_y_preds = y_preds_subset[sorted_indices]
-#
-#     # Plot the graph
-#     if ax is None:
-#         fig, ax = plt.subplots()
-#     ax.plot(sorted_y_true, sorted_y_preds, "o", label="Predictions")
-#     ax.set_xlabel("True Values")
-#     ax.set_ylabel("Predicted Values")
-#     # ax.set_title(f"True vs. Predicted Values - {task_name or 'PCM'}")
-#
-#     # Calculate the best-fitting line
-#     best_fit_coeffs = np.polyfit(sorted_y_true, sorted_y_preds, deg=1)
-#     best_fit_line = np.poly1d(best_fit_coeffs)
-#     ax.plot(
-#         sorted_y_true, best_fit_line(sorted_y_true), color="red", label="Best Fit Line"
-#     )
-#
-#     # Calculate and display the RMSE for the subset
-#     rmse = np.sqrt(np.mean((sorted_y_preds - best_fit_line(sorted_y_true)) ** 2))
-#     ax.text(
-#         0.95, 0.05, f"RMSE: {rmse:.2f}", transform=ax.transAxes, ha="right", va="bottom"
-#     )
-#
-#     # Show the legend and display/save the graph
-#     ax.legend(loc="upper left")
-#     #
-#     # if save_path:
-#     #     plt.savefig(save_path)
-#     #     print(f"Saved true_vs_preds_plot to {save_path}")
-#     # else:
-#     #     plt.show()
-#     #
-#     # return fig
-#
-#     # Calculate the distances of each point to the best-fitted line
-#     # distances = np.abs(best_fit_line(sorted_y_true) - sorted_y_preds)
-#     # normalized_distances = distances / np.max(distances)
-#     # ax.plot(sorted_y_true, sorted_y_preds, color="gray", alpha=0.2)
-#     # for i in range(len(sorted_y_true)):
-#     #     ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
-#     #              color='gray', alpha=normalized_distances[i])
-#     # Plot the grey lines between dots and best fit line
-#     # for i in range(len(sorted_y_true)):
-#     #     ax.plot(
-#     #         [sorted_y_true[i], sorted_y_true[i]],
-#     #         [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
-#     #         color="gray",
-#     #         alpha=0.2,
-#     #     )
-
-
 def plot_pred_intervals(
     y_pred: np.ndarray,
     y_std: np.ndarray,
     y_true: np.ndarray,
     n_subset: int = 100,
-    ylims: Tuple[float, float] | None = (-3.0, 3.0),
-    num_stds_confidence_bound: float = 2.0,  # 1.96 for 95% CI for normal distribution
-    ax: plt.Axes = None,
-    ordered=False,
-):
+    ylims: Optional[Tuple[float, float]] = (-3.0, 3.0),
+    num_stds_confidence_bound: float = 2.0,
+    ax: Optional[plt.Axes] = None,
+    ordered: bool = False,
+) -> None:
+    """
+    Plots prediction intervals to visualize uncertainty.
+
+    Parameters:
+    -----------
+    y_pred : np.ndarray
+        Predicted values.
+    y_std : np.ndarray
+        Standard deviation / Uncertainty of predictions.
+    y_true : np.ndarray
+        True values.
+    n_subset : int, optional
+        Number of samples to plot, by default 100.
+    ylims : Optional[Tuple[float, float]], optional
+        Y-axis limits, by default (-3.0, 3.0).
+    num_stds_confidence_bound : float, optional
+        Number of standard deviations for confidence bounds, by default 2.0.
+    ax : Optional[plt.Axes], optional
+        Matplotlib axis to plot on, by default None.
+    ordered : bool, optional
+        Whether to order the intervals, by default False.
+
+    Returns:
+    --------
+    None
+    """
     if ax is None:
         fig, ax = plt.subplots()
     if ordered:
@@ -796,8 +724,24 @@ def plot_pred_intervals(
 
 
 def plot_sharpness(
-    y_std: np.ndarray, n_subset: int = 100, ax: plt.Axes = None, **kwargs
-):
+    y_std: np.ndarray, n_subset: int = 100, ax: Optional[plt.Axes] = None
+) -> None:
+    """
+    Plots sharpness of uncertainty estimates.
+
+    Parameters:
+    -----------
+    y_std : np.ndarray
+        Standard deviation of predictions.
+    n_subset : int, optional
+        Number of samples to plot, by default 100.
+    ax : Optional[plt.Axes], optional
+        Matplotlib axis to plot on, by default None.
+
+    Returns:
+    --------
+    None
+    """
     if ax is None:
         fig, ax = plt.subplots()
     uct_viz.plot_sharpness(y_std=y_std, n_subset=n_subset, ax=ax)
@@ -809,31 +753,31 @@ def get_calib_props(
     y_true: np.ndarray,
     vectorized: bool = True,
     prop_type: str = "interval",
-    output_folder: Path = None,
+    output_folder: Optional[Path] = None,
 ) -> pd.DataFrame:
     """
-    Compute the expected and observed proportions for a calibration plot. Optionally save the data.
+    Computes expected and observed proportions for calibration plots.
 
-    Args:
-        y_pred: 1D array of the predicted means for the held out dataset.
-        y_std: 1D array of the predicted standard deviations for the held out dataset.
-        y_true: 1D array of the true labels in the held out dataset.
-        vectorized: plot using get_proportion_lists_vectorized.
-        prop_type: "interval" to measure observed proportions for centered prediction intervals,
-                   and "quantile" for observed proportions below a predicted quantile.
-                   Ignored if exp_props and obs_props are provided as inputs.
-        output_folder: Path to the folder where the calibration plot data will be saved.
+    Parameters:
+    -----------
+    y_pred : np.ndarray
+        Predicted values.
+    y_std : np.ndarray
+        Standard deviation of predictions.
+    y_true : np.ndarray
+        True values.
+    vectorized : bool, optional
+        Whether to use vectorized computations, by default True.
+    prop_type : str, optional
+        Type of calibration proportion ("interval" or "quantile"), by default "interval".
+    output_folder : Optional[Path], optional
+        Directory to save calibration data, by default None.
 
     Returns:
-        pd.DataFrame: A DataFrame containing the expected and observed proportions.
+    --------
+    pd.DataFrame
+        DataFrame containing expected and observed proportions.
     """
-
-    # # Optionally select a subset
-    # if n_subset is not None:
-    #     [y_pred, y_std, y_true] = uct_viz.filter_subset([y_pred, y_std, y_true], n_subset)
-
-    # if (exp_props is None) or (obs_props is None):
-    # Compute exp_proportions and obs_proportions
     if vectorized:
         (
             exp_proportions,
@@ -871,16 +815,51 @@ def make_uct_plots(
     y_pred: np.ndarray,
     y_std: np.ndarray,
     y_true: np.ndarray,
-    task_name: str = None,
+    task_name: Optional[str] = None,
     n_subset: int = 100,
-    ylims: Tuple[float, float] | None = (-3.0, 3.0),
-    num_stds_confidence_bound: float = 2.0,  # 1.96 for 95% CI for normal distribution
+    ylims: Optional[Tuple[float, float]] = (-3.0, 3.0),
+    num_stds_confidence_bound: float = 2.0,
     plot_save_str: str = "uct_plot",
     savefig: bool = True,
-    save_dir: Path = "path/to/figures",
-    exp_props: Union[np.ndarray, None] = None,
-    obs_props: Union[np.ndarray, None] = None,
+    save_dir: Path = Path("path/to/figures"),
+    exp_props: Optional[np.ndarray] = None,
+    obs_props: Optional[np.ndarray] = None,
 ) -> Dict[str, plt.Figure]:
+    """
+    Generates various Uncertainty Calibration and Analysis plots.
+
+    Parameters:
+    -----------
+    y_pred : np.ndarray
+        Model-predicted values.
+    y_std : np.ndarray
+        Standard deviations of predictions.
+    y_true : np.ndarray
+        True target values.
+    task_name : Optional[str], optional
+        Name of the task for labeling, by default None.
+    n_subset : int, optional
+        Number of samples to include in the plots, by default 100.
+    ylims : Optional[Tuple[float, float]], optional
+        Limits for the y-axis, by default (-3.0, 3.0).
+    num_stds_confidence_bound : float, optional
+        Confidence bound in terms of standard deviations, by default 2.0.
+    plot_save_str : str, optional
+        Prefix for saving plot files, by default "uct_plot".
+    savefig : bool, optional
+        Whether to save the generated figures, by default True.
+    save_dir : Path, optional
+        Directory to save the plots, by default "path/to/figures".
+    exp_props : Optional[np.ndarray], optional
+        Expected proportions for calibration plots, by default None.
+    obs_props : Optional[np.ndarray], optional
+        Observed proportions for calibration plots, by default None.
+
+    Returns:
+    --------
+    Dict[str, plt.Figure]
+        A dictionary containing different generated plots.
+    """
     if not all(isinstance(arr, np.ndarray) for arr in [y_pred, y_std, y_true]):
         raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
 
@@ -925,17 +904,17 @@ def make_uct_plots(
 
     for plot_name, plot_func, kwargs in plot_functions:
         fig, ax = plt.subplots(figsize=(6, 4))
-        # if plot_name == "sharpness":
-        #     plot_func(y_std=y_std, n_subset=n_subset, ax=ax)
-        # else:
-        plot_func(
-            y_pred=y_pred,
-            y_std=y_std,
-            y_true=y_true,
-            n_subset=n_subset,
-            ax=ax,
-            **kwargs,
-        )
+        if plot_name == "sharpness":
+            plot_func(y_std=y_std, n_subset=n_subset, ax=ax)
+        else:
+            plot_func(
+                y_pred=y_pred,
+                y_std=y_std,
+                y_true=y_true,
+                n_subset=n_subset,
+                ax=ax,
+                **kwargs,
+            )
         pname = plot_name.replace("_", " ").capitalize()
         t_name = task_name.replace("_", " ")
         ax.set_title(f"{pname} - {t_name}")
@@ -972,7 +951,30 @@ def get_calib_with_recal(
     y_true: np.ndarray,
     num_bins: int,
     verbose: bool = True,
-):
+) -> Dict[str, float]:
+    """
+    Computes calibration metrics with recalibration applied.
+
+    Parameters:
+    -----------
+    recal_model : IsotonicRegression
+        Trained isotonic regression model for recalibration.
+    y_pred : np.ndarray
+        Predicted values.
+    y_std : np.ndarray
+        Standard deviations of predictions.
+    y_true : np.ndarray
+        True target values.
+    num_bins : int
+        Number of bins for calibration.
+    verbose : bool, optional
+        Whether to print calibration metrics, by default True.
+
+    Returns:
+    --------
+    Dict[str, float]
+        Dictionary containing calibration metrics.
+    """
     if verbose:
         print(" (2/n) Calculating average calibration metrics")
 
@@ -996,52 +998,50 @@ def get_calib_with_recal(
 
 
 def calculate_uct_metrics(
-    y_pred,
-    y_std,
-    y_true,
-    n_subset=None,
-    Nbins=100,
-    task_name=None,
-    figpath=FIGS_DIR,
-    exp_props: Union[np.ndarray, None] = None,
-    obs_props: Union[np.ndarray, None] = None,
-    recal_model=None,
-    verbose=True,
-):
+    y_pred: np.ndarray,
+    y_std: np.ndarray,
+    y_true: np.ndarray,
+    n_subset: Optional[int] = None,
+    Nbins: int = 100,
+    task_name: Optional[str] = None,
+    figpath: Path = FIGS_DIR,
+    exp_props: Optional[np.ndarray] = None,
+    obs_props: Optional[np.ndarray] = None,
+    recal_model: Optional[IsotonicRegression] = None,
+    verbose: bool = True,
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, plt.Figure]]:
     """
-    Calculate metrics for the predictions.
+    Computes Uncertainty Calibration Tool (UCT) metrics and generates corresponding plots.
 
-    Parameters
-    ----------
-    y_pred : ndarray
-        (Mean of) Predicted values.
-    y_std : ndarray
-        Standard deviation of predicted values.
-    y_true : ndarray
-        True values.
-    n_subset : int
-        Number of samples to plot.
-    Nbins : int
-        Number of bins for calibration.
-    task_name : str
-        Name of the task.
-    figpath : Path or str
-        Path to save the figures. Default is FIGS_DIR.
-    exp_props : ndarray or None
-        Expected proportions for calibration plot.
-    obs_props : ndarray or None
-        Observed proportions for calibration plot.
-    recal_model : IsotonicRegression or None
-        Isotonic regression model for recalibration.
-    verbose : bool
-        Whether to print the metrics. Default is True.
+    Parameters:
+    -----------
+    y_pred : np.ndarray
+        Predicted values.
+    y_std : np.ndarray
+        Standard deviations of predictions.
+    y_true : np.ndarray
+        True target values.
+    n_subset : Optional[int], optional
+        Number of samples to include in plots, by default None.
+    Nbins : int, optional
+        Number of bins for calibration, by default 100.
+    task_name : Optional[str], optional
+        Name of the task for labeling, by default None.
+    figpath : Path, optional
+        Directory to save figures, by default FIGS_DIR.
+    exp_props : Optional[np.ndarray], optional
+        Expected proportions for calibration plots, by default None.
+    obs_props : Optional[np.ndarray], optional
+        Observed proportions for calibration plots, by default None.
+    recal_model : Optional[IsotonicRegression], optional
+        Recalibration model for uncertainty estimates, by default None.
+    verbose : bool, optional
+        Whether to print metrics, by default True.
 
-    Returns
-    -------
-    metrics : dict
-        Dictionary containing calculated metrics.
-    plots : dict
-        Dictionary containing the generated plots.
+    Returns:
+    --------
+    Tuple[Dict[str, Dict[str, float]], Dict[str, plt.Figure]]:
+        Dictionary containing computed UCT metrics and generated plots.
     """
 
     metrics = get_all_metrics(
@@ -1058,23 +1058,6 @@ def calculate_uct_metrics(
         metrics["avg_calibration"] = get_calib_with_recal(
             recal_model, y_pred, y_std, y_true, Nbins, verbose=verbose
         )
-
-    # else:
-    #     # Accuracy
-    #     accuracy_metrics = uct.get_all_accuracy_metrics(y_pred, y_true, verbose)
-    #
-    #     # Adversarial Group Calibration
-    #     adv_group_cali_metrics = get_all_adversarial_group_calibration(
-    #         y_pred, y_std, y_true, num_bins, verbose
-    #     )
-    #
-    #     # Sharpness
-    #     sharpness_metrics = get_all_sharpness_metrics(y_std, verbose)
-    #
-    #     # Proper Scoring Rules
-    #     scoring_rule_metrics = get_all_scoring_rule_metrics(
-    #         y_pred, y_std, y_true, resolution, scaled, verbose
-    #     )
 
     metrics_filepath = Path(figpath) / f"{task_name}_metrics.pkl"
     save_pickle(metrics, metrics_filepath)
@@ -1097,11 +1080,23 @@ def calculate_uct_metrics(
 
 
 def calculate_tdc_classification_metrics(
-    y_pred,
-    y_true,
-    task_name=None,
-    data_specific_path="papyrus/xc50/all/",
-):
+    y_pred: np.ndarray, y_true: np.ndarray
+) -> Dict[str, float]:
+    """
+    Computes classification metrics using TDC (Therapeutics Data Commons) evaluation.
+
+    Parameters:
+    -----------
+    y_pred : np.ndarray
+        Predicted class probabilities or labels.
+    y_true : np.ndarray
+        True labels.
+
+    Returns:
+    --------
+    Dict[str, float]
+        Dictionary containing classification metrics.
+    """
     metrics = [
         "PR-AUC",
         "range_logAUC",
@@ -1122,25 +1117,48 @@ def calculate_tdc_classification_metrics(
         results[m] = evaluator(y_true, y_pred, threshold=threshold)
 
     return results
-    # if m in ["PR@K", "RP@K"]:
-    #     score = evaluator(y_true, y_pred, threshold=0.9)
-    # else:
-    #     score = evaluator(y_true, y_pred)
-    # results[m] = score
-    # print(f"{m} score: {score:.4f}")
 
 
 def make_uq_plots(
-    ordered_df,
-    gaus_pred,
-    errors_observed,
-    mis_cal,
-    Nbins=100,
-    include_bootstrap=True,
-    task_name="PCM",
-    figpath=FIGS_DIR,
-    logger=logging.Logger("uqtools"),
-):
+    ordered_df: pd.DataFrame,
+    gaus_pred: Union[np.ndarray, list[float | Any]],
+    errors_observed: Union[np.ndarray, list[float | Any]],
+    mis_cal: float,
+    Nbins: int = 100,
+    include_bootstrap: bool = True,
+    task_name: str = "PCM",
+    figpath: Path = FIGS_DIR,
+    logger: logging.Logger = logging.Logger("uqtools"),
+) -> Tuple[Dict[str, plt.Figure], float, float, float]:
+    """
+    Generates plots related to uncertainty quantification and miscalibration.
+
+    Parameters:
+    -----------
+    ordered_df : pd.DataFrame
+        Dataframe containing ordered uncertainties and errors.
+    gaus_pred : Union[np.ndarray, list[float | Any]]
+        Gaussian-predicted calibration values.
+    errors_observed : Union[np.ndarray, list[float | Any]]
+        Observed error calibration values.
+    mis_cal : float
+        Miscalibration area value.
+    Nbins : int, optional
+        Number of bins for discretization, by default 100.
+    include_bootstrap : bool, optional
+        Whether to include bootstrap-based confidence intervals, by default True.
+    task_name : str, optional
+        Name of the task, by default "PCM".
+    figpath : Path, optional
+        Directory to save plots, by default FIGS_DIR.
+    logger : logging.Logger, optional
+        Logger for debugging and information, by default "uqtools".
+
+    Returns:
+    --------
+    Tuple[Dict[str, plt.Figure], float, float, float]
+        Dictionary of generated plots and regression calibration slope, R^2, and intercept.
+    """
     # generate error-based calibration plot
     fig, slope, r_sq, intercept = get_slope_metric(
         ordered_df.uq,
@@ -1171,14 +1189,39 @@ def make_uq_plots(
 
 
 def calculate_uqtools_metrics(
-    uncertainties,
-    errors,
-    Nbins=100,
-    include_bootstrap=True,
-    task_name="PCM",
-    figpath=FIGS_DIR,
-    logger=logging.Logger("uqtools"),
-):
+    uncertainties: np.ndarray,
+    errors: np.ndarray,
+    Nbins: int = 100,
+    include_bootstrap: bool = True,
+    task_name: str = "PCM",
+    figpath: Path = FIGS_DIR,
+    logger: logging.Logger = logging.Logger("uqtools"),
+) -> Tuple[Dict[str, float], Dict[str, plt.Figure]]:
+    """
+    Computes various uncertainty quantification metrics and generates related plots.
+
+    Parameters:
+    -----------
+    uncertainties : np.ndarray
+        Model-predicted uncertainty estimates.
+    errors : np.ndarray
+        Absolute errors in predictions.
+    Nbins : int, optional
+        Number of bins for calibration, by default 100.
+    include_bootstrap : bool, optional
+        Whether to include bootstrap-based confidence intervals, by default True.
+    task_name : str, optional
+        Name of the task for labeling, by default "PCM".
+    figpath : Path, optional
+        Directory to save plots, by default FIGS_DIR.
+    logger : logging.Logger, optional
+        Logger for debugging and logging results, by default "uqtools".
+
+    Returns:
+    --------
+    Tuple[Dict[str, float], Dict[str, plt.Figure]]
+        Dictionary of computed uncertainty metrics and generated plots.
+    """
     # Order uncertainties and errors according to uncertainties
     ordered_df = order_sig_and_errors(uncertainties, errors)
     # calculate rho_rank and rho_rank_sim # TODO spearmanr is already implemented in scipy
@@ -1205,11 +1248,7 @@ def calculate_uqtools_metrics(
     rng = np.random.default_rng()
     for i in range(1000):
         sim_errors = np.abs(rng.normal(0, uncertainties))
-        # sim_errors = []
-        # for sigma in uncertainties:
-        #     sim_error = rng.normal(0, sigma)
-        #     # sim_error = np.random.normal(0, sigma)
-        #     sim_errors.append(sim_error)
+
         NLL_sim = NLL(uncertainties, sim_errors)
         exp_NLL.append(NLL_sim)
     NLL_sim = np.mean(exp_NLL)
@@ -1258,47 +1297,23 @@ def calculate_uqtools_metrics(
 
     return metrics, plots
 
-    # return (
-    #     fig,
-    #     fig2,
-    #     fig3,
-    #     rho_rank,
-    #     rho_rank_sim,
-    #     rho_rank_sim_std,
-    #     mis_cal,
-    #     _NLL,
-    #     NLL_sim,
-    #     NLL_sim_std,
-    #     Z_var,
-    #     interval_var.confidence_interval,
-    #     Z_mean,
-    #     interval_mean.confidence_interval,
-    # )
 
-    # rmvs, rmses, ci_low, ci_high = get_rmvs_and_rmses(
-    #     uncertainties, errors, Nbins=Nbins, include_bootstrap=include_bootstrap
-    # )
-    # fig_z_score, ax = plot_Z_scores(errors, uncertainties)
-    #
-    # fig, slope, r_sq, intercept = get_slope_metric(
-    #     ordered_df.uq,
-    #     ordered_df.errors,
-    #     Nbins=Nbins,
-    #     include_bootstrap=include_bootstrap,
-    # )
-    #
-    # gaus_pred, errors_observed = calibration_curve(ordered_df.abs_z)
-    # mis_cal = calibration_area(errors_observed, gaus_pred)
-    # print("miscalibration area = ", mis_cal)
-    # fig = plot_calibration_curve(gaus_pred, errors_observed, mis_cal)
-    #
-    # ci_low, ci_high = get_bootstrap_intervals(ordered_df.errors, Nbins=Nbins)
-    # rho, sim_errors = expected_rho(ordered_df.uq)
+def order_sig_and_errors(sigmas: np.ndarray, errors: np.ndarray) -> pd.DataFrame:
+    """
+    Orders uncertainty values and corresponding errors in ascending order of uncertainty.
 
-    # raise NotImplementedError
+    Parameters:
+    -----------
+    sigmas : np.ndarray
+        Array of uncertainty values.
+    errors : np.ndarray
+        Array of corresponding errors.
 
-
-def order_sig_and_errors(sigmas, errors):
+    Returns:
+    --------
+    pd.DataFrame
+        A DataFrame containing ordered uncertainties and errors.
+    """
     ordered_df = pd.DataFrame()
     ordered_df["uq"] = sigmas
     ordered_df["errors"] = errors
@@ -1307,16 +1322,43 @@ def order_sig_and_errors(sigmas, errors):
     return ordered_df
 
 
-def rmse(x, axis=None):
+def rmse(x: np.ndarray, axis: Optional[int] = None) -> float:
+    """
+    Computes the Root Mean Squared Error (RMSE).
+
+    Parameters:
+    -----------
+    x : np.ndarray
+        Input data array.
+    axis : Optional[int], optional
+        Axis along which to compute RMSE, by default None.
+
+    Returns:
+    --------
+    float
+        Computed RMSE value.
+    """
     return np.sqrt((x**2).mean())
 
 
 ### SOURCE: UQtools.py https://github.com/jensengroup/UQ_validation_methods/blob/main/UQtools.py ###
-
-
-def get_bootstrap_intervals(errors_ordered, Nbins=10):
+def get_bootstrap_intervals(
+    errors_ordered: np.ndarray, Nbins: int = 10
+) -> Tuple[List[float], List[float]]:
     """
-    calculate the confidence intervals at a given p-level.
+    Computes bootstrap confidence intervals for error calibration.
+
+    Parameters:
+    -----------
+    errors_ordered : np.ndarray
+        Ordered error values.
+    Nbins : int, optional
+        Number of bins for calibration, by default 10.
+
+    Returns:
+    --------
+    Tuple[List[float], List[float]]
+        Lower and upper confidence intervals for each bin.
     """
     ci_low = []
     ci_high = []
@@ -1331,32 +1373,44 @@ def get_bootstrap_intervals(errors_ordered, Nbins=10):
     return ci_low, ci_high
 
 
-def expected_rho(uncertainties):
+def expected_rho(uncertainties: np.ndarray) -> Tuple[float, np.ndarray]:
     """
-    for each uncertainty we draw a random Gaussian error to simulate the expected errors
-    the spearman rank coeff. is then calculated between uncertainties and errors.
+    Simulates expected errors for each uncertainty and calculates Spearman rank correlation.
+
+    Parameters:
+    -----------
+    uncertainties : np.ndarray
+        Array of uncertainty values.
+
+    Returns:
+    --------
+    Tuple[float, np.ndarray]
+        Spearman correlation coefficient and simulated errors.
     """
+
     # sim_errors = []
     rng = np.random.default_rng()
     sim_errors = np.abs(rng.normal(0, uncertainties))
-    # for sigma in uncertainties:
-    #     # random normal generator
-    #     error = np.abs(rng.normal(0, sigma))
-    #     error = np.abs(np.random.normal(0, sigma))
-    #     sim_errors.append(error)
-
-    # rho, _ = spearman_rank_corr(uncertainties, sim_errors)
     rho, _ = spearmanr(uncertainties, sim_errors)
     return rho, sim_errors
 
 
-# def spearman_rank_corr(v1, v2):
-#     v1_ranked = ss.rankdata(v1)
-#     v2_ranked = ss.rankdata(v2)
-#     return pearsonr(v1_ranked, v2_ranked)
+def NLL(uncertainties: np.ndarray, errors: np.ndarray) -> float:
+    """
+    Computes the Negative Log-Likelihood (NLL) for a given set of uncertainties and errors.
 
+    Parameters:
+    -----------
+    uncertainties : np.ndarray
+        Array of uncertainty estimates.
+    errors : np.ndarray
+        Array of errors.
 
-def NLL(uncertainties, errors):
+    Returns:
+    --------
+    float
+        Computed NLL value.
+    """
     NLL = 0
     for uncertainty, error in zip(uncertainties, errors):
         temp = math.log(2 * np.pi * uncertainty**2) + (error) ** 2 / uncertainty**2
@@ -1366,7 +1420,22 @@ def NLL(uncertainties, errors):
     return NLL
 
 
-def calibration_curve(errors_sigma):
+def calibration_curve(
+    errors_sigma: np.ndarray,
+) -> tuple[list[int | Any], list[float | Any]]:
+    """
+    Computes calibration curves based on error sigmas.
+
+    Parameters:
+    -----------
+    errors_sigma : np.ndarray
+        Array of standardized errors.
+
+    Returns:
+    --------
+    Tuple[np.ndarray, np.ndarray]
+        Gaussian-predicted calibration and observed error calibration.
+    """
     N_errors = len(errors_sigma)
     gaus_pred = []
     errors_observed = []
@@ -1380,7 +1449,26 @@ def calibration_curve(errors_sigma):
     return gaus_pred, errors_observed
 
 
-def plot_calibration_curve(gaus_pred, errors_observed, mis_cal):
+def plot_calibration_curve(
+    gaus_pred: np.ndarray, errors_observed: np.ndarray, mis_cal: float
+) -> plt.Figure:
+    """
+    Plots a calibration curve comparing expected and observed error fractions.
+
+    Parameters:
+    -----------
+    gaus_pred : np.ndarray
+        Gaussian-predicted calibration values.
+    errors_observed : np.ndarray
+        Observed error calibration values.
+    mis_cal : float
+        Miscalibration area value.
+
+    Returns:
+    --------
+    plt.Figure
+        Generated calibration plot figure.
+    """
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.fill_between(
         gaus_pred,
@@ -1398,7 +1486,24 @@ def plot_calibration_curve(gaus_pred, errors_observed, mis_cal):
     return fig
 
 
-def plot_Z_scores(errors, uncertainties):
+def plot_Z_scores(
+    errors: np.ndarray, uncertainties: np.ndarray
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Plots a histogram of standardized Z-scores for uncertainty quantification.
+
+    Parameters:
+    -----------
+    errors : np.ndarray
+        Array of observed errors.
+    uncertainties : np.ndarray
+        Array of uncertainty estimates.
+
+    Returns:
+    --------
+    Tuple[plt.Figure, plt.Axes]
+        The generated histogram figure and axes.
+    """
     Z_scores = errors / uncertainties
     N_bins = 29
     xmin, xmax = -7, 7
@@ -1423,11 +1528,21 @@ def plot_Z_scores(errors, uncertainties):
     return fig, ax
 
 
-def take_closest(myList, myNumber):
+def take_closest(myList: List[float], myNumber: float) -> Tuple[float, float, int, int]:
     """
-    Assumes myList is sorted. Returns closest value to myNumber.
+    Finds the two closest values to a given number in a sorted list.
 
-    If two numbers are equally close, return the smallest number.
+    Parameters:
+    -----------
+    myList : List[float]
+        Sorted list of numbers.
+    myNumber : float
+        The number to find closest values for.
+
+    Returns:
+    --------
+    Tuple[float, float, int, int]
+        The two closest values and their corresponding indices.
     """
     pos = bisect_left(myList, myNumber)
     if pos == 0:
@@ -1442,22 +1557,73 @@ def take_closest(myList, myNumber):
         return before, after, pos - 1, pos
 
 
-def f_linear_segment(x, point_list=None, x_list=None):
+def f_linear_segment(x: float, point_list: List[float], x_list: List[float]) -> float:
+    """
+    Computes a linear interpolation between points.
 
+    Parameters:
+    -----------
+    x : float
+        The x-value for interpolation.
+    point_list : List[float]
+        List of y-values corresponding to x_list.
+    x_list : List[float]
+        List of x-values.
+
+    Returns:
+    --------
+    float
+        Interpolated y-value.
+    """
     x1, x2, x1_idx, x2_idx = take_closest(x_list, x)
     f = point_list[x1_idx] + (x - x1) / (x2 - x1) * (
         point_list[x2_idx] - point_list[x1_idx]
     )
-
     return f
 
 
-def area_function(x, observed_list, predicted_list):
+def area_function(
+    x: float, observed_list: List[float], predicted_list: List[float]
+) -> float:
+    """
+    Computes the absolute difference between observed and predicted calibration.
+
+    Parameters:
+    -----------
+    x : float
+        x-value for integration.
+    observed_list : List[float]
+        List of observed calibration values.
+    predicted_list : List[float]
+        List of predicted calibration values.
+
+    Returns:
+    --------
+    float
+        Absolute difference between observed and predicted values at x.
+    """
     h = np.abs((f_linear_segment(x, observed_list, predicted_list) - x))
     return h
 
 
-def calibration_area(observed, predicted):
+def calibration_area(
+    observed: Union[np.ndarray, list[float]], predicted: Union[np.ndarray, list[float]]
+) -> float:
+    """
+    Computes the calibration miscalibration area using numerical integration.
+
+    Parameters:
+    -----------
+    observed : Union[np.ndarray, list[float]]
+        Observed calibration values.
+    predicted : Union[np.ndarray, list[float]]
+        Predicted calibration values.
+
+    Returns:
+    --------
+    float
+        Computed miscalibration area.
+    """
     area = 0
     x = min(predicted)
     while x < max(predicted):
@@ -1467,7 +1633,26 @@ def calibration_area(observed, predicted):
     return area
 
 
-def chi_squared(x_values, x_sigmas, target_values):
+def chi_squared(
+    x_values: np.ndarray, x_sigmas: np.ndarray, target_values: np.ndarray
+) -> Tuple[float, float]:
+    """
+    Computes the chi-squared statistic and corresponding probability.
+
+    Parameters:
+    -----------
+    x_values : np.ndarray
+        Observed values.
+    x_sigmas : np.ndarray
+        Standard deviations associated with the observed values.
+    target_values : np.ndarray
+        Expected (target) values.
+
+    Returns:
+    --------
+    Tuple[float, float]
+        Chi-squared statistic and corresponding probability.
+    """
     mask = x_values > 0
     chi_value = ((x_values[mask] - target_values[mask]) / x_sigmas[mask]) ** 2
     chi_value = np.sum(chi_value)
@@ -1479,19 +1664,32 @@ def chi_squared(x_values, x_sigmas, target_values):
 
 
 def get_slope_metric(
-    uq_ordered,
-    errors_ordered,
-    Nbins=10,
-    include_bootstrap=True,
-    logger=logging.Logger("uqtools"),
-):
+    uq_ordered: np.ndarray,
+    errors_ordered: np.ndarray,
+    Nbins: int = 10,
+    include_bootstrap: bool = True,
+    logger: logging.Logger = logging.getLogger("uqtools"),
+) -> Tuple[plt.Figure, float, float, float]:
     """
-    Calculates the error-based calibration metrices
+    Computes the slope metric for error-based calibration.
 
-    uq_ordered: list of uncertainties in increasing order
-    error_ordered: list of observed errors corresponding to the uncertainties in uq_ordered
-    NBins: integer deciding how many bins to use for the error-based calibration metric
-    include_bootstrap: boolean deciding wiether to include 95% confidence intervals on RMSE values from bootstrapping
+    Parameters:
+    -----------
+    uq_ordered : np.ndarray
+        Ordered uncertainties in increasing order.
+    errors_ordered : np.ndarray
+        Observed errors corresponding to the uncertainties.
+    Nbins : int, optional
+        Number of bins for computing error calibration (default is 10).
+    include_bootstrap : bool, optional
+        Whether to include bootstrap confidence intervals (default is True).
+    logger : logging.Logger, optional
+        Logger instance for debugging information (default is "uqtools").
+
+    Returns:
+    --------
+    Tuple[plt.Figure, float, float, float]
+        The generated plot, slope, R-squared value, and intercept of the fitted regression.
     """
     rmvs, rmses, ci_low, ci_high = get_rmvs_and_rmses(
         uq_ordered, errors_ordered, Nbins=Nbins, include_bootstrap=include_bootstrap
@@ -1545,20 +1743,37 @@ def get_slope_metric(
     return fig, slope, r_sq, intercept
 
 
-def get_rmvs_and_rmses(uq_ordered, errors_ordered, Nbins=10, include_bootstrap=True):
+def get_rmvs_and_rmses(
+    uq_ordered: np.ndarray,
+    errors_ordered: np.ndarray,
+    Nbins: int = 10,
+    include_bootstrap: bool = True,
+) -> Tuple[List[float], List[float], Optional[List[float]], Optional[List[float]]]:
     """
-    uq orderes should be the list of uncertainties in increasing order and errors should be the corresponding errors
-    Nbins determine how many bins the data should be divided into
-    """
+    Computes RMV (root mean variance) and RMSE (root mean squared error) over bins.
 
+    Parameters:
+    -----------
+    uq_ordered : np.ndarray
+        Ordered uncertainty values.
+    errors_ordered : np.ndarray
+        Corresponding errors.
+    Nbins : int, optional
+        Number of bins to divide the data (default is 10).
+    include_bootstrap : bool, optional
+        Whether to compute bootstrap confidence intervals (default is True).
+
+    Returns:
+    --------
+    Tuple[List[float], List[float], Optional[List[float]], Optional[List[float]]]
+        Lists of RMV values, RMSE values, and optionally lower/upper confidence intervals.
+    """
     N_total = len(uq_ordered)
     N_entries = math.ceil(N_total / Nbins)
-    # print(N_entries)
     rmvs = [
         np.sqrt((uq_ordered[i : i + N_entries] ** 2).mean())
         for i in range(0, N_total, N_entries)
     ]
-    # print(rmvs)
     rmses = [
         np.sqrt((errors_ordered[i : i + N_entries] ** 2).mean())
         for i in range(0, N_total, N_entries)
@@ -1570,39 +1785,52 @@ def get_rmvs_and_rmses(uq_ordered, errors_ordered, Nbins=10, include_bootstrap=T
     return rmvs, rmses, ci_low, ci_high
 
 
-def spearman_r(y_test, y_pred, y_var):
+def spearman_r(y_test: np.ndarray, y_pred: np.ndarray, y_var: np.ndarray) -> float:
     """
-    Calculate the Spearman \\rho coefficient
+    Computes the Spearman correlation coefficient between squared errors and uncertainty.
+
+    Parameters:
+    -----------
+    y_test : np.ndarray
+        Ground truth values.
+    y_pred : np.ndarray
+        Predicted values.
+    y_var : np.ndarray
+        Estimated uncertainty values.
+
+    Returns:
+    --------
+    float
+        Spearman correlation coefficient.
     """
     return spearmanr((y_test - y_pred) ** 2, y_var).correlation
 
 
-# TODO : Implement Reliability Diagrams
 def reliability_diagram(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     n_bins: int = 10,
-    ax: plt.Axes = None,
+    ax: Optional[plt.Axes] = None,
     **kwargs,
-):  # CONCEPT FROM COPILOT
+) -> plt.Axes:
     """
-    Plot a reliability diagram.
+    Plots a reliability diagram comparing predicted and observed fractions.
 
-    Parameters
-    ----------
+    Parameters:
+    -----------
     y_true : np.ndarray
         True values.
     y_pred : np.ndarray
         Predicted values.
     n_bins : int, optional
-        Number of bins. The default is 10.
-    ax : plt.Axes, optional
-        Matplotlib axes. The default is None.
+        Number of bins for calibration (default is 10).
+    ax : Optional[plt.Axes], optional
+        Matplotlib axes object for plotting (default is None).
 
-    Returns
-    -------
-    ax : plt.Axes
-        Matplotlib axes.
+    Returns:
+    --------
+    plt.Axes
+        Matplotlib axes object with the reliability diagram.
     """
     if ax is None:
         fig, ax = plt.subplots()
@@ -1643,61 +1871,42 @@ def reliability_diagram(
     return ax
 
 
-#
-# # TODO Implement accuracy-rejection curves - Concept from Kajetan
-#
-# unc_names = ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"]
-# components = ["TU", "AU", "EU"]
-# thresholds = list(range(50, 101, 1))
-# def evaluate_all(preds, y_tests, uncertainties, metric, runs):
-#
-#     all_perfs = list()
-#
-#     torch.manual_seed(seed)
-#
-#     for i in range(len(dataset_names)):
-#         for c, comp in enumerate(components):
-#             for measure in unc_names:
-#                 if comp == "EU" and measure == "B2":
-#                     continue  # B2 is not defined for epistemic uncertainty
-#                 scores = uncertainties[i][measure][c]
-#                 for r in range(runs):
-#                     for t in thresholds:
-#                         num_samples = int(len(preds[i]) / 100 * t)
-#                         idx = torch.argsort(scores[:, r], descending=False)[
-#                             :num_samples
-#                         ]
-#                         all_perfs.append(
-#                             metric(preds[i][idx, r], y_tests[i][idx]).item() * 100
-#                         )
-#         # add random selection
-#         for r in range(runs):
-#             for t in thresholds:
-#                 idx = torch.randperm(len(preds[i]))[: int(len(preds[i]) / 100 * t)]
-#                 all_perfs.append(metric(preds[i][idx, r], y_tests[i][idx]).item() * 100)
-#
-#     return torch.tensor(all_perfs).reshape(
-#         len(dataset_names), (len(components) * len(unc_names)), runs, len(thresholds)
-#     )
-
-
 class MetricsTable:
     def __init__(
         self,
-        config=None,
-        model_type=None,
-        add_plots_to_table=False,
-        logger=None,
-        project_name=None,
-        run_name=None,
-        verbose=True,
-        csv_path=None,
+        config: Optional[Dict[str, Any]] = None,
+        model_type: Optional[str] = None,
+        add_plots_to_table: bool = False,
+        logger: Optional[logging.Logger] = None,
+        project_name: Optional[str] = None,
+        run_name: Optional[str] = None,
+        verbose: bool = True,
+        csv_path: Optional[Union[str, Path]] = None,
     ):
         """
-        Initialize the metrics table.
+        Initializes a metrics table for tracking model performance.
 
-        Returns:
-        --------
+        Parameters
+        ----------
+        config : Optional[Dict[str, Any]], optional
+            Configuration dictionary containing experiment settings (default: None).
+        model_type : Optional[str], optional
+            Type of the model being evaluated (default: None).
+        add_plots_to_table : bool, optional
+            Whether to add plots to the metrics table (default: False).
+        logger : Optional[logging.Logger], optional
+            Logger instance for debugging (default: None).
+        project_name : Optional[str], optional
+            Name of the project for logging (default: None).
+        run_name : Optional[str], optional
+            Name of the run for logging (default: None).
+        verbose : bool, optional
+            Whether to print verbose logs (default: True).
+        csv_path : Optional[Union[str, Path]], optional
+            Path to save the CSV file for aggregated metrics (default: None).
+
+        Returns
+        -------
         None
         """
         self.config = config
@@ -1712,23 +1921,15 @@ class MetricsTable:
         self.task_type = config.get("task_type", "regression")
         self.data_specific_path = config.get("data_specific_path", None)
         self.model_name = config.get("model_name", "ensemble")
-        # self.aleatoric = config.get("aleatoric", False)
         self.dropout = config.get("dropout", None)
         self.add_plots_to_table = add_plots_to_table
         self.wandb_run_name = run_name or wandb.run.name
         self.wandb_project_name = project_name or wandb.run.project
-        # if wandb.run is None:
-        #     self.wandb_run_name = run_name
-        #     self.wandb_project_name = project_name
-        # else:
-        #     self.wandb_project_name = wandb.run.project
-        #     self.wandb_run_name = wandb.run.name
 
         cols = []
         if self.model_type:
             cols += ["Model type", "Task"]
-        # if self.mt:
-        # cols += []
+
         cols += ["Activity", "Split", "desc_prot", "desc_chem", "dropout"]
         if self.task_type == "regression":
             cols.extend(
@@ -1804,7 +2005,6 @@ class MetricsTable:
         self.table = wandb.Table(columns=cols)
         if add_plots_to_table:
             self.plot_table = pd.DataFrame(columns=self.plot_cols)
-        # TODO save this to a one table specific to the data_specific_path
         if csv_path:
             self.df_path = Path(csv_path)
         else:
@@ -1814,58 +2014,60 @@ class MetricsTable:
 
     def __call__(
         self,
-        y_pred,
-        y_std,
-        y_true,
-        y_err,
-        y_eps,
-        # y_alea=None,
-        n_subset=None,
-        task_name=None,
-        figpath=None,
-        exp_props=None,
-        obs_props=None,
-        recal_model=None,
-    ):
+        y_pred: np.ndarray,
+        y_std: np.ndarray,
+        y_true: np.ndarray,
+        y_err: np.ndarray,
+        y_eps: Optional[np.ndarray] = None,
+        n_subset: Optional[int] = None,
+        task_name: Optional[str] = None,
+        figpath: Optional[Union[str, Path]] = None,
+        exp_props: Optional[np.ndarray] = None,
+        obs_props: Optional[np.ndarray] = None,
+        recal_model: Optional[IsotonicRegression] = None,
+        nll: Optional[float] = None,
+    ) -> tuple[dict[str, Any] | dict[str, float], dict[Any, Image]]:
         """
-        Calculate metrics and add them to the table.
+        Computes and logs metrics to the table.
 
         Parameters
         ----------
-        y_pred : ndarray
-            (Mean of) Predicted values.
-        y_std : ndarray
-            Standard deviation of predicted values.
-        y_true : ndarray
-            True values.
-        y_err : ndarray
-            Errors.
-        y_alea : ndarray, optional
-            Aleatoric uncertainty. The default is None.
-        n_subset : int, optional
-            Number of samples to use for the plots. The default is None.
-        task_name : str, optional
-            Name of the task. The default is None.
-        figpath : str, optional
-            Path to save the figures. The default is None.
-        exp_props : ndarray, optional
-            Expected proportions for the recalibration plot. The default is None.
-        obs_props : ndarray, optional
-            Observed proportions for the recalibration plot. The default is None.
-        recal_model : IsotonicRegression, optional
-            Recalibration model. The default is None.
+        y_pred : np.ndarray
+            Predicted values.
+        y_std : np.ndarray
+            Standard deviation (uncertainty) of the predictions.
+        y_true : np.ndarray
+            True target values.
+        y_err : np.ndarray
+            Errors between predicted and true values.
+        y_eps : Optional[np.ndarray], optional
+            Epistemic uncertainty (default: None).
+        n_subset : Optional[int], optional
+            Number of samples to use for visualization (default: None).
+        task_name : Optional[str], optional
+            Name of the task (default: None).
+        figpath : Optional[Union[str, Path]], optional
+            Path to save the figures (default: None).
+        exp_props : Optional[np.ndarray], optional
+            Expected proportions for recalibration plot (default: None).
+        obs_props : Optional[np.ndarray], optional
+            Observed proportions for recalibration plot (default: None).
+        recal_model : Optional[IsotonicRegression], optional
+            Model used for recalibration (default: None).
+
         Returns
         -------
-        metrics : dict
-            Dictionary containing calculated metrics.
+        Tuple[Dict[str, Any], Dict[str, plt.Figure]]
+            A tuple containing the computed metrics and generated plots.
         """
         # y_pred, y_std, y_true, y_err, y_alea = self.not_nan_filter(y_pred, y_std, y_true, y_err)
+        if y_eps is None:
+            y_eps = np.zeros_like(y_std)
         metrics, plots = self.calculate_metrics(
             y_pred=y_pred,
             y_std=y_std,
             y_true=y_true,
             y_err=y_err,
-            # y_alea=y_alea,
             y_eps=y_eps,
             n_subset=n_subset,
             task_name=task_name,
@@ -1874,6 +2076,7 @@ class MetricsTable:
             exp_props=exp_props,
             obs_props=obs_props,
             recal_model=recal_model,
+            nll=nll,
         )
 
         # self.export_plots(imgs, task_name)
@@ -1881,47 +2084,63 @@ class MetricsTable:
 
         return metrics, plots
 
-    # @staticmethod
-    # def not_nan_filter(y_pred, y_std, y_true, y_err, y_alea=None):
-    #     valid_mask = ~torch.isnan(y_true) # watch out the shapes Shape []
-    #     y_pred = y_pred[valid_mask]
-    #     y_std = y_std[valid_mask]
-    #     y_true = y_true[valid_mask]
-    #     y_err = y_err[valid_mask]
-    #     if y_alea is not None:
-    #         y_alea = y_alea[valid_mask]
-    #
-    #     return y_pred, y_std, y_true, y_err, y_alea
-
     def calculate_metrics(
         self,
-        y_pred,
-        y_std,  # Predicted std (Aleatoric from PNN)
-        y_true,
-        y_err,
-        # y_alea,
-        y_eps=None,
-        data_specific_path=None,
-        n_subset=None,
-        task_name=None,  # model_name=None,
-        figpath=None,
-        exp_props=None,
-        obs_props=None,
-        recal_model=None,
-    ):
+        y_pred: np.ndarray,
+        y_std: np.ndarray,
+        y_true: np.ndarray,
+        y_err: np.ndarray,
+        y_eps: Optional[np.ndarray] = None,
+        data_specific_path: Optional[Union[str, Path]] = None,
+        n_subset: Optional[int] = None,
+        task_name: Optional[str] = None,
+        figpath: Optional[Union[str, Path]] = None,
+        exp_props: Optional[np.ndarray] = None,
+        obs_props: Optional[np.ndarray] = None,
+        recal_model: Optional[IsotonicRegression] = None,
+        nll: Optional[float] = None,
+    ) -> tuple[dict[str, Any] | dict[str, float], dict[Any, Image]]:
+        """
+        Computes various uncertainty quantification (UQ) metrics and plots.
+
+        Parameters
+        ----------
+        y_pred : np.ndarray
+            Predicted values.
+        y_std : np.ndarray
+            Standard deviation / aleatoric uncertainty.
+        y_true : np.ndarray
+            True target values.
+        y_err : np.ndarray
+            Errors between predicted and true values.
+        y_eps : Optional[np.ndarray], optional
+            Epistemic uncertainty (default: None).
+        data_specific_path : Optional[Union[str, Path]], optional
+            Path to save the results (default: None).
+        n_subset : Optional[int], optional
+            Number of samples for visualization (default: None).
+        task_name : Optional[str], optional
+            Name of the task (default: None).
+        figpath : Optional[Union[str, Path]], optional
+            Path to save figures (default: None).
+        exp_props : Optional[np.ndarray], optional
+            Expected proportions for calibration plot (default: None).
+        obs_props : Optional[np.ndarray], optional
+            Observed proportions for calibration plot (default: None).
+        recal_model : Optional[IsotonicRegression], optional
+            Model for recalibration (default: None).
+
+        Returns
+        -------
+        Tuple[Dict[str, Any], Dict[str, plt.Figure]]
+            A dictionary of computed metrics and a dictionary of generated plots.
+        """
         figures_path = Path(
             FIGS_DIR / data_specific_path / self.model_name
             if not figpath and data_specific_path
             else figpath
         )
-        # figures_path = FIGS_DIR / data_specific_path / self.model_name
-        # figures_path = (
-        #     figures_path / task_name
-        #     if task_name is not None and recalibrate
-        #     else figures_path
-        # )
         figures_path.mkdir(parents=True, exist_ok=True)
-        # TODO Deal with NANs
         if self.task_type == "regression":
             uctmetrics, uctplots = calculate_uct_metrics(
                 y_pred=y_pred,
@@ -1936,9 +2155,12 @@ class MetricsTable:
                 recal_model=recal_model,
                 verbose=self.verbose,
             )
+            if nll:
+                uctmetrics["scoring_rule"]["nll"] = nll
+
             # calculate other uqtools metrics
             uqmetrics, uqplots = calculate_uqtools_metrics(
-                y_std,
+                y_std + y_eps,
                 y_err,
                 Nbins=100,  # 100
                 include_bootstrap=True,
@@ -1949,7 +2171,6 @@ class MetricsTable:
             metrics = {**uctmetrics, **uqmetrics}
             plots = {**uctplots, **uqplots}
 
-        # elif self.task_type == "classification":
         else:
             metrics = calculate_tdc_classification_metrics(
                 y_pred=y_pred,
@@ -1957,12 +2178,8 @@ class MetricsTable:
                 task_name=task_name,
                 data_specific_path=data_specific_path,
             )
-            # TODO classification plots
             plots = {}
 
-        # self.aleatoric = False if y_alea is None else True
-        # if self.aleatoric:
-        # if y_alea is None:
         if y_eps is None:
             (
                 metrics["aleatoric_uct_mean"],
@@ -1982,28 +2199,29 @@ class MetricsTable:
 
         return metrics, plots
 
-    def add_data(self, task_name, metrics, plots):
+    def add_data(
+        self,
+        task_name: str,
+        metrics: Dict[str, Any],
+        plots: Dict[str, plt.Figure] | Dict[str, Image],
+    ) -> None:
         """
-        Add data to the UCT metrics table.
+        Adds computed metrics and plots to the metrics table.
 
         Parameters
         ----------
         task_name : str
             Name of the task.
-        config : wandb.config
-            Configuration object.
-        metrics : dict
-            Dictionary containing calculated metrics.
-        plots : dict
-            Dictionary containing UCT plots and other plots. The keys are the plot names.
+        metrics : Dict[str, Any]
+            Dictionary containing computed metrics.
+        plots : Dict[str, plt.Figure] or Dict[str, Image]
+            Dictionary containing generated plots.
 
         Returns
         -------
         None
         """
-        # self.plot_table._append(plots, ignore_index=True)
         vals = [self.model_type] if self.model_type is not None else []
-        # if self.mt:
         vals.append(task_name)
         vals.extend(
             [
@@ -2096,7 +2314,23 @@ class MetricsTable:
         self.table.add_data(*vals)
         plt.close()
 
-    def excel_log(self, df, path, add_plots=False):
+    def excel_log(self, df: pd.DataFrame, path: Path, add_plots: bool = False) -> None:
+        """
+        Saves the computed metrics to an Excel file.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            DataFrame containing metrics.
+        path : Path
+            Path to save the Excel file.
+        add_plots : bool, optional
+            Whether to include plots in the Excel file (default: False).
+
+        Returns
+        -------
+        None
+        """
         if add_plots:
             raise NotImplementedError
         else:
@@ -2123,7 +2357,14 @@ class MetricsTable:
         )
         writer.save()
 
-    def csv_log(self):
+    def csv_log(self) -> None:
+        """
+        Saves the computed metrics to a CSV file.
+
+        Returns
+        -------
+        None
+        """
         df = self.table.get_dataframe()
         df["wandb project"] = self.wandb_project_name
         df["wandb run"] = self.wandb_run_name
@@ -2137,25 +2378,54 @@ class MetricsTable:
             header=not self.df_path.exists(),
         )
 
-    def wandb_log(self):
+    def wandb_log(self) -> None:
         """
-        Export the UCT metrics table to wandb.
+        Logs the metrics table to Weights & Biases (wandb).
+
+        Returns
+        -------
+        None
         """
-        self.csv_log()  # TODO to be replaced with excel_log when we figure out how to add the images.
-        # self.excel_log(df, self.df_path)
-        # TODO Due to the size of the table, we will only log it to a csv file
+        self.csv_log()
         wandb.log(
             {
                 f"Uncertainty Metrics Table - {self.model_type} - {wandb.run.name}": self.table
             }
         )
-        #  - {self.model_type}
-        # wandb.run.log_artifact({f"Uncertainty Metrics Table": self.table})  #  - {self.model_type}
 
 
 def isotonic_recalibrator(
-    y_true_recal, y_pred_recal, y_std_recal, y_true_test, y_pred_test, y_std_test
-):
+    y_true_recal: np.ndarray,
+    y_pred_recal: np.ndarray,
+    y_std_recal: np.ndarray,
+    y_true_test: np.ndarray,
+    y_pred_test: np.ndarray,
+    y_std_test: np.ndarray,
+) -> Tuple[IsotonicRegression, np.ndarray, np.ndarray]:
+    """
+    Trains an isotonic regression model for recalibration and applies it to test predictions.
+
+    Parameters
+    ----------
+    y_true_recal : np.ndarray
+        True target values for recalibration.
+    y_pred_recal : np.ndarray
+        Predicted values for recalibration.
+    y_std_recal : np.ndarray
+        Predicted uncertainties for recalibration.
+    y_true_test : np.ndarray
+        True target values for testing.
+    y_pred_test : np.ndarray
+        Predicted values for testing.
+    y_std_test : np.ndarray
+        Predicted uncertainties for testing.
+
+    Returns
+    -------
+    Tuple[IsotonicRegression, np.ndarray, np.ndarray]
+        Recalibration model, expected proportions, and observed proportions after recalibration.
+    """
+
     y_pred_recal = y_pred_recal.flatten()
     y_std_recal = y_std_recal.flatten()
     exp_props, obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
@@ -2175,7 +2445,31 @@ def isotonic_recalibrator(
     return recal_model, te_recal_exp_props, te_recal_obs_props
 
 
-def std_recalibrator(y_true_recal, y_pred_recal, y_std_recal, y_std_test):
+def std_recalibrator(
+    y_true_recal: np.ndarray,
+    y_pred_recal: np.ndarray,
+    y_std_recal: np.ndarray,
+    y_std_test: np.ndarray,
+) -> Tuple[Callable[[np.ndarray], np.ndarray], np.ndarray, np.ndarray]:
+    """
+    Recalibrates standard deviation predictions using a recalibration model.
+
+    Parameters
+    ----------
+    y_true_recal : np.ndarray
+        True target values for recalibration.
+    y_pred_recal : np.ndarray
+        Predicted values for recalibration.
+    y_std_recal : np.ndarray
+        Predicted uncertainties for recalibration.
+    y_std_test : np.ndarray
+        Predicted uncertainties for testing.
+
+    Returns
+    -------
+    Tuple[Callable[[np.ndarray], np.ndarray], np.ndarray, np.ndarray]
+        Recalibration function, recalibrated standard deviations for recalibration and testing.
+    """
     std_recal = uct.recalibration.get_std_recalibrator(
         y_pred_recal, y_std_recal, y_true_recal
     )
@@ -2187,18 +2481,51 @@ def std_recalibrator(y_true_recal, y_pred_recal, y_std_recal, y_std_test):
 
 
 def recalibration_metrics_and_plots(
-    y_pred_test,
-    y_std_test,
-    y_true_test,
-    y_err_test,
-    uct_logger=None,
-    exp_props=None,
-    obs_props=None,
-    recal_model=None,
-    n_subset=None,
-    task_name="before_calibration",
-    figpath=None,
-):
+    y_pred_test: np.ndarray,
+    y_std_test: np.ndarray,
+    y_true_test: np.ndarray,
+    y_err_test: np.ndarray,
+    uct_logger: Optional[Callable] = None,
+    exp_props: Optional[np.ndarray] = None,
+    obs_props: Optional[np.ndarray] = None,
+    recal_model: Optional[IsotonicRegression] = None,
+    n_subset: Optional[int] = None,
+    task_name: str = "before_calibration",
+    figpath: Optional[Union[str, Path]] = None,
+) -> Tuple[Dict[str, Any], Dict[str, plt.Figure]]:
+    """
+    Computes recalibration metrics and generates plots.
+
+    Parameters
+    ----------
+    y_pred_test : np.ndarray
+        Predicted values for testing.
+    y_std_test : np.ndarray
+        Predicted uncertainties for testing.
+    y_true_test : np.ndarray
+        True target values for testing.
+    y_err_test : np.ndarray
+        Prediction errors.
+    uct_logger : Optional[Callable], optional
+        Logger function for uncertainty calibration tracking (default: None).
+    exp_props : Optional[np.ndarray], optional
+        Expected proportions for calibration plot (default: None).
+    obs_props : Optional[np.ndarray], optional
+        Observed proportions for calibration plot (default: None).
+    recal_model : Optional[IsotonicRegression], optional
+        Recalibration model (default: None).
+    n_subset : Optional[int], optional
+        Number of samples to use for visualization (default: None).
+    task_name : str, optional
+        Name of the task (default: "before_calibration").
+    figpath : Optional[Union[str, Path]], optional
+        Path to save the figures (default: None).
+
+    Returns
+    -------
+    Tuple[Dict[str, Any], Dict[str, plt.Figure]]
+        Computed metrics and generated plots.
+    """
     if uct_logger is not None:
         metrics, plots = uct_logger(
             y_pred=y_pred_test,
@@ -2213,21 +2540,7 @@ def recalibration_metrics_and_plots(
             obs_props=obs_props,
             recal_model=recal_model,
         )
-        # submetrics, subplots = uct_logger( # for saved plots with 100 samples
-        #     y_pred=y_pred_test,
-        #     y_std=y_std_test,
-        #     y_true=y_true_test,
-        #     y_err=y_err_test,
-        #     y_eps=None,
-        #     n_subset=100,
-        #     task_name=task_name + " Subset 100",
-        #     figpath=figpath,
-        #     exp_props=exp_props,
-        #     obs_props=obs_props,
-        #     recal_model=recal_model,
-        # )
 
-        # uct_logger.wandb_log()
     else:  # without logging to wandb then
         uctmetrics, uctplots = calculate_uct_metrics(
             y_pred=y_pred_test,
@@ -2253,18 +2566,6 @@ def recalibration_metrics_and_plots(
             **uctplots,
             **uqplots,
         }
-        # submetrics, subplots = calculate_uct_metrics(
-        #     y_pred=y_pred_test,
-        #     y_std=y_std_test,
-        #     y_true=y_true_test,
-        #     n_subset=100,
-        #     Nbins=100,
-        #     task_name=task_name + " Subset 100",
-        #     figpath=figpath,
-        #     exp_props=exp_props,
-        #     obs_props=obs_props,
-        #     recal_model=recal_model,
-        # )
 
     plt.close()
 
@@ -2272,37 +2573,67 @@ def recalibration_metrics_and_plots(
 
 
 def recalibrate(
-    y_true_recal,
-    y_pred_recal,
-    y_alea_recal,  # y_std_recal,
-    y_err_recal,
-    y_true_test,
-    y_pred_test,
-    y_alea_test,  # y_std_test,
-    y_err_test,
-    n_subset=None,
-    task_name="PCM",
+    y_true_recal: np.ndarray,
+    y_pred_recal: np.ndarray,
+    y_alea_recal: np.ndarray,
+    y_err_recal: np.ndarray,
+    y_true_test: np.ndarray,
+    y_pred_test: np.ndarray,
+    y_alea_test: np.ndarray,
+    y_err_test: np.ndarray,
+    n_subset: Optional[int] = None,
+    task_name: str = "PCM",
     savefig: bool = True,
-    save_dir: Path = "path/to/figures",
-    uct_logger=None,
-):
+    save_dir: Path = Path("path/to/figures"),
+    uct_logger: Optional[Callable] = None,
+) -> IsotonicRegression:
+    """
+    Performs uncertainty recalibration using isotonic regression and saves recalibration results.
+
+    Parameters
+    ----------
+    y_true_recal : np.ndarray
+        True target values for recalibration.
+    y_pred_recal : np.ndarray
+        Predicted values for recalibration.
+    y_alea_recal : np.ndarray
+        Aleatoric uncertainty for recalibration.
+    y_err_recal : np.ndarray
+        Prediction errors for recalibration.
+    y_true_test : np.ndarray
+        True target values for testing.
+    y_pred_test : np.ndarray
+        Predicted values for testing.
+    y_alea_test : np.ndarray
+        Aleatoric uncertainty for testing.
+    y_err_test : np.ndarray
+        Prediction errors for testing.
+    n_subset : Optional[int], optional
+        Number of samples for visualization (default: None).
+    task_name : str, optional
+        Name of the task (default: "PCM").
+    savefig : bool, optional
+        Whether to save the recalibration plots (default: True).
+    save_dir : Path, optional
+        Path to save the figures and recalibration results (default: "path/to/figures").
+    uct_logger : Optional[Callable], optional
+        Logger function for uncertainty calibration tracking (default: None).
+
+    Returns
+    -------
+    IsotonicRegression
+        Trained isotonic regression model for recalibration.
+    """
     if savefig:
         before_path = Path(save_dir) / "Before_recal"
         after_path = Path(save_dir) / "After_recal"
         before_path.mkdir(exist_ok=True)
         after_path.mkdir(exist_ok=True)
-        # before_path_m = before_path / "metrics"
-        # after_path_m = after_path / "metrics"
-        # before_path_m.mkdir(exist_ok=True)
-        # after_path_m.mkdir(exist_ok=True)
 
     else:
         before_path = None
         after_path = None
-        # before_path_m = None
-        # after_path_m = None
     # Before Calibration
-    # calculating exp_prop and obs_prop
     before_metrics, before_plots = recalibration_metrics_and_plots(
         y_pred_test=y_pred_test,
         y_std_test=y_alea_test,
@@ -2324,23 +2655,6 @@ def recalibrate(
         task_name=task_name + "_before_calibration_subset_100",
         figpath=before_path,
     )
-
-    # # Plot average calibration
-    # fig1, ax1 = plt.subplots(figsize=(6, 4))
-    # uct.viz.plot_calibration(
-    #     y_pred_test, y_std_test, y_true_test, n_subset=n_subset, ax=ax1
-    # )
-    # ax1.set_title("Calibration Curve - Before Recalibration")
-    # plt.gcf().set_size_inches(4, 4)
-    # plt.tight_layout()
-    #
-    # if savefig:
-    #     fig_save_path = Path(save_dir) / "Calib_curve_before_recalibration"
-    #     uct.viz.save_figure(
-    #         str(fig_save_path), ext_list=["png", "svg"], white_background=True
-    #     )
-    # plt.show()
-    # plt.close()
 
     # Recalibrating
     # * this is the isotonic regression one *
@@ -2381,29 +2695,6 @@ def recalibrate(
         figpath=after_path,
     )
 
-    # # * this is the std recalibrator *
-    # std_recal, y_std_recal_recalibrated, y_std_test_recalibrated = std_recalibrator(
-    #     y_true_recal=y_true_recal,
-    #     y_pred_recal=y_pred_recal,
-    #     y_std_recal=y_std_recal,
-    #     y_std_test=y_std_test,
-    # )
-    #
-    # # After std recalibrator metrics
-    # recal_metrics_std, recal_plots_std = recalibration_metrics_and_plots(
-    #     y_pred_test=y_pred_test,
-    #     y_std_test=y_std_test_recalibrated,
-    #     y_true_test=y_true_test,
-    #     y_err_test=y_err_test,
-    #     uct_logger=uct_logger,
-    #     n_subset=n_subset,
-    #     task_name=task_name + "_after_calibration_with_std_recalibrator",
-    #     figpath=after_path,
-    # )
-
-    # metrics = {**before_metrics, **recal_metrics, **recal_metrics_std}
-    # plots = {**before_plots, **recal_plots, **recal_plots_std}
-
     # Let's save the recalibration model
     recal_model_path = Path(save_dir) / "iso_recalibration_model.pkl"
     save_pickle(iso_recal_model, recal_model_path)
@@ -2414,111 +2705,33 @@ def recalibrate(
     # save metrics after recalibration with isotonic regression
     recal_metrics_path = Path(save_dir) / "recal_metrics_iso.pkl"
     save_pickle(recal_metrics, recal_metrics_path)
-
-    # save metrics after recalibration with std recalibrator
-    # recal_metrics_std_path = Path(save_dir) / "recal_metrics_std.pkl"
-    # save_pickle(recal_metrics_std, recal_metrics_std_path)
-
+    # TODO : Add evidential NLL as an argument here.
     return iso_recal_model  # std_recal  # , metrics, plots
 
-    # y_pred_recal = y_pred_recal.flatten()
-    # y_std_recal = y_std_recal.flatten()
-    # exp_props, obs_props = uct.metrics_calibration.get_proportion_lists_vectorized(
-    #     y_pred_recal,
-    #     y_std_recal,
-    #     y_true_recal,
-    # )
-    # # Train a recalibration model.
-    # recal_model = uct.recalibration.iso_recal(exp_props, obs_props)
-    # # Get the expected props and observed props using the new recalibrated model
-    # te_recal_exp_props, te_recal_obs_props = (
-    #     uct.metrics_calibration.get_proportion_lists_vectorized(
-    #         y_pred_test, y_std_test, y_true_test, recal_model=recal_model
-    #     )
-    # )
-    #
-    # # Show the updated average calibration plot AFTER
-    # fig2, ax2 = plt.subplots(figsize=(6, 4))
-    # uct.viz.plot_calibration(
-    #     y_pred_test,
-    #     y_std_test,
-    #     y_true_test,
-    #     n_subset=n_subset,
-    #     exp_props=te_recal_exp_props,
-    #     obs_props=te_recal_obs_props,
-    #     ax=ax2,
-    # )
-    #
-    # ax2.set_title("Calibration Curve - After Recalibration")
-    # plt.gcf().set_size_inches(4.0, 4.0)
-    # plt.tight_layout()
-    #
-    # if savefig:
-    #     fig_save_path = Path(save_dir) / "Calib_curve_after_recalibration"
-    #     uct.viz.save_figure(
-    #         str(fig_save_path), ext_list=["png", "svg"], white_background=True
-    #     )
-    # plt.show()
-    # plt.close()
 
-    # if uct_logger is not None:
-    #     uct_logger(
-    #         y_pred=y_pred_recal,
-    #         y_std=y_std_recal,
-    #         y_true=y_true_recal,
-    #         y_err=y_err_recal,
-    #         task_name="after_calibration",
-    #     )
-    # else:
-    #     uctmetrics, _ = calculate_uct_metrics(
-    #         y_pred=y_pred_test,
-    #         y_std=y_std_test,
-    #         y_true=y_true_test,
-    #         Nbins=100,
-    #         task_name=task_name,
-    #         figpath=after_path_m,
-    #     )
-    #     uqmetrics, _ = calculate_uqtools_metrics(
-    #         y_std_test,
-    #         y_err_test,
-    #         Nbins=100,
-    #         include_bootstrap=True,
-    #         task_name=task_name,
-    #         figpath=after_path_m,
-    #     )
-    #     _after = {**uctmetrics, **uqmetrics}
-    # # plots_before = {**uctplots, **uqplots}
-    # plt.close()
-
-    # return recal_model
-
-
-def calc_alea_epi_mean_var_notnan(vars_all, targets_all):
+def calc_alea_epi_mean_var_notnan(
+    vars_all: torch.Tensor, targets_all: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Calculate the mean and variance of vars_all considering only the valid (non-NaN) corresponding targets.
+    Calculates the mean and variance of aleatoric and epistemic uncertainty,
+    considering only valid (non-NaN) corresponding targets.
 
-    Parameters:
+    Parameters
+    ----------
     vars_all : torch.Tensor
-        Aleatoric variances from the model, shape [batch_size, num_tasks, num_models]
+        Aleatoric variances from the model, shape [batch_size, num_tasks, num_models].
     targets_all : torch.Tensor
-        True target values, shape [batch_size, num_tasks]
+        True target values, shape [batch_size, num_tasks].
 
-    Returns:
-    tuple of torch.Tensor
-        Mean and variance of vars_all considering only valid entries, scalar values.
+    Returns
+    -------
+    Tuple[torch.Tensor, torch.Tensor]
+        Mean and variance of vars_all considering only valid entries.
     """
-    # Ensure targets_all has an additional dimension for broadcasting compatibility
-    # if targets_all.dim() < vars_all.dim():
-    #     targets_all = targets_all.unsqueeze(-1)  # Shape [datapoints, tasks, 1]
-
     # Create a mask of valid (non-NaN) targets
-    valid_mask = ~torch.isnan(targets_all)  # Shape [datapoints, tasks, 1] [6525, 20, 1]
-
-    # Apply the mask to vars_all
-    # valid_vars = torch.where(valid_mask, vars_all, torch.tensor(float('nan'), device=vars_all.device))
+    valid_mask = ~torch.isnan(targets_all)
 
     # Flatten the valid_vars to a 1D array for mean and variance calculation
-    # if valid_mask.shape[]
     valid_vars_flat = vars_all[valid_mask]
 
     # Calculate mean and variance on the flattened valid data
@@ -2528,25 +2741,27 @@ def calc_alea_epi_mean_var_notnan(vars_all, targets_all):
     return vars_mean, vars_var
 
 
-def aggregate_metrics_csv(input_file_path, output_file_path):
+def aggregate_metrics_csv(input_file_path: str, output_file_path: str) -> None:
     """
     Aggregates a CSV file by specified columns, calculating mean and standard deviation
     for numeric columns and collecting string columns into lists.
 
-    Parameters:
-    -----------
-    input_file_path (str): Path to the input CSV file.
-    output_file_path (str): Path to save the aggregated CSV file.
+    Parameters
+    ----------
+    input_file_path : str
+        Path to the input CSV file.
+    output_file_path : str
+        Path to save the aggregated CSV file.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
 
-    Example:
-    --------
-    >> input_file_path = '/path/to/your/inputfile.csv'  # Replace with your actual input file path
-    >> output_file_path = '/path/to/your/outputfile.csv'  # Replace with your desired output file path
-    >> aggregate_csv(input_file_path, output_file_path)
+    Example
+    -------
+    >>> input_file_path = '/path/to/your/inputfile.csv'
+    >>> output_file_path = '/path/to/your/outputfile.csv'
+    >>> aggregate_metrics_csv(input_file_path, output_file_path)
     """
     # Step 1: Read the CSV file into a DataFrame
     df = pd.read_csv(input_file_path, header=0)
@@ -2621,220 +2836,3 @@ def aggregate_metrics_csv(input_file_path, output_file_path):
     final_aggregated.to_csv(output_file_path, index=False)
 
     print("Aggregation complete and results saved to", output_file_path)
-
-
-#
-# def log_mol_table(smiles, inputs, targets, outputs, targets_names):
-#     data = []
-#     for smi, inp, tar, out in zip(
-#         smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")
-#     ):
-#         row = {
-#             "smiles": smi,
-#             "molecule": wandb.Molecule.from_smiles(smi),
-#             "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
-#             "ECFP": inp,
-#             "fp_length": len(inp),
-#         }
-#
-#         # Iterate over each pair of output and target
-#         for targetName, target, output in zip(targets_names, tar, out):
-#             row[f"{targetName}_label"] = target.item()
-#             row[f"{targetName}_predicted"] = output.item()
-#
-#         data.append(row)
-#
-#     dataframe = pd.DataFrame.from_records(data)
-#     table = wandb.Table(dataframe=dataframe)
-#     wandb.log({"mols_table": table}, commit=False)
-#
-#
-# def _make_uct_plots(
-#     y_preds: np.ndarray,
-#     y_std: np.ndarray,
-#     y_true: np.ndarray,
-#     task_name: str = None,
-#     n_subset: int = 100,
-#     ylims: Tuple[float, float] | None = (-3.0, 3.0),
-#     num_stds_confidence_bound: float = 2.0,  # 1.96 for 95% CI for normal distribution
-#     plot_save_str: str = "uct_plot",
-#     savefig: bool = True,
-#     save_dir: Path = FIGS_DIR,
-# ) -> plt.Figure:
-#     """
-#     Generate a set of UCT plots including prediction intervals, calibration, adversarial
-#     group calibration, sharpness, and residuals vs. predictive standard deviation.
-#
-#     Parameters
-#     ----------
-#     y_preds : np.ndarray
-#         Predicted values.
-#     y_std : np.ndarray
-#         Standard deviations of predictions.
-#     y_true : np.ndarray
-#         True target values.
-#     task_name : str, optional
-#         Name of the task, used in plot titles.
-#     n_subset : int, optional
-#         Number of points to subset for plotting.
-#     ylims : tuple, optional
-#         Y-limits for the plots.
-#     num_stds_confidence_bound : float, optional
-#         Number of standard deviations for confidence interval.
-#     plot_save_str : str, optional
-#         String to be used in the plot's save path.
-#     savefig : bool, optional
-#         Whether to save the figure.
-#     save_dir : Path, optional
-#         Directory to save the figure.
-#
-#     Returns
-#     -------
-#     plt.Figure
-#         The matplotlib figure object containing all UCT plots.
-#     """
-#     if not all(isinstance(arr, np.ndarray) for arr in [y_preds, y_std, y_true]):
-#         raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
-#
-#     task_name = task_name if task_name is not None else "PCM"
-#
-#     fig, axs = plt.subplots(2, 4, figsize=(30, 10))
-#     axs = axs.flatten()  # Flatten to index easily
-#     # Prediction Intervals plot
-#     uct_viz.plot_intervals(
-#         y_preds,
-#         y_std,
-#         y_true,
-#         n_subset=n_subset,
-#         ylims=ylims,
-#         num_stds_confidence_bound=num_stds_confidence_bound,
-#         ax=axs[0],
-#     )
-#     axs[0].set_title(f"Prediction Intervals - {task_name}")
-#     rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
-#     axs[0].text(
-#         0.05,
-#         0.95,
-#         f"RMSE: {rmse:.2f}",
-#         transform=axs[0].transAxes,
-#         verticalalignment="top",
-#     )
-#
-#     # Calibration plot
-#     uct_viz.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
-#     axs[1].set_title(f"Average Calibration - {task_name}")
-#
-#     # Adversarial group calibration plot
-#     uct_viz.plot_adversarial_group_calibration(
-#         y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
-#     )
-#     axs[2].set_title(f"Adversarial Group Calibration - {task_name}")
-#
-#     # Sharpness plot
-#     uct_viz.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
-#     axs[3].set_title(f"Sharpness - {task_name}")
-#
-#     # Residuals vs. Predictive Std plot
-#     uct_viz.plot_residuals_vs_stds(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4])
-#     axs[4].set_title(f"Residuals vs. Predictive Std - {task_name}")
-#
-#     # New plot: Ordered Prediction Intervals
-#     uct_viz.plot_intervals_ordered(
-#         y_preds,
-#         y_std,
-#         y_true,
-#         n_subset=n_subset,
-#         ylims=ylims,
-#         num_stds_confidence_bound=num_stds_confidence_bound,
-#         ax=axs[5],
-#     )
-#     axs[5].set_title(f"Ordered Prediction Intervals - {task_name}")
-#
-#     # New plot: True vs Predictions Plot
-#     plot_true_vs_preds(y_preds, y_true, task_name=task_name, ax=axs[6])
-#
-#     plt.tight_layout(pad=2.0)
-#
-#     # Save figure if required
-#     if savefig:
-#         full_save_path = Path(save_dir) / plot_save_str
-#         uct_viz.save_figure(
-#             str(full_save_path), ext_list=["png", "svg"], white_background=True
-#         )
-#
-#     return fig
-#
-#
-# def _2make_uct_plots(
-#     y_preds,
-#     y_std,
-#     y_true,
-#     task_name=None,
-#     n_subset=100,
-#     ylims=(-3, 3),
-#     num_stds_confidence_bound=2.0,  # Use 1.96 for 95% confidence interval for normal distribution
-#     plot_save_str="uct_plot",  # "row",
-#     savefig=True,
-#     save_dir=FIGS_DIR,
-# ):
-#     """
-#     Make set of plots.
-#     Adapted from https://github.com/uncertainty-toolbox/uncertainty-toolbox/blob/main/examples/viz_readme_figures.py
-#     """
-#     if (
-#         not isinstance(y_preds, np.ndarray)
-#         or not isinstance(y_std, np.ndarray)
-#         or not isinstance(y_true, np.ndarray)
-#     ):
-#         raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
-#     task_name = str(task_name) if task_name else "PCM"
-#
-#     fig, axs = plt.subplots(1, 5, figsize=(25, 5))  # (28, 8)
-#
-#     axs[0] = uct.plot_intervals(
-#         y_preds,
-#         y_std,
-#         y_true,
-#         n_subset=n_subset,
-#         ylims=ylims,
-#         num_stds_confidence_bound=num_stds_confidence_bound,
-#         ax=axs[0],
-#     )
-#     axs[0].set_title("Prediction Intervals - {}".format(task_name))
-#     # calculate RMSE and add it to the plot left upper corner
-#     rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
-#     axs[0].text(0.05, 0.95, "RMSE: {:.2f}".format(rmse), transform=axs[0].transAxes)
-#
-#     # Make calibration plot
-#     axs[1] = uct.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
-#     axs[1].set_title("Average Calibration - {}".format(task_name))
-#
-#     # Make adversarial group calibration plot
-#     axs[2] = uct.plot_adversarial_group_calibration(
-#         y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
-#     )
-#     axs[2].set_title("Adversarial Group Calibration - {}".format(task_name))
-#
-#     # Make sharpness plot
-#     axs[3] = uct.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
-#     axs[3].set_title("Sharpness - {}".format(task_name))
-#
-#     # Make residual vs stds plot
-#     axs[4] = uct.plot_residuals_vs_stds(
-#         y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4]
-#     )
-#     axs[4].set_title("Residuals vs. Predictive Std - {}".format(task_name))
-#
-#     # Adjust subplots spacing
-#     fig.subplots_adjust(wspace=0.5)
-#     # Adjust the spacing between subplots
-#     plt.tight_layout()
-#
-#     # Save figure
-#     if savefig:
-#         full_save_path = Path(save_dir) / f"{plot_save_str}"
-#         uct.viz.save_figure(
-#             str(full_save_path), ext_list=["png", "svg"], white_background=True
-#         )
-#
-#     return fig

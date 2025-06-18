@@ -18,10 +18,8 @@ today=$(date +%Y-%m-%d)
 echo "Script started at: $(date)"
 
 # Predefine the args here
-#data="papyrus"
 ext="pkl"
 task_type="regression"
-#wandb_project="${today}-all-models" #"2024-04-16-baseline"
 wandb_project="${today}-all-models" #"2024-04-16-baseline"
 logname="${wandb_project}-evidential.txt"
 

@@ -23,7 +23,7 @@ task_type="regression"
 wandb_project="mcdp-test"
 logname="${wandb_project}.txt"
 
-python mcdropout.py --num_mc_samples $num_mc_samples --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb_project_name "$wandb_project" 2>&1 | tee ../logs/"${logname}"
+python model_parser.py --model mcdropout --num_mc_samples $num_mc_samples --data_name $data --n_targets $n_targets --activity_type $activity --descriptor_protein $desc_prot --descriptor_chemical $desc_chem --split_type $split_type --ext $ext --task_type $task_type --wandb_project_name $wandb_project 2>&1 | tee ../logs/"${logname}"
 
 # Report end time
 echo "Script ended at: $(date)"

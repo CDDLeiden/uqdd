@@ -1,13 +1,11 @@
 import math
-import os
 import random
 import logging
 from pathlib import Path
-from typing import Union
+from typing import Dict, Optional, Any, List, Tuple, Union
 from collections import OrderedDict
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.optim as optim
 import wandb
@@ -21,13 +19,18 @@ from uqdd.utils import get_config, create_logger
 string_types = (type(b""), type(""))
 
 
-def set_seed(seed=42):
+def set_seed(seed: int = 42) -> None:
     """
-    Set the random seed for reproducible results.
+    Sets the random seed for reproducibility across libraries.
 
     Parameters:
     -----------
-    - seed (int): The random seed to use.
+    seed : int, default=42
+        The seed value to use for random number generation.
+
+    Returns:
+    --------
+    None
     """
     random.seed(seed)
     np.random.seed(seed)
@@ -43,12 +46,36 @@ def set_seed(seed=42):
 
 # Adapted from ChemProp - Uncertainty
 def compute_pnorm(model: nn.Module) -> float:
-    """Computes the norm of the parameters of a model."""
+    """
+    Computes the norm of a model's parameters.
+
+    Parameters:
+    -----------
+    model : nn.Module
+        The neural network model whose parameter norm is to be computed.
+
+    Returns:
+    --------
+    float
+        The L2 norm of the model's parameters.
+    """
     return math.sqrt(sum([p.norm().item() ** 2 for p in model.parameters()]))
 
 
 def compute_gnorm(model: nn.Module) -> float:
-    """Computes the norm of the gradients of a model."""
+    """
+    Computes the norm of a model's gradients.
+
+    Parameters:
+    -----------
+    model : nn.Module
+        The neural network model whose gradient norm is to be computed.
+
+    Returns:
+    --------
+    float
+        The L2 norm of the model's gradients.
+    """
     return math.sqrt(
         sum(
             [
@@ -60,20 +87,19 @@ def compute_gnorm(model: nn.Module) -> float:
     )
 
 
-def get_desc_len_from_dataset(dataset):  # , desc_prot=True):
+def get_desc_len_from_dataset(dataset: torch.utils.data.Dataset) -> Tuple[int, int]:
     """
-    Get the length of the descriptors for the protein and chemical  inputs
-    Parameters
-    ----------
-    dataset
-        One of the datasets from the get_datasets function train or val or test.
+    Retrieves the lengths of protein and chemical descriptors from a dataset.
 
-    Returns
-    -------
-    desc_prot_len: int
-        Length of the protein descriptors
-    desc_chem_len: int
-        Length of the chemical descriptors
+    Parameters:
+    -----------
+    dataset : torch.utils.data.Dataset
+        The dataset containing descriptor information.
+
+    Returns:
+    --------
+    Tuple[int, int]
+        A tuple containing the length of protein descriptors and chemical descriptors.
     """
     # desc_prot then descriptor_chemical
     inputs = dataset[0][0]
@@ -87,7 +113,24 @@ def get_desc_len_from_dataset(dataset):  # , desc_prot=True):
         raise ValueError("Unknown input type to get_desc_len function.")
 
 
-def get_desc_len(*descriptors: str, logger=None):
+def get_desc_len(
+    *descriptors: Optional[str], logger: Optional[logging.Logger] = None
+) -> Tuple[int, ...]:
+    """
+    Retrieves descriptor lengths from the configuration.
+
+    Parameters:
+    -----------
+    descriptors : Optional[str]
+        Variable number of descriptor names for which lengths are required.
+    logger : Optional[logging.Logger], default=None
+        Logger for debugging information.
+
+    Returns:
+    --------
+    Tuple[int, ...]
+        A tuple containing the lengths of the requested descriptors.
+    """
     desc_config = get_config(config_name="desc_dim", config_dir=CONFIG_DIR)
     lengths = []
     for d in descriptors:
@@ -98,42 +141,24 @@ def get_desc_len(*descriptors: str, logger=None):
     return tuple(lengths)
 
 
-def get_model_config(model_type="baseline", **kwargs):
+def get_model_config(model_type: str = "pnn", **kwargs) -> Dict:
     """
-    Retrieve the configuration dictionary for model training.
+    Retrieves the configuration dictionary for model training.
 
     Parameters:
-    - config (dict or None): A dictionary containing configuration parameters. If None, the default configuration will be loaded.
-    - **kwargs: Additional keyword arguments that override the values in the config dictionary.
+    -----------
+    model_type : str, default="pnn"
+        The type of model configuration to load (e.g., "pnn", "ensemble", "mcdropout").
+    **kwargs : dict
+        Additional parameters to override default configuration values.
 
     Returns:
-    - dict: Merged dictionary containing the configuration parameters.
-
-    Notes:
-    - If `config` is None, the function will load the default configuration from a JSON file.
-    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
-    - If both `config` and `kwargs` contain the same key, the value from `kwargs` will take precedence.
-
-    Examples:
-    # Example 1: Read from default config file
-    config = get_config()
-
-    # Example 2: Read from a custom config file
-    config = get_config(config="path/to/custom/config.json")
-
-    # Example 3: Provide config as a dictionary
-    custom_config = {
-        "learning_rate": 0.001,
-        "batch_size": 64,
-        "num_epochs": 500
-    }
-    config = get_config(config=custom_config)
-
-    # Example 4: Provide config as a dictionary and additional keyword arguments
-    config = get_config(config=custom_config, num_epochs=1000, batch_size=32)
+    --------
+    Dict
+        The model configuration dictionary.
     """
     assert model_type in [
-        "baseline",
+        "pnn",
         "ensemble",
         "mcdropout",
         "evidential",
@@ -155,19 +180,21 @@ def get_model_config(model_type="baseline", **kwargs):
     )
 
 
-def get_sweep_config(model_name="baseline", **kwargs):
+def get_sweep_config(model_name: str = "pnn", **kwargs) -> Dict:
     """
-    Retrieve the sweep configuration for hyperparameter tuning.
+    Retrieves the sweep configuration for hyperparameter tuning.
 
     Parameters:
     -----------
-    - config (dict, str, or None): A dictionary containing sweep configuration parameters,
-    a path to a YAML or JSON config file, or None to use the default configuration.
-    - **kwargs: Additional keyword arguments that override the values in the 'parameters' dictionary.
+    model_name : str, default="pnn"
+        The name of the model to retrieve sweep configurations for.
+    **kwargs : dict
+        Additional parameters to override default sweep configurations.
 
     Returns:
     --------
-    - dict: Merged dictionary containing the sweep configuration parameters.
+    Dict
+        The sweep configuration dictionary.
 
     Notes:
     ------
@@ -178,7 +205,7 @@ def get_sweep_config(model_name="baseline", **kwargs):
         the value from `kwargs` will take precedence.
     """
     assert model_name in [
-        "baseline",
+        "pnn",
         "ensemble",
         "mcdropout",
         "evidential",
@@ -194,19 +221,51 @@ def get_sweep_config(model_name="baseline", **kwargs):
 
 
 def build_datasets(
-    data_name="papyrus",
+    data_name: str = "papyrus",
     n_targets: int = -1,
     activity_type: str = "xc50",
     split_type: str = "random",
-    desc_prot: Union[str, None] = None,
-    desc_chem: Union[str, None] = None,
+    desc_prot: Optional[str] = None,
+    desc_chem: Optional[str] = None,
     median_scaling: bool = False,
     task_type: str = "regression",
-    # label_scaling_func: Callable[[torch.Tensor], torch.Tensor] | str = None,
     ext: str = "pkl",
-    logger: logging.Logger = None,
-    device: str = DEVICE,
-):
+    logger: Optional[logging.Logger] = None,
+    device: Union[str, torch.device] = DEVICE,
+) -> Dict[str, torch.utils.data.Dataset]:
+    """
+    Builds datasets for training and evaluation.
+
+    Parameters:
+    -----------
+    data_name : str, default="papyrus"
+        The name of the dataset to load ("papyrus", "tdc", or "other").
+    n_targets : int, default=-1
+        The number of target entries to load (-1 for all).
+    activity_type : str, default="xc50"
+        The type of bioactivity measurement.
+    split_type : str, default="random"
+        The type of dataset split (e.g., "random", "scaffold").
+    desc_prot : Optional[str], default=None
+        The type of protein descriptor to use.
+    desc_chem : Optional[str], default=None
+        The type of chemical descriptor to use.
+    median_scaling : bool, default=False
+        Whether to apply median scaling to labels.
+    task_type : str, default="regression"
+        The type of task ("regression" or "classification").
+    ext : str, default="pkl"
+        The file extension format for loading the dataset.
+    logger : Optional[logging.Logger], default=None
+        Logger for tracking dataset building.
+    device : str, default=DEVICE
+        The device on which data will be processed.
+
+    Returns:
+    --------
+    Dict[str, torch.utils.data.Dataset]
+        A dictionary containing training, validation, and test datasets.
+    """
     logger = create_logger(name="build_datasets") if not logger else logger
     logger.debug(f"Building datasets for {data_name}")
     # if isinstance(label_scaling_func, str):
@@ -226,14 +285,7 @@ def build_datasets(
             logger=logger,
             device=device,
         )
-    elif data_name == "tdc":
-        from uqdd.data.data_tdc import get_datasets
 
-        datasets = get_datasets()
-    elif data_name == "other":
-        from uqdd.data.data_other import get_datasets
-
-        datasets = get_datasets()
     else:
         raise ValueError(
             f"Unknown data name: {data_name}"
@@ -243,7 +295,31 @@ def build_datasets(
     return datasets
 
 
-def build_loader(datasets, batch_size, shuffle=False, wt_resampler=False):
+def build_loader(
+    datasets: Dict[str, torch.utils.data.Dataset],
+    batch_size: int,
+    shuffle: bool = False,
+    wt_resampler: bool = False,
+) -> Dict[str, DataLoader]:
+    """
+    Constructs data loaders for training, validation, and testing.
+
+    Parameters:
+    -----------
+    datasets : Dict[str, torch.utils.data.Dataset]
+        A dictionary containing dataset splits (e.g., "train", "val", "test").
+    batch_size : int
+        The batch size for loading data.
+    shuffle : bool, optional
+        Whether to shuffle the data (default: False).
+    wt_resampler : bool, optional
+        Whether to use a weighted random sampler for the training set (default: False).
+
+    Returns:
+    --------
+    Dict[str, DataLoader]
+        A dictionary containing the data loaders for each dataset split.
+    """
     try:
         # num_cpu_cores = os.cpu_count()
         dataloaders = {}
@@ -267,28 +343,25 @@ def build_loader(datasets, batch_size, shuffle=False, wt_resampler=False):
     return dataloaders
 
 
-def get_sampler(dataset, bins=50):
-    labels = dataset.labels
-    # mean = labels.mean()
-    # std = labels.std()
-    # from scipy.stats import norm
-    #
-    # pdf_values = norm.pdf(labels.cpu().numpy(), loc=mean.cpu(), scale=std.cpu())
-    # # Step 2: Compute the inverse of these PDF values to get the weights
-    # weights = 1.0 / pdf_values
-    #
-    # # Step 3: Normalize these weights to form a valid probability distribution
-    # weights /= weights.sum()
-    # # Convert weights to a tensor
-    # weights_tensor = torch.tensor(weights, dtype=torch.double, device=labels.device)
+def get_sampler(
+    dataset: torch.utils.data.Dataset, bins: int = 50
+) -> WeightedRandomSampler:
+    """
+    Creates a weighted random sampler for handling imbalanced datasets.
 
-    # # Create the sampler with the calculated weights
-    # sampler = WeightedRandomSampler(
-    #     weights=weights_tensor.squeeze(),
-    #     num_samples=len(weights_tensor),
-    #     replacement=True,
-    #     generator=torch.Generator(device=labels.device),
-    # )
+    Parameters:
+    -----------
+    dataset : torch.utils.data.Dataset
+        The dataset for which to create the sampler.
+    bins : int, optional
+        The number of bins for discretizing the label distribution (default: 50).
+
+    Returns:
+    --------
+    WeightedRandomSampler
+        A PyTorch weighted random sampler for balanced sampling.
+    """
+    labels = dataset.labels
     min_val, max_val = labels.min(), labels.max()
     bin_edges = torch.linspace(min_val, max_val, bins + 1, device=labels.device)
     bin_indices = torch.bucketize(labels, bin_edges)
@@ -296,26 +369,8 @@ def get_sampler(dataset, bins=50):
 
     # Compute weights for each sample - inverse of the frequency of the bin
     weights = 1.0 / (bin_counts[bin_indices] + 1e-2)
-    # weights = 1e4 / (bin_counts[bin_indices] + 1e3)
-
     # Normalize the weights
     weights = weights / weights.sum() * len(weights)
-    # Clip weights to avoid excessive emphasis on rare samples
-    # max_weight = 200 * weights.min()
-    # weights = torch.clamp(weights, max=max_weight)
-    # weights = torch.log10(weights)  # min_wt keeps it at least 0,1
-    # weights += weights.min() + 0.1
-    # Plot the weights distribution
-    # import matplotlib.pyplot as plt
-    #
-    # plt.figure(figsize=(10, 6))
-    # plt.scatter(labels.cpu().numpy(), weights.cpu().numpy(), marker="o")
-    # plt.xlabel("Labels")
-    # plt.ylabel("Weights")
-    # plt.title("Weights per Label")
-    # plt.grid(True)
-    # plt.savefig("/home/bkhalil/Repos/uqdd/wts_test.png")
-
     # Create the sampler with the calculated weights
     sampler = WeightedRandomSampler(
         weights=weights.squeeze(),
@@ -326,31 +381,29 @@ def get_sampler(dataset, bins=50):
     # labels[torch.where(weights>1000)]
     return sampler
 
-    # labels = dataset.labels
-    # mean = labels.mean()
-    # abs_diffs = torch.abs(labels - mean)
-    #
-    # min_diff = abs_diffs.min()
-    # max_diff = abs_diffs.max()
-    # scaled_diffs = (torch.abs(abs_diffs - min_diff) + 1) / (max_diff - min_diff)
 
+def build_optimizer(
+    model: nn.Module, optimizer: str, lr: float, weight_decay: float
+) -> optim.Optimizer:
+    """
+    Initializes an optimizer for training a model.
 
-def _build_loader(datasets, batch_size, ecfp_size=1024):
-    try:
-        train_set = datasets[f"train_ecfp{ecfp_size}"]
-        val_set = datasets[f"val_ecfp{ecfp_size}"]
-        test_set = datasets[f"test_ecfp{ecfp_size}"]
-        train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
-        test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
-        logging.debug("Data loaders created")
-    except Exception as e:
-        raise RuntimeError(f"Error loading data {e}")
+    Parameters:
+    -----------
+    model : nn.Module
+        The model whose parameters will be optimized.
+    optimizer : str
+        The name of the optimizer to use (e.g., "adam", "sgd").
+    lr : float
+        The learning rate for optimization.
+    weight_decay : float
+        The weight decay (L2 penalty) applied to the optimizer.
 
-    return train_loader, val_loader, test_loader
-
-
-def build_optimizer(model, optimizer, lr, weight_decay):
+    Returns:
+    --------
+    optim.Optimizer
+        The initialized optimizer instance.
+    """
     if optimizer.lower() == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer.lower() == "adamw":
@@ -371,36 +424,34 @@ def build_optimizer(model, optimizer, lr, weight_decay):
     return optimizer
 
 
-# ### Custom Loss Functions ###
-# class MultiTaskLoss(nn.Module):
-#     def __init__(self, loss_type="huber", reduction="mean"):
-#         super(MultiTaskLoss, self).__init__()
-#         self.loss_type = loss_type
-#         self.loss_fn = build_loss(loss_type, reduction=reduction)
-#
-#     def forward(self, outputs, targets):
-#         nan_mask = torch.isnan(targets)
-#         # loss
-#         loss = calc_loss_notnan(outputs, targets, nan_mask, self.loss_fn)
-#         return loss
-#
-#
-# def build_loss(loss, reduction="none", mt=False):
-#     if mt:
-#         return MultiTaskLoss(loss_type=loss, reduction=reduction)
-#
-#     if loss.lower() in ["mse", "l2"]:
-#         loss_fn = nn.MSELoss(reduction=reduction)
-#     elif loss.lower() in ["mae", "l1"]:
-#         loss_fn = nn.L1Loss(reduction=reduction)
-#     elif loss.lower() in ["huber", "smoothl1"]:
-#         loss_fn = nn.SmoothL1Loss(reduction=reduction)
-#     else:
-#         raise ValueError("Unknown loss: {}".format(loss))
-#     return loss_fn
+def build_lr_scheduler(
+    optimizer: optim.Optimizer,
+    lr_scheduler: Optional[str],
+    patience: int = 20,
+    factor: float = 0.2,
+    **kwargs,
+) -> Optional[optim.lr_scheduler._LRScheduler]:
+    """
+    Constructs a learning rate scheduler.
 
+    Parameters:
+    -----------
+    optimizer : optim.Optimizer
+        The optimizer for which to adjust the learning rate.
+    lr_scheduler : str, optional
+        The type of learning rate scheduler (e.g., "plateau", "step", "exp", "cos").
+    patience : int, optional
+        The number of epochs with no improvement before reducing LR (default: 20).
+    factor : float, optional
+        The factor by which to reduce LR (default: 0.2).
+    **kwargs : dict
+        Additional parameters for the scheduler.
 
-def build_lr_scheduler(optimizer, lr_scheduler, patience=20, factor=0.2, **kwargs):
+    Returns:
+    --------
+    Optional[optim.lr_scheduler._LRScheduler]
+        The learning rate scheduler instance, or None if no scheduler is used.
+    """
     if lr_scheduler is None:
         return None
     elif lr_scheduler.lower() == "plateau":
@@ -425,160 +476,42 @@ def build_lr_scheduler(optimizer, lr_scheduler, patience=20, factor=0.2, **kwarg
     return lr_scheduler
 
 
-# def calc_nanaware_metrics(tensor, nan_mask, all_tasks_agg=False):
-#     """
-#     Aggregate a tensor by excluding NaN values based on a nan_mask.
-#
-#     Calculates the mean of the non-NaN values along the specified dimension.
-#     Optionally, it can aggregate the mean across all tasks.
-#
-#     Parameters
-#     ----------
-#     tensor : torch.Tensor
-#         The input tensor to be aggregated.
-#     nan_mask : torch.Tensor
-#         A boolean mask indicating the NaN values in the tensor.
-#     all_tasks_agg : bool or str, optional
-#         Determines whether to aggregate across all tasks. If False (default),
-#         returns the mean for each task. If 'mean', returns the mean of all tasks.
-#         If 'sum', returns the sum of all tasks.
-#
-#     Returns
-#     -------
-#     torch.Tensor
-#         The aggregated tensor based on the specified aggregation method.
-#
-#     Notes
-#     -----
-#     - The nan_mask should have the same shape as tensor_for_agg.
-#     - The nan_mask should be a boolean tensor with True indicating NaN values.
-#
-#     Examples
-#     --------
-#     >>> import torch
-#     >>> tensor_for_agg = torch.tensor([[1, 2, 3], [4, float('nan'), 6]])
-#     >>> nan_mask = torch.isnan(tensor_for_agg)
-#     >>> aggregated_tensor = calc_nanaware_metrics(tensor_for_agg, nan_mask, all_tasks_agg=True)
-#     >>> print(aggregated_tensor)
-#     tensor(3.3333)
-#
-#     The above example demonstrates the usage of the `agg_notnan` function.
-#     The input tensor contains NaN values, and the nan_mask is used to identify those NaN values.
-#     By specifying `all_tasks_agg=True`, the function calculates the mean of the non-NaN values and then
-#     returns the mean of all tasks. In this case, the output is `tensor(3.3333)`.
-#     """
-#     # Now we only include the non-Nan targets in the mean calc.
-#     # tensor_means = torch.sum(tensor, dim=0) / torch.sum(~nan_mask, dim=0)
-#
-#     valid_values = torch.where(
-#         ~nan_mask, tensor, torch.tensor(0.0, device=tensor.device)
-#     )
-#     sum_values = torch.sum(valid_values, dim=0)
-#     valid_counts = torch.sum(~nan_mask, dim=0)
-#
-#     tensor_means = sum_values / valid_counts.clamp(min=1)  # Avoid division by zero
-#
-#     # If we want to aggregate across all tasks, we do so here.
-#     # if not all_tasks_agg:
-#     #     return tensor_means
-#     if all_tasks_agg == "mean":
-#         return torch.nanmean(tensor_means)
-#     elif all_tasks_agg == "sum":
-#         return torch.nansum(tensor_means)
-#     return tensor_means
-#
-#
-# def calc_regr_metrics(targets, outputs):
-#     # Handle extra dimensions (ensembles) by averaging ensemble predictions
-#     if outputs.dim() > targets.dim():
-#         outputs = outputs.mean(dim=-1)
-#
-#     # Adjust dimensions if necessary (for MTL to STL comparison)
-#     if targets.dim() < outputs.dim():
-#         targets = targets.unsqueeze(-1)
-#
-#     targets = targets.cpu().numpy()
-#     outputs = outputs.cpu().numpy()
-#
-#     # no reduction here because we want to calc per task metrics
-#     rmse = mean_squared_error(targets, outputs, squared=False, multioutput="raw_values")
-#     r2 = r2_score(targets, outputs, multioutput="raw_values")
-#     evs = explained_variance_score(targets, outputs, multioutput="raw_values")
-#
-#     return rmse, r2, evs
-#
-#
-# #
-# # def calc_loss_notnan(outputs, targets, nan_mask, loss_fn):
-# #     valid_targets = torch.where(
-# #         ~nan_mask, targets, torch.tensor(0.0, device=targets.device)
-# #     )
-# #     valid_outputs = torch.where(
-# #         ~nan_mask, outputs, torch.tensor(0.0, device=outputs.device)
-# #     )
-# #
-# #     loss_per_task = loss_fn(valid_outputs, valid_targets, reduction="none")
-# #     loss = calc_nanaware_metrics(loss_per_task, nan_mask, all_tasks_agg="sum")
-# #
-# #     return loss
-#
-# # targets[nan_mask], outputs[nan_mask] = 0.0, 0.0
-# #
-# # loss_per_task = loss_fn(outputs, targets)
-# #
-# # # Now we only include the non-Nan targets in the mean calc.
-# # loss = calc_nanaware_metrics(
-# #     tensor=loss_per_task, nan_mask=nan_mask, all_tasks_agg="sum"
-# # )
-# # # task_losses = torch.sum(loss_per_task, dim=1) / torch.sum(~nan_mask, dim=1)
-# # # loss = torch.sum(task_losses)
-# # return loss
-#
-#
-# def process_preds(predictions, targets, task_idx=None):
-#     # Get the predictions mean and std
-#     preds_mu = predictions.mean(dim=-1)  # (dim=2)
-#     preds_std = predictions.std(dim=-1)  # (dim=2)
-#
-#     if task_idx is not None:
-#         # For MTL, select predictions for the specific task
-#         preds_mu = preds_mu[:, task_idx]
-#         preds_std = preds_std[:, task_idx]
-#         targets = targets[:, task_idx]
-#     elif predictions.dim() > 2 and targets.dim() == 1:
-#         preds_mu = preds_mu.flatten()
-#         preds_std = preds_std.flatten()
-#     # else:
-#     #     # flatten # TODO I dont think this works for STL
-#     #     preds_mu = torch.flatten(preds_mu.transpose(0, 1))
-#     #     preds_std = torch.flatten(preds_std.transpose(0, 1))
-#     #     targets = torch.flatten(targets.transpose(0, 1))
-#
-#     # nan mask filter
-#     nan_mask = ~torch.isnan(targets)
-#     preds_mu = preds_mu[nan_mask]
-#     preds_std = preds_std[nan_mask]
-#     targets = targets[nan_mask]
-#
-#     # convert to numpy and to cpu
-#     y_true = targets.cpu().numpy()
-#     y_pred = preds_mu.cpu().numpy()
-#     y_std = preds_std.cpu().numpy()
-#     y_err = abs(y_true - y_pred)
-#
-#     return y_true, y_pred, y_std, y_err
-
-
 def save_model(
-    config,
-    model,
-    model_name=f"{TODAY}-baseline_random_ankh-base_ecfp2048",
-    data_specific_path=None,
-    desc_prot_len=0,
-    desc_chem_len=1024,
-    onnx=True,
-    tracker="wandb",
-):
+    config: Dict[str, Any],
+    model: nn.Module,
+    model_name: str = f"{TODAY}-pnn_random_ankh-base_ecfp2048",
+    data_specific_path: Optional[str] = None,
+    desc_prot_len: int = 0,
+    desc_chem_len: int = 1024,
+    onnx: bool = True,
+    tracker: str = "wandb",
+) -> None:
+    """
+    Saves a trained model in both PyTorch and ONNX formats.
+
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing model training parameters.
+    model : nn.Module
+        The trained model to save.
+    model_name : str, optional
+        The name of the saved model file (default: generated from date and settings).
+    data_specific_path : str, optional
+        Path for saving model-specific configurations (default: None).
+    desc_prot_len : int, optional
+        Length of protein descriptors (default: 0).
+    desc_chem_len : int, optional
+        Length of chemical descriptors (default: 1024).
+    onnx : bool, optional
+        Whether to save the model in ONNX format (default: True).
+    tracker : str, optional
+        Model tracking system to use ("wandb" or other) (default: "wandb").
+
+    Returns:
+    --------
+    None
+    """
     try:
         if model is None:
             raise ValueError(f"No model to save - {model=}")
@@ -642,18 +575,23 @@ def save_model(
         print("Error saving models: " + str(e))
 
 
-def add_prefix_to_state_dict_keys(state_dict, prefix):
+def add_prefix_to_state_dict_keys(
+    state_dict: Dict[str, torch.Tensor], prefix: str
+) -> Dict[str, torch.Tensor]:
     """
-    Add a prefix to the keys of a state dictionary.
+    Adds a prefix to all keys in a model's state dictionary.
 
     Parameters:
     -----------
-    state_dict (dict): The state dictionary to modify.
-    prefix (str): The prefix to add to the keys.
+    state_dict : Dict[str, torch.Tensor]
+        The original state dictionary.
+    prefix : str
+        The prefix to append to each key.
 
     Returns:
     --------
-    dict: The modified state dictionary with the new keys.
+    Dict[str, torch.Tensor]
+        The updated state dictionary with modified keys.
     """
     new_state_dict = OrderedDict()
     for key, value in state_dict.items():
@@ -663,19 +601,30 @@ def add_prefix_to_state_dict_keys(state_dict, prefix):
     return new_state_dict
 
 
-def load_model(model_class, model_path, prefix_to_state_keys=None, **model_kwargs):
+def load_model(
+    model_class: nn.Module | Any,
+    model_path: str,
+    prefix_to_state_keys: Optional[str] = None,
+    **model_kwargs,
+) -> nn.Module:
     """
-    Load a PyTorch model from a saved state dictionary.
+    Loads a PyTorch model from a saved state dictionary.
 
     Parameters:
     -----------
-    model_class (torch.nn.Module): The class of the model to be loaded.
-    model_path (str): Path to the .pt file containing the state dictionary.
-    **model_kwargs: Additional keyword arguments to initialize the model.
+    model_class : nn.Module
+        The class of the model to instantiate.
+    model_path : str
+        Path to the saved state dictionary.
+    prefix_to_state_keys : str, optional
+        Prefix to prepend to state dictionary keys if needed.
+    **model_kwargs : dict
+        Additional arguments for initializing the model.
 
     Returns:
-    -------
-        torch.nn.Module: The model with loaded weights.
+    --------
+    nn.Module
+        The model instance with loaded weights.
     """
     # Initialize the model
     model = model_class(**model_kwargs)
@@ -692,7 +641,20 @@ def load_model(model_class, model_path, prefix_to_state_keys=None, **model_kwarg
     return model
 
 
-def get_ckpt_path(config):
+def get_ckpt_path(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generates and returns the path for model checkpoint storage.
+
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing model details.
+
+    Returns:
+    --------
+    Dict[str, Any]
+        Updated configuration dictionary with checkpoint path information.
+    """
     dir = MODELS_DIR / "ckpt"
     dir.mkdir(parents=True, exist_ok=True)
     if config.get("ckpt_name", None):
@@ -714,50 +676,70 @@ def get_ckpt_path(config):
     return config
 
 
-def ckpt(model, config):  #  random_num=None
+def ckpt(model: nn.Module, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Saves a model checkpoint to disk.
+
+    Parameters:
+    -----------
+    model : nn.Module
+        The model whose state should be saved.
+    config : Dict[str, Any]
+        Configuration dictionary containing checkpoint details.
+
+    Returns:
+    --------
+    Dict[str, Any]
+        Updated configuration dictionary with checkpoint path.
+    """
     ckpt_path = config.get("ckpt_path", None)
     if not ckpt_path:  # First time saving
         config = get_ckpt_path(config)
         ckpt_path = config["ckpt_path"]
     torch.save(model.state_dict(), ckpt_path)
     return config
-    #
-    # dir = MODELS_DIR / "ckpt"
-    # dir.mkdir(parents=True, exist_ok=True)
-    # if config.get("ckpt_name", None):
-    #     ckpt_name = config.get("ckpt_name")
-    # else:
-    #     ckpt_name = get_model_name(config) + f"_{random_num}" if random_num else ""
-    #
-    #     config["ckpt_name"] = ckpt_name
-    #
-    # model_path = dir / f"{ckpt_name}"
-    # i = 0
-    # while Path(model_path).exists():
-    #     ckpt_name_m = ckpt_name + f"{i}"
-    #     model_path = dir / f"{ckpt_name_m}"
-    #     i += 1
-    # torch.save(model.state_dict(), model_path)
-    #
-    # return config
 
 
-def load_ckpt(model, config):  # , ckpt_name=None
+def load_ckpt(model: nn.Module, config: Dict[str, Any]) -> nn.Module:
+    """
+    Loads a model checkpoint from disk.
+
+    Parameters:
+    -----------
+    model : nn.Module
+        The model to which weights should be loaded.
+    config : Dict[str, Any]
+        Configuration dictionary containing checkpoint path.
+
+    Returns:
+    --------
+    nn.Module
+        The model with restored weights.
+    """
     ckpt_path = config.get("ckpt_path", None)
     ckpt_name = config.get("ckpt_name", None)
     if ckpt_path:
         print(f"Loading model {ckpt_name} from {ckpt_path}")
         model.load_state_dict(torch.load(ckpt_path))
-    # if ckpt_name is None:
-    #     ckpt_name = config.get("ckpt_name", None)
-    #     # model_path = config.get("ckpt_path", None)
-    # if ckpt_name:
-    #     model_path = MODELS_DIR / "ckpt" / f"{ckpt_name}.pth"
-    #     model.load_state_dict(torch.load(model_path))
     return model
 
 
-def get_model_name(config, run=None):
+def get_model_name(config: Dict[str, Any], run: Optional[wandb.run] = None) -> str:
+    """
+    Generates a model name based on configuration settings.
+
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing model details.
+    run : wandb.run, optional
+        The W&B run object for naming the model.
+
+    Returns:
+    --------
+    str
+        The generated model name.
+    """
     if config.get("model_name", None):
         model_name = config.get("model_name")
     else:
@@ -766,7 +748,7 @@ def get_model_name(config, run=None):
         descriptor_protein = config.get("descriptor_protein", None)
         descriptor_chemical = config.get("descriptor_chemical", None)
         split_type = config.get("split_type", "random")
-        model_type = config.get("model_type", "baseline")
+        model_type = config.get("model_type", "pnn")
         multitask = config.get("MT", False)
         seed = config.get("seed", 42)
 
@@ -780,7 +762,24 @@ def get_model_name(config, run=None):
     return model_name
 
 
-def get_data_specific_path(config, logger=None):
+def get_data_specific_path(
+    config: Dict[str, Any], logger: Optional[logging.Logger] = None
+) -> Path:
+    """
+    Constructs a data-specific directory path for model storage.
+
+    Parameters:
+    -----------
+    config : Dict[str, Any]
+        Configuration dictionary containing dataset details.
+    logger : logging.Logger, optional
+        Logger instance for debugging (default: None).
+
+    Returns:
+    --------
+    Path
+        The generated directory path for storing dataset-specific results.
+    """
     if config.get("data_specific_path", None):
         return config.get("data_specific_path")
 
@@ -794,403 +793,35 @@ def get_data_specific_path(config, logger=None):
     return data_specific_path
 
 
-def calculate_means(*tensors):
+def calculate_means(*tensors: torch.Tensor) -> List[torch.Tensor]:
+    """
+    Computes the mean along the last dimension for multiple tensors.
+
+    Parameters:
+    -----------
+    tensors : torch.Tensor
+        One or more tensors to compute the mean over.
+
+    Returns:
+    --------
+    List[torch.Tensor]
+        A list containing the mean-reduced tensors.
+    """
     return [torch.mean(tensor, dim=2) for tensor in tensors]
 
 
-# def make_uct_plots(
-#     y_preds,
-#     y_std,
-#     y_true,
-#     task_name=None,
-#     n_subset=100,
-#     ylims=(-3, 3),
-#     num_stds_confidence_bound=2.0,  # Use 1.96 for 95% confidence interval for normal distribution
-#     plot_save_str="row",
-#     savefig=True,
-#     save_dir=FIGS_DIR,
-# ):
-#     """
-#     Make set of plots.
-#     Adapted from https://github.com/uncertainty-toolbox/uncertainty-toolbox/blob/main/examples/viz_readme_figures.py
-#     """
-#     if (
-#         not isinstance(y_preds, np.ndarray)
-#         or not isinstance(y_std, np.ndarray)
-#         or not isinstance(y_true, np.ndarray)
-#     ):
-#         raise ValueError("y_preds, y_std, and y_true must be numpy arrays.")
-#     task_name = str(task_name) if task_name else "PCM"
-#
-#     fig, axs = plt.subplots(1, 5, figsize=(25, 5))  # (28, 8)
-#
-#     axs[0] = uct.plot_intervals(
-#         y_preds,
-#         y_std,
-#         y_true,
-#         n_subset=n_subset,
-#         ylims=ylims,
-#         num_stds_confidence_bound=num_stds_confidence_bound,
-#         ax=axs[0],
-#     )
-#     axs[0].set_title("Prediction Intervals - {}".format(task_name))
-#     # calculate RMSE and add it to the plot left upper corner
-#     rmse = np.sqrt(np.mean((y_preds - y_true) ** 2))
-#     axs[0].text(0.05, 0.95, "RMSE: {:.2f}".format(rmse), transform=axs[0].transAxes)
-#
-#     # Make calibration plot
-#     axs[1] = uct.plot_calibration(y_preds, y_std, y_true, n_subset=n_subset, ax=axs[1])
-#     axs[1].set_title("Average Calibration - {}".format(task_name))
-#
-#     # Make adversarial group calibration plot
-#     axs[2] = uct.plot_adversarial_group_calibration(
-#         y_preds, y_std, y_true, n_subset=n_subset, ax=axs[2]
-#     )
-#     axs[2].set_title("Adversarial Group Calibration - {}".format(task_name))
-#
-#     # Make sharpness plot
-#     axs[3] = uct.plot_sharpness(y_std, n_subset=n_subset, ax=axs[3])
-#     axs[3].set_title("Sharpness - {}".format(task_name))
-#
-#     # Make residual vs stds plot
-#     axs[4] = uct.plot_residuals_vs_stds(
-#         y_preds, y_std, y_true, n_subset=n_subset, ax=axs[4]
-#     )
-#     axs[4].set_title("Residuals vs. Predictive Std - {}".format(task_name))
-#
-#     # Adjust subplots spacing
-#     fig.subplots_adjust(wspace=0.5)
-#     # Adjust the spacing between subplots
-#     plt.tight_layout()
-#
-#     # Save figure
-#     if savefig:
-#         uct.viz.save_figure(
-#             plot_save_str, ext_list=["png", "svg"], white_background=True
-#         )
-#
-#     return fig
-#
-#
-# def plot_true_vs_preds(
-#     y_preds,
-#     y_true,
-#     task_name,
-#     save_path=None,
-# ):
-#     # Sort the values based on y_true
-#     sorted_indices = np.argsort(y_true)
-#     sorted_y_true = y_true[sorted_indices]
-#     sorted_y_preds = y_preds[sorted_indices]
-#
-#     # Plot the graph
-#     fig, ax = plt.subplots()
-#     ax.plot(sorted_y_true, sorted_y_preds, "o", label="Predictions")
-#     ax.set_xlabel("True Values")
-#     ax.set_ylabel("Predicted Values")
-#     ax.set_title("True vs. Predicted Values - {}".format(task_name))
-#
-#     # Calculate the best-fitting line
-#     best_fit_coeffs = np.polyfit(sorted_y_true, sorted_y_preds, deg=1)
-#     best_fit_line = np.poly1d(best_fit_coeffs)
-#     ax.plot(
-#         sorted_y_true, best_fit_line(sorted_y_true), color="red", label="Best Fit Line"
-#     )
-#
-#     # Calculate the distances of each point to the best-fitted line
-#     distances = np.abs(best_fit_line(sorted_y_true) - sorted_y_preds)
-#     normalized_distances = distances / np.max(distances)
-#     ax.plot(sorted_y_true, sorted_y_preds, color="gray", alpha=0.2)
-#     # for i in range(len(sorted_y_true)):
-#     #     ax.plot([sorted_y_true[i], sorted_y_true[i]], [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
-#     #              color='gray', alpha=normalized_distances[i])
-#     # Plot the grey lines between dots and best fit line
-#     for i in range(len(sorted_y_true)):
-#         ax.plot(
-#             [sorted_y_true[i], sorted_y_true[i]],
-#             [sorted_y_preds[i], best_fit_line(sorted_y_true[i])],
-#             color="gray",
-#             alpha=0.2,
-#         )
-#
-#     # Calculate and display the RMSE
-#     rmse = np.sqrt(np.mean((sorted_y_preds - best_fit_line(sorted_y_true)) ** 2))
-#     # ax.text(0.05, 0.9, f'RMSE: {rmse:.2f}', transform=plt.gca().transAxes)
-#     ax.text(
-#         0.95, 0.05, f"RMSE: {rmse:.2f}", transform=ax.transAxes, ha="right", va="bottom"
-#     )
-#
-#     # Show the legend and display/save the graph
-#     ax.legend(loc="upper left")
-#
-#     if save_path is not None:
-#         fig.savefig(save_path)
-#         print(f"Saved true_vs_preds_plot to {save_path}")
-#     else:
-#         plt.show()
-#
-#     return fig
-#
-#
-# def calculate_uct_metrics(
-#     y_pred, y_std, y_true, task_name, activity, split, model_type="ensemble"
-# ):
-#     """
-#     Calculate metrics for the predictions.
-#
-#     Parameters
-#     ----------
-#     y_pred : ndarray
-#         (Mean of) Predicted values.
-#     y_std : ndarray
-#         Standard deviation of predicted values.
-#     y_true : ndarray
-#         True values.
-#     task_name : str
-#         Name of the task.
-#     activity : str
-#         Activity name.
-#     split : str
-#         Split name.
-#     model_type : str, optional
-#         Type of the model. The default is "ensemble".
-#
-#     Returns
-#     -------
-#     metrics : dict
-#         Dictionary containing calculated metrics.
-#     img     : wandb.Image
-#         Image of the UCT plot - ready for logging
-#     """
-#     metrics = get_all_metrics(
-#         y_pred=y_pred,
-#         y_std=y_std,
-#         y_true=y_true,
-#         num_bins=100,
-#         resolution=99,
-#         scaled=True,
-#         verbose=False,
-#     )
-#
-#     figures_path = os.path.join(FIGS_DIR, model_type, activity, split)
-#     os.makedirs(figures_path, exist_ok=True)
-#
-#     metrics_filepath = os.path.join(figures_path, f"{task_name}_metrics.pkl")
-#     with open(metrics_filepath, "wb") as file:
-#         pickle.dump(metrics, file)
-#
-#     fig = make_uct_plots(
-#         y_pred,
-#         y_std,
-#         y_true,
-#         task_name=task_name,
-#         n_subset=min(500, len(y_true)),
-#         ylims=None,
-#         num_stds_confidence_bound=1.96,
-#         plot_save_str=os.path.join(figures_path, f"{task_name}_uct"),
-#         savefig=True,
-#     )
-#
-#     img = wandb.Image(fig)
-#
-#     return metrics, img
-#
-#
-# class UCTMetricsTable:
-#     def __init__(self, model_type=None, config=None, multitask=False):
-#         """
-#         Initialize the UCT metrics table.
-#
-#         Returns:
-#         --------
-#         None
-#         """
-#         cols = []
-#         # self.task_name = task_name
-#         self.config = config
-#         self.model_type = model_type
-#         self.mt = multitask
-#         if model_type is not None:
-#             cols = ["Model type"]
-#         if multitask:
-#             cols.extend(["Target"])
-#         cols.extend(
-#             [
-#                 "Multi-Task",
-#                 "Activity",
-#                 "Split",
-#                 "RMSE",
-#                 "R2",
-#                 "MAE",
-#                 "MADAE",
-#                 "MARPD",
-#                 "Correlation",
-#                 "RMS Calibration",
-#                 "MA Calibration",
-#                 "Miscalibration Area",
-#                 "Sharpness",
-#                 "NLL",
-#                 "CRPS",
-#                 "Check",
-#                 "Interval",
-#                 "UCT plots",
-#             ]
-#         )
-#         self.table = wandb.Table(columns=cols)
-#
-#     def __call__(self, y_pred, y_std, y_true, task_name=None):
-#         """
-#         Calculate metrics and add them to the table.
-#
-#         Parameters
-#         ----------
-#         y_pred : ndarray
-#             (Mean of) Predicted values.
-#         y_std : ndarray
-#             Standard deviation of predicted values.
-#         y_true : ndarray
-#             True values.
-#         task_name : str, optional
-#             Name of the task. The default is None.
-#
-#         Returns
-#         -------
-#         metrics : dict
-#             Dictionary containing calculated metrics.
-#         """
-#         metrics, img = self.calculate_metrics(
-#             y_pred=y_pred, y_std=y_std, y_true=y_true, task_name=task_name
-#         )
-#         self.add_data(task_name=task_name, config=self.config, metrics=metrics, img=img)
-#
-#         return metrics
-#
-#     def calculate_metrics(self, y_pred, y_std, y_true, task_name=None):
-#         metrics, img = calculate_uct_metrics(
-#             y_pred=y_pred,
-#             y_std=y_std,
-#             y_true=y_true,
-#             task_name=task_name,
-#             activity=self.config.activity,
-#             split=self.config.split,
-#             model_type=self.model_type,
-#         )
-#         return metrics, img
-#
-#     def add_data(self, task_name, config, metrics, img):
-#         """
-#         Add data to the UCT metrics table.
-#
-#         Parameters
-#         ----------
-#         task_name : str
-#             Name of the task.
-#         config : wandb.config
-#             Configuration object.
-#         metrics : dict
-#             Dictionary containing calculated metrics.
-#         img : wandb.Image
-#             Image of the UCT plot.
-#
-#         Returns
-#         -------
-#         None
-#         """
-#         vals = [self.model_type] if self.model_type is not None else []
-#         vals.extend(
-#             [
-#                 task_name,
-#                 config.activity,
-#                 config.split,
-#                 metrics["accuracy"]["rmse"],
-#                 metrics["accuracy"]["r2"],
-#                 metrics["accuracy"]["mae"],
-#                 metrics["accuracy"]["mdae"],
-#                 metrics["accuracy"]["marpd"],
-#                 metrics["accuracy"]["corr"],
-#                 metrics["avg_calibration"]["rms_cal"],
-#                 metrics["avg_calibration"]["ma_cal"],
-#                 metrics["avg_calibration"]["miscal_area"],
-#                 metrics["sharpness"]["sharp"],
-#                 metrics["scoring_rule"]["nll"],
-#                 metrics["scoring_rule"]["crps"],
-#                 metrics["scoring_rule"]["check"],
-#                 metrics["scoring_rule"]["interval"],
-#                 img,
-#             ]
-#         )
-#
-#         self.table.add_data(*vals)
-#         plt.close()
-#
-#     def wandb_log(self):
-#         """
-#         Export the UCT metrics table to wandb.
-#         """
-#         wandb.log({f"UCT Metrics Table {self.model_type}": self.table})
-#
-#
-# def uct_metrics_logger(uct_metrics_table, task_name, config, metrics, img):
-#     """
-#     Log UCT metrics to the UCT metrics table.
-#
-#     Parameters
-#     ----------
-#     uct_metrics_table : UCTMetricsTable
-#         UCT metrics table object for logging.
-#     task_name : str
-#         Name of the task.
-#     config : wandb.config
-#         Configuration object.
-#     metrics : dict
-#         Dictionary containing calculated metrics.
-#     img : wandb.Image
-#         Image of the UCT plot.
-#
-#     Returns
-#     -------
-#     None
-#     """
-#     uct_metrics_table.add_data(
-#         task_name,
-#         config,
-#         metrics,
-#         img,
-#     )
-#     plt.close()
-#
-#
-# def log_mol_table(smiles, inputs, targets, outputs, targets_names):
-#     # targets_cols = targets.columns()
-#     # table_cols = ['smiles', 'mol', 'mol_2D', 'ECFP', 'fp_length']
-#     # for t in targets_cols:
-#     #     table_cols.append(f'{t}_label')
-#     #     table_cols.append(f'{t}_predicted')
-#     # table = wandb.Table(columns=table_cols)
-#     # with wandb.init(dir=wandb_dir, mode=wandb_mode):
-#     data = []
-#     for smi, inp, tar, out in zip(
-#         smiles, inputs.to("cpu"), targets.to("cpu"), outputs.to("cpu")
-#     ):
-#         row = {
-#             "smiles": smi,
-#             "molecule": wandb.Molecule.from_smiles(smi),
-#             "molecule_2D": wandb.Image(smi_to_pil_image(smi)),
-#             "ECFP": inp,
-#             "fp_length": len(inp),
-#         }
-#
-#         # Iterate over each pair of output and target
-#         for targetName, target, output in zip(targets_names, tar, out):
-#             row[f"{targetName}_label"] = target.item()
-#             row[f"{targetName}_predicted"] = output.item()
-#
-#         data.append(row)
-#
-#     dataframe = pd.DataFrame.from_records(data)
-#     table = wandb.Table(dataframe=dataframe)
-#     wandb.log({"mols_table": table}, commit=False)
-#
-#
-# def postmodel_metrics():
-#     raise NotImplementedError
+def stack_vars(*tensors: List[torch.Tensor]) -> List[torch.Tensor]:
+    """
+    Stacks multiple tensors along the last dimension.
+
+    Parameters:
+    -----------
+    tensors : torch.Tensor
+        One or more tensors to stack.
+
+    Returns:
+    --------
+    List[torch.Tensor]
+        A list containing the stacked tensors.
+    """
+    return [torch.stack(tensor, dim=2) for tensor in tensors]

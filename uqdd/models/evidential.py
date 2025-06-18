@@ -1,12 +1,15 @@
+import logging
+
 import wandb
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 import torch.nn.functional as F
 from tqdm import tqdm
 
 from uqdd import DEVICE
-from uqdd.models.baseline import BaselineDNN
+from uqdd.models.pnn import PNN
+from uqdd.models.loss import nig_nll
 from uqdd.utils import create_logger
 
 from uqdd.models.utils_train import (
@@ -21,48 +24,406 @@ from uqdd.models.utils_models import (
     get_sweep_config,
 )
 
+from typing import Tuple, Optional
 
-def ev_predict(model, dataloader, device=DEVICE, set_on_eval=True):
+
+def ev_uncertainty(v: Tensor, alpha: Tensor, beta: Tensor) -> Tuple[Tensor, Tensor]:
+    """
+    Computes the aleatoric and epistemic uncertainties from the Normal Inverse Gamma (NIG) distribution.
+
+    Parameters
+    ----------
+    v : Tensor
+        Variance parameter.
+    alpha : Tensor
+        Shape parameter.
+    beta : Tensor
+        Scale parameter.
+
+    Returns
+    -------
+    Tuple[Tensor, Tensor]
+        Aleatoric and epistemic uncertainties.
+    """
+    alea_vars = beta / (alpha - 1)  # aleatoric
+    epist_var = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
+
+    return alea_vars, epist_var
+
+
+def ev_predict_params(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device = DEVICE,
+    set_on_eval: bool = True,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """
+    Performs evidential prediction using the provided model and dataloader.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The trained evidential deep learning model.
+    dataloader : torch.utils.data.DataLoader
+        The dataloader containing the test dataset.
+    device : torch.device, optional
+        The device to run inference on, by default the available CUDA device or CPU.
+    set_on_eval : bool, optional
+        Whether to set the model in evaluation mode, by default True.
+
+    Returns
+    -------
+        Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+        - mu
+        - v
+        - alpha
+        - beta
+        - Targets
+    """
     if set_on_eval:
         model.eval()
-    outputs_all, targets_all = [], []
-    alea_all, epistemic_all = [], []
+
+    mus, vs, alphas, betas, targets_all = [], [], [], [], []
+
     with torch.no_grad():
         for inputs, targets in tqdm(
             dataloader, total=len(dataloader), desc="Evidential prediction"
         ):
             inputs = tuple(x.to(device) for x in inputs)
-            outputs = model(inputs)  # , alea_vars
+            outputs = model(inputs)
 
-            mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
-            alea_vars = beta / (alpha - 1)  # aleatoric
-            epist_var = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
-            outputs = mu
+            mu, v, alpha, beta = outputs
 
-            outputs_all.append(outputs)
+            mus.append(mu)
+            vs.append(v)
+            alphas.append(alpha)
+            betas.append(beta)
             targets_all.append(targets)
-            alea_all.append(alea_vars)
-            epistemic_all.append(epist_var)
 
-    outputs_all = torch.cat(outputs_all, dim=0)
-    targets_all = torch.cat(targets_all, dim=0)
-    alea_all = torch.cat(alea_all, dim=0)
-    epistemic_all = torch.cat(epistemic_all, dim=0)
+        mus, vs, alphas, betas, targets_all = (
+            torch.cat(mus, dim=0),
+            torch.cat(vs, dim=0),
+            torch.cat(alphas, dim=0),
+            torch.cat(betas, dim=0),
+            torch.cat(targets_all, dim=0),
+        )
+        return mus, vs, alphas, betas, targets_all
 
-    return outputs_all, targets_all, alea_all, epistemic_all
+
+def ev_predict(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device = DEVICE,
+    set_on_eval: bool = True,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Performs evidential prediction using the provided model and dataloader.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The trained evidential deep learning model.
+    dataloader : torch.utils.data.DataLoader
+        The dataloader containing the test dataset.
+    device : torch.device, optional
+    set_on_eval: bool, optional
+        Whether to set the model in evaluation mode, by default True.
+
+    Returns
+    -------
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        Model outputs, targets, aleatoric uncertainties, and epistemic uncertainties.
+    """
+    mus, vs, alphas, betas, targets_all = ev_predict_params(
+        model, dataloader, device, set_on_eval
+    )
+    alea_vars, epist_var = ev_uncertainty(vs, alphas, betas)
+    return mus, targets_all, alea_vars, epist_var
 
 
-# Adopted from https://github.com/teddykoker/evidential-learning-pytorch
+def ev_nll(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device = DEVICE,
+) -> float:
+    """
+    Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
+
+    Parameters:
+    -----------
+    model : nn.Module
+        The trained evidential deep learning model.
+    dataloader: torch.utils.data.DataLoader
+        The dataloader containing the test dataset.
+    device: torch.device, optional
+        The device to run inference on, by default DEVICE.
+
+    Returns:
+    -------
+    float
+        The negative log-likelihood (NLL) of the NIG distribution
+    """
+    mus, vs, alphas, betas, targets_all = ev_predict_params(model, dataloader, device)
+    nll = nig_nll(mus, vs, alphas, betas, targets_all).item()
+    return nll
+
+    # if return_params:
+    #
+    # else:
+    #     alea_vars, epist_var = ev_uncertainty(vs, alphas, betas)
+    #     return mus, targets_all, alea_vars, epist_var
+
+    #         if return_params:
+    #             mus.append(mu)
+    #             vs.append(v)
+    #             alphas.append(alpha)
+    #             betas.append(beta)
+    #             targets_all.append(targets)
+    #         else:
+    #             alea_vars, epist_var = ev_uncertainty(mu, v, alpha, beta)
+    #             outputs_all.append(mu)
+    #             targets_all.append(targets)
+    #             alea_all.append(alea_vars)
+    #             epistemic_all.append(epist_var)
+    #
+    # if return_params:
+    #     return (
+    #         torch.cat(mus, dim=0),
+    #         torch.cat(vs, dim=0),
+    #         torch.cat(alphas, dim=0),
+    #         torch.cat(betas, dim=0),
+    #         torch.cat(targets_all, dim=0),
+    #     )
+    # else:
+    #     alea_vars, epist_var = ev_uncertainty(mu, v, alpha, beta)
+    #     return (
+    #         torch.cat(outputs_all, dim=0),
+    #         torch.cat(targets_all, dim=0),
+    #         torch.cat(alea_all, dim=0),
+    #         torch.cat(epistemic_all, dim=0),
+    #     )
+
+
+# def ev_predict(
+#     model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     device: torch.device = DEVICE,
+#     set_on_eval: bool = True,
+#     return_params: bool = False,
+# ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+#     """
+#     Performs evidential prediction using the provided model and dataloader.
+#
+#     Parameters
+#     ----------
+#     model : nn.Module
+#         The trained evidential deep learning model.
+#     dataloader : torch.utils.data.DataLoader
+#         The dataloader containing the test dataset.
+#     device : torch.device, optional
+#         The device to run inference on, by default DEVICE.
+#     set_on_eval : bool, optional
+#         Whether to set the model in evaluation mode, by default True.
+#
+#     Returns
+#     -------
+#     Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+#         Model outputs, targets, aleatoric uncertainties, and epistemic uncertainties.
+#     """
+#     if set_on_eval:
+#         model.eval()
+#     outputs_all, targets_all = [], []
+#     alea_all, epistemic_all = [], []
+#
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#             dataloader, total=len(dataloader), desc="Evidential prediction"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             outputs = model(inputs)  # , alea_vars
+#
+#             mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+#
+#             alea_vars, epist_var = ev_uncertainty(mu, v, alpha, beta)
+#             outputs = mu
+#
+#             outputs_all.append(outputs)
+#             targets_all.append(targets)
+#             alea_all.append(alea_vars)
+#             epistemic_all.append(epist_var)
+#
+#     outputs_all = torch.cat(outputs_all, dim=0)
+#     targets_all = torch.cat(targets_all, dim=0)
+#     alea_all = torch.cat(alea_all, dim=0)
+#     epistemic_all = torch.cat(epistemic_all, dim=0)
+#
+#     return outputs_all, targets_all, alea_all, epistemic_all
+
+
+# def ev_predict_params(
+#     model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     device: torch.device = DEVICE,
+#     set_on_eval: bool = True,
+# ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+#     """
+#     Performs evidential prediction using the provided model and dataloader.
+#
+#     Parameters
+#     ----------
+#     model : nn.Module
+#         The trained evidential deep learning model.
+#     dataloader : torch.utils.data.DataLoader
+#         The dataloader containing the test dataset.
+#     device : torch.device, optional
+#         The device to run inference on, by default DEVICE.
+#     set_on_eval : bool, optional
+#         Whether to set the model in evaluation mode, by default True.
+#
+#     Returns
+#     -------
+#     Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+#         Evidential Model parameters (mu, v, alpha, beta).
+#     """
+#     if set_on_eval:
+#         model.eval()
+#     mus, vs, alphas, betas, all_targets = [], [], [], [], []
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#             dataloader, total=len(dataloader), desc="Evidential prediction"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             outputs = model(inputs)  # , alea_vars
+#
+#             mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+#
+#             mus.append(mu)
+#             vs.append(v)
+#             alphas.append(alpha)
+#             betas.append(beta)
+#             all_targets.append(targets)
+#
+#     mus = torch.cat(mus, dim=0)
+#     vs = torch.cat(vs, dim=0)
+#     alphas = torch.cat(alphas, dim=0)
+#     betas = torch.cat(betas, dim=0)
+#     all_targets = torch.cat(all_targets, dim=0)
+#
+#     return mus, vs, alphas, betas, all_targets
+
+#
+# def ev_predict_params_nll(
+#     model: nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     device: torch.device = DEVICE,
+#     set_on_eval: bool = True,
+# ) -> torch.Tensor:
+#     """
+#     Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
+#
+#     Parameters
+#     ----------
+#     model : nn.Module
+#         The trained evidential deep learning model.
+#     dataloader: torch.utils.data.DataLoader
+#         The dataloader containing the test dataset.
+#     device: torch.device, optional
+#         The device to run inference on, by default DEVICE.
+#     set_on_eval: bool, optional
+#         Whether to set the model in evaluation mode, by default True.
+#
+#     Returns
+#     -------
+#
+#     """
+#     if set_on_eval:
+#         model.eval()
+#     test_nll = 0.0
+#     # mus, vs, alphas, betas = [], [], [], []
+#     # all_targets = []
+#     with torch.no_grad():
+#         for inputs, targets in tqdm(
+#             dataloader, total=len(dataloader), desc="Evidential prediction"
+#         ):
+#             inputs = tuple(x.to(device) for x in inputs)
+#             outputs = model(inputs)  # , alea_vars
+#
+#             mu, v, alpha, beta = outputs  # (d.squeeze() for d in outputs)
+#
+#             nll = nig_nll(
+#                 mu, v, alpha, beta, targets
+#             )  # TODO: we need to average in eoe here - eoe is already averaged in forward
+#             test_nll += nll.item()
+#             # mus.append(mu)
+#             # vs.append(v)
+#             # alphas.append(alpha)
+#             # betas.append(beta)
+#             # all_targets.append(targets)
+#     test_nll /= len(dataloader)
+#
+#     return test_nll
+#     # mus = torch.cat(mus, dim=0)
+#     # vs = torch.cat(vs, dim=0)
+#     # alphas = torch.cat(alphas, dim=0)
+#     # betas = torch.cat(betas, dim=0)
+#     # all_targets = torch.cat(all_targets, dim=0)
+#
+#     # return mus.cpu(), vs.cpu(), alphas.cpu(), betas.cpu(), all_targets.cpu()
+
+
+# Adopted and Modified from https://github.com/teddykoker/evidential-learning-pytorch
 class NormalInvGamma(nn.Module):
-    def __init__(self, in_features, out_units):
+    """
+    Normal Inverse Gamma layer for evidential regression.
+
+    Parameters
+    ----------
+    in_features : int
+        Number of input features.
+    out_units : int
+        Number of output units.
+    """
+
+    def __init__(self, in_features: int, out_units: int) -> None:
         super().__init__()
         self.dense = nn.Linear(in_features, out_units * 4)
         self.out_units = out_units
 
-    def evidence(self, x, eps=1e-2):
+    @staticmethod
+    def evidence(x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
+        """
+        Computes evidence using softplus activation.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+        eps : float, optional
+            Small epsilon to ensure numerical stability, by default 1e-2.
+
+        Returns
+        -------
+        torch.Tensor
+            Transformed evidence.
+        """
         return F.softplus(x) + eps
 
-    def forward(self, x):
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Forward pass of the Normal Inverse Gamma layer.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Predicted mean, variance, shape, and scale parameters.
+        """
         out = self.dense(x)
         mu, logv, logalpha, logbeta = torch.split(out, self.out_units, dim=-1)
         v = self.evidence(logv)
@@ -73,27 +434,78 @@ class NormalInvGamma(nn.Module):
 
 
 class Dirichlet(nn.Module):
+    """
+    Dirichlet layer for evidential classification.
+
+    Parameters
+    ----------
+    in_features : int
+        Number of input features.
+    out_units : int
+        Number of output units.
+    """
+
     def __init__(self, in_features, out_units):
         super().__init__()
         self.dense = nn.Linear(in_features, out_units)
         self.out_units = int(out_units)
 
-    def evidence(self, x, eps=1e-2):
+    @staticmethod
+    def evidence(x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
+        """
+        Computes evidence using softplus activation.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+        eps : float, optional
+            Small epsilon to ensure numerical stability, by default 1e-2.
+
+        Returns
+        -------
+        torch.Tensor
+            Transformed evidence.
+        """
         return F.softplus(x) + eps
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the Dirichlet layer.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Dirichlet concentration parameters.
+        """
         out = self.dense(x)
         alpha = self.evidence(out) + 1
         return alpha
 
 
-class EvidentialDNN(BaselineDNN):
+class EvidentialDNN(PNN):
+    """
+    Evidential Deep Neural Network (DNN) for regression and classification.
+
+    Parameters
+    ----------
+    config : dict, optional
+        Configuration dictionary.
+    logger : logging.Logger, optional
+        Logger instance.
+    """
+
     def __init__(
         self,
-        config=None,
-        logger=None,
+        config: Optional[dict] = None,
+        logger: Optional[logging.Logger] = None,
         **kwargs,
-    ):
+    ) -> None:
         super(EvidentialDNN, self).__init__(
             config,
             logger,
@@ -105,9 +517,6 @@ class EvidentialDNN(BaselineDNN):
             self.output_layer = NormalInvGamma(
                 self.config["regressor_layers"][-1], self.output_dim
             )
-            # self.regressor_or_classifier[-1] = NormalInvGamma(
-            #     self.config["regressor_layers"][-1], self.output_dim
-            # )
         elif self.task_type == "classification":
             self.output_layer = Dirichlet(
                 self.config["regressor_layers"][-1], self.output_dim
@@ -116,9 +525,23 @@ class EvidentialDNN(BaselineDNN):
             raise ValueError(f"Unknown task_type: {self.task_type}")
 
         self.apply(self.init_wt)
-        # reinitiating wts to include the new layers in the model initialization.
 
-    def forward(self, inputs):
+    def forward(
+        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+    ) -> Tuple[torch.Tensor, ...]:
+        """
+        Forward pass of the EvidentialDNN model.
+
+        Parameters
+        ----------
+        inputs : Tuple[torch.Tensor, torch.Tensor]
+            Tuple containing protein and chemical input tensors.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, ...]
+            Model output containing either Normal Inverse Gamma or Dirichlet parameters.
+        """
         prot_input, chem_input = inputs
         chem_features = self.chem_feature_extractor(chem_input)
         if not self.MT:
@@ -133,28 +556,22 @@ class EvidentialDNN(BaselineDNN):
         return output
 
 
-def run_evidential(config=None):
-    # if config is None:
-    #     config = get_model_config("evidential")
-    # task_type = config.get("task_type", "regression")
-    # loss = config.get("loss", "evidential_regression")
-    # # Enforce loss type : # We have to stop this for the sweeper :(
-    # if task_type == "regression" and loss != "evidential_regression":
-    #     raise ValueError(f"Evidential regression loss should be evidence regression")
-    # elif task_type == "classification" and loss != "evidential_classification":
-    #     raise ValueError(
-    #         f"Evidential classification loss should be evidence classification"
-    #     )
+def run_evidential(
+    config: Optional[dict] = None,
+) -> Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]:
+    """
+    Trains and evaluates an Evidential Deep Neural Network.
 
-    # Temporary turning off aleatoric for training
-    # aleat_ = config.get("aleatoric", False)
-    # config["aleatoric"] = False
-    # print("BEFORE")
-    # skeys = wandb.run.summary.keys()
-    # for sk in skeys:
-    #     print(f"{sk}: {wandb.run.summary[sk]}")
-    # best_model, dataloaders, config, logger, _ = train_model_e2e(
-    # device = config.get("device", DEVICE)
+    Parameters
+    ----------
+    config : dict, optional
+        Configuration dictionary, by default None.
+
+    Returns
+    -------
+    Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]
+        The trained model, recalibration model, evaluation metrics, and plots.
+    """
     device = DEVICE
     best_model, config, _, _ = train_model_e2e(
         config,
@@ -163,10 +580,6 @@ def run_evidential(config=None):
         logger=LOGGER,
         device=device,
     )
-    # print("AFTER")
-    # skeys = wandb.run.summary.keys()
-    # for sk in skeys:
-    #     print(f"{sk}: {wandb.run.summary[sk]}")
 
     sweep = config.get("sweep", False)
 
@@ -176,6 +589,7 @@ def run_evidential(config=None):
         preds, labels, alea_vars, epi_vars = ev_predict(
             best_model, dataloaders["test"], device=device
         )
+        nll = ev_nll(best_model, dataloaders["test"], device=device)
         # Then comes the predict metrics part
         metrics, plots, uct_logger = evaluate_predictions(
             config,
@@ -186,11 +600,14 @@ def run_evidential(config=None):
             logger=LOGGER,
             epi_vars=epi_vars,
             wandb_push=False,
+            nll=nll,
         )
         # RECALIBRATION
         preds_val, labels_val, alea_vars_val, epi_vars_vals = ev_predict(
-            best_model, dataloaders["val"], device=DEVICE
+            best_model, dataloaders["val"], device=device
         )
+        nll = ev_nll(best_model, dataloaders["val"], device=device)
+
         iso_recal_model = recalibrate_model(
             preds_val,
             labels_val,
@@ -202,6 +619,7 @@ def run_evidential(config=None):
             epi_val=epi_vars_vals,
             epi_test=epi_vars,
             uct_logger=uct_logger,
+            nll=nll,
         )
         uct_logger.wandb_log()
     else:
@@ -210,16 +628,21 @@ def run_evidential(config=None):
     # wandb.finish()
     return best_model, iso_recal_model, metrics, plots
 
-    #
-    # # TODO:
-    # # here we should specify the loss function according to the task_type,
-    # # we dont need the config in this one we need to force it.
-    # if
-    #
-    # raise NotImplementedError("This function is not implemented yet.")
-
 
 def run_evidential_wrapper(**kwargs):
+    """
+    Wrapper function for running Evidential Deep Learning.
+
+    Parameters
+    ----------
+    kwargs : dict
+        Additional configuration parameters.
+
+    Returns
+    -------
+    Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]
+        The trained model, recalibration model, evaluation metrics, and plots.
+    """
     global LOGGER
     LOGGER = create_logger(name="evidential", file_level="debug", stream_level="info")
     config = get_model_config(model_type="evidential", **kwargs)
@@ -227,6 +650,14 @@ def run_evidential_wrapper(**kwargs):
 
 
 def run_evidential_hyperparam(**kwargs):
+    """
+    Runs hyperparameter optimization for Evidential Deep Learning using Weights & Biases sweeps.
+
+    Parameters
+    ----------
+    kwargs: dict
+        Hyperparameter configuration options.
+    """
     global LOGGER
     LOGGER = create_logger(
         name="evidential-sweep", file_level="debug", stream_level="info"
@@ -250,7 +681,7 @@ def run_evidential_hyperparam(**kwargs):
 #         data_name="papyrus",
 #         n_targets=-1,
 #         task_type="regression",
-#         activity_type="xc50",
+#         activity_type="kx",
 #         split_type="random",
 #         descriptor_protein="ankh-large",
 #         descriptor_chemical="ecfp2048",
@@ -277,189 +708,3 @@ def run_evidential_hyperparam(**kwargs):
 #         seed=50,
 #     )
 #     print("Done")
-# def main():
-#     parser = argparse.ArgumentParser(description="Run Ensemble Model")
-#     parser.add_argument(
-#         "--aleatoric",
-#         type=bool,
-#         default=True,
-#         help="Aleatoric inference"
-#     )
-#     # parser.add_argument(
-#     #     "--ensemble_size",
-#     #     type=int,
-#     #     default=100,
-#     #     help="Size of the ensemble",
-#     # )
-#     parser.add_argument(
-#         "--data_name",
-#         type=str,
-#         default="papyrus",
-#         choices=["papyrus", "tdc", "other"],
-#         help="Data name argument",
-#     )
-#     parser.add_argument(
-#         "--activity_type",
-#         type=str,
-#         default="xc50",
-#         choices=["xc50", "kx"],
-#         help="Activity argument",
-#     )
-#     parser.add_argument(
-#         "--n_targets",
-#         type=int,
-#         default=-1,
-#         help="Number of targets argument (default=-1 for all targets)",
-#     )
-#     parser.add_argument(
-#         "--descriptor_protein",
-#         type=str,
-#         default="ankh-base",
-#         choices=[
-#             None,
-#             "ankh-base",
-#             "ankh-large",
-#             "unirep",
-#             "protbert",
-#             "protbert_bfd",
-#             "esm1_t34",
-#             "esm1_t12",
-#             "esm1_t6",
-#             "esm1b",
-#             "esm_msa1",
-#             "esm_msa1b",
-#             "esm1v",
-#         ],
-#         help="Protein descriptor argument",
-#     )
-#     parser.add_argument(
-#         "--descriptor_chemical",
-#         type=str,
-#         default="ecfp2048",
-#         choices=[
-#             "ecfp1024",
-#             "ecfp2048",
-#             "mold2",
-#             "mordred",
-#             "cddd",
-#             "fingerprint",  # "moldesc"
-#         ],
-#         help="Chemical descriptor argument",
-#     )
-#     parser.add_argument(
-#         "--median_scaling",
-#         action="store_true",
-#         help="Use median scaling",
-#     )
-#     parser.add_argument(
-#         "--split_type",
-#         type=str,
-#         default="random",
-#         choices=["random", "scaffold", "time", "scaffold_cluster"],
-#         help="Split argument",
-#     )
-#     parser.add_argument(
-#         "--ext",
-#         type=str,
-#         default="pkl",
-#         choices=["pkl", "parquet", "csv", "feather"],
-#         help="File extension argument",
-#     )
-#     parser.add_argument(
-#         "--task_type",
-#         type=str,
-#         default="regression",
-#         choices=["regression", "classification"],
-#         help="Task type argument",
-#     )
-#     parser.add_argument(
-#         "--wandb-project-name",
-#         type=str,
-#         default="ensemble-test",
-#         help="Wandb project name argument",
-#     )
-#     parser.add_argument(
-#         "--sweep-count",
-#         type=int,
-#         default=None,
-#         help="Sweep count argument",
-#     )
-#     # take chem layers as list input
-#     parser.add_argument(
-#         "--chem_layers",
-#         type=parse_list,
-#         default=None,
-#         help="Chem layers sizes",
-#     )
-#     parser.add_argument(
-#         "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
-#     )
-#     parser.add_argument(
-#         "--regressor_layers",
-#         type=parse_list,
-#         default=None,
-#         help="Regressor layers sizes",
-#     )
-#     parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
-#     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
-#     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
-#     parser.add_argument(
-#         "--early_stop", type=int, default=None, help="Early stopping patience"
-#     )
-#     parser.add_argument("--loss", type=str, default=None, help="Loss function")
-#     parser.add_argument(
-#         "--loss_reduction", type=str, default=None, help="Loss reduction method"
-#     )
-#     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer")
-#     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
-#     parser.add_argument(
-#         "--weight_decay", type=float, default=None, help="Weight decay rate"
-#     )
-#     parser.add_argument(
-#         "--lr_scheduler", type=str, default=None, help="LR scheduler type"
-#     )
-#     parser.add_argument(
-#         "--lr_scheduler_patience", type=int, default=None, help="LR scheduler patience"
-#     )
-#     parser.add_argument(
-#         "--lr_scheduler_factor", type=float, default=None, help="LR scheduler factor"
-#     )
-#     parser.add_argument(
-#         "--max_norm", type=float, default=None, help="Max norm for gradient clipping"
-#     )
-#
-#     args = parser.parse_args()
-#     # Construct kwargs, excluding arguments that were not provided
-#     kwargs = {k: v for k, v in vars(args).items() if v is not None}
-#
-#     sweep_count = args.sweep_count # TODO no sweep for now
-#     # if sweep_count is not None and sweep_count > 0:
-#     run_evidential_wrapper(
-#         **kwargs,
-#     )
-#     # else:
-#     #     run_ensemble_wrapper(
-#     #         **kwargs,
-#     #     )
-#
-#     # raise NotImplementedError
-#
-#
-# if __name__ == "__main__":
-#     main()
-# run_evidential_wrapper(
-#     data_name="papyrus",
-#     n_targets=-1,
-#     task_type="regression",
-#     activity_type="xc50",
-#     split_type="random",
-#     descriptor_protein="ankh-base",
-#     descriptor_chemical="ecfp2048",
-#     median_scaling=False,
-#     ext="pkl",
-#     wandb_project_name="test-evidential",
-#     # sweep_count = 0  # 250
-#     # aleatoric = True
-#     # epochs=1
-# )
-# main()
