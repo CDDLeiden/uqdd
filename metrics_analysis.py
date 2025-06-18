@@ -9,6 +9,8 @@ import numpy as np
 import shutil
 
 import seaborn as sns
+
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
@@ -18,6 +20,11 @@ import matplotlib.gridspec as gridspec
 
 from sklearn.metrics import mean_squared_error, auc
 
+# mpl.rcParams.update({"font.family": "sans-serif", "font.size": 7})
+#
+import scienceplots
+
+plt.style.use(["science", "no-latex", "nature"])
 
 # DESCRIPTORS
 descriptor_protein = "ankh-large"
@@ -635,6 +642,7 @@ def plot_metrics(
     total_height = plot_height + 2  # Extra space for x-axis labels
 
     fig = plt.figure(figsize=(total_width, total_height))
+    # fig = plt.figure()
     gs = gridspec.GridSpec(
         1, 1, figure=fig, left=0.1, right=0.75, top=0.9, bottom=0.2
     )  # Main plot area
@@ -855,6 +863,7 @@ def plot_comparison_metrics(
     total_height = plot_height + 2  # Extra space for x-axis labels
 
     fig = plt.figure(figsize=(total_width, total_height))
+    # fig = plt.figure()
     gs = gridspec.GridSpec(
         1, 1, figure=fig, left=0.1, right=0.75, top=0.9, bottom=0.15
     )  # Main plot area
@@ -1167,6 +1176,7 @@ def plot_calibration_data(
     total_height = plot_height + 2  # Extra space for x-axis labels
 
     fig = plt.figure(figsize=(total_width, total_height))
+    # fig = plt.figure()
     gs = gridspec.GridSpec(
         1, 1, figure=fig, left=0.15, right=0.75, top=0.9, bottom=0.15
     )  # Main plot area
@@ -1483,6 +1493,7 @@ def plot_rmse_rejection_curves(
     total_height = plot_height + 2  # Space for x-axis labels
 
     fig = plt.figure(figsize=(total_width, total_height))
+    # fig = plt.figure()
     gs = gridspec.GridSpec(
         1, 1, figure=fig, left=0.15, right=0.75, top=0.9, bottom=0.15
     )  # Define space for the main plot
@@ -1736,6 +1747,7 @@ def plot_auc_comparison(
 
     # **Create the figure with fixed plot box dimensions**
     fig = plt.figure(figsize=(total_width, total_height))
+    # fig = plt.figure()
     gs = gridspec.GridSpec(
         1, 1, figure=fig, left=0.15, right=0.75, top=0.9, bottom=0.15
     )  # Define space for the main plot
