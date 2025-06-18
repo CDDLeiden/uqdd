@@ -68,8 +68,10 @@ def create_logger(
     file_level = levels.get(file_level.lower(), logging.DEBUG)
     stream_level = levels.get(stream_level.lower(), logging.INFO)
     # Set root logger to the lowest level between file_level and stream_level
-    logging.getLogger().setLevel(stream_level)
+    # to capture all messages intended for its handlers.
+    # logging.getLogger().setLevel(stream_level)
     log = logging.getLogger(name)
+    log.setLevel(min(file_level, stream_level))
 
     formatter = logging.Formatter(
         fmt="%(asctime)s:%(levelname)s:%(name)s:%(message)s:%(relativeCreated)d",
@@ -194,15 +196,15 @@ def check_na(
 
     Example:
     --------
-    # >>> df = pd.DataFrame({'A': [1, 2, np.nan], 'B': [np.nan, 4, 5], 'C': [7, 8, 9]})
-    # >>> df_clean, df_nan = check_na(df, cols=['A', 'B'], nan_dup_source='original')
-    # >>> print(df_clean)
-       A    B  C
-    0  1.0  4.0  7
-    1  2.0  5.0  8
-    # >>> print(df_nan)
-         A   B  C nan_dup_source
-    0  NaN NaN  9       original
+    >>> df = pd.DataFrame({'A': [1, 2, np.nan], 'B': [np.nan, 4, 5], 'C': [7, 8, 9]})
+    >>> df_clean, df_nan = check_na(df, cols=['A', 'B'], nan_dup_source='original')
+    >>> print(df_clean)
+    #    A    B  C
+    # 1  2.0  4.0  8
+    >>> print(df_nan)
+    #      A    B  C nan_dup_source
+    # 0  1.0  NaN  7       original
+    # 2  NaN  5.0  9       original
     """
     if not isinstance(cols, list):
         cols = [cols]
@@ -276,15 +278,15 @@ def check_duplicates(
 
     Example:
     --------
-    # >>> df = pd.DataFrame({'A': [1, 2, 2], 'B': [4, 5, 4], 'C': [7, 8, 9]})
-    # >>> df_clean, df_dup = check_duplicates(df, cols=['A', 'B'], keep='last')
-    # >>> print(df_clean)
-       A  B  C
-    0  1  4  7
-    2  2  4  9
-    # >>> print(df_dup)
-       A  B  C
-    1  2  5  8
+    >>> df = pd.DataFrame({'A': [1, 2, 2], 'B': [4, 5, 4], 'C': [7, 8, 9]})
+    >>> df_clean, df_dup = check_duplicates(df, cols=['A', 'B'], keep='last', nan_dup_source='original')
+    >>> print(df_clean)
+    #    A  B  C
+    # 0  1  4  7
+    # 2  2  4  9
+    >>> print(df_dup)
+    #    A  B  C nan_dup_source
+    # 1  2  5  8       original
     """
     if not isinstance(cols, list):
         cols = [cols]
