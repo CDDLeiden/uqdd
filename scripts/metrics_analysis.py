@@ -1928,6 +1928,7 @@ if __name__ == "__main__":
 
     data_specific_path = f"{data_name}/{activity_type}/{type_n_targets}"
 
+    # TODO: Change the following file paths with yours:
     file_1 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_ensemble_mcdp_{activity_type}/metrics.csv"
     file_2 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_evidential_{activity_type}/metrics.csv"
     file_3 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_pnn_{activity_type}/metrics.csv"
