@@ -26,12 +26,15 @@
         <a href="#usage">Usage</a>
         <ul>
             <li><a href="#dataprocessing">Data Processing</a></li>
+            <li><a href="#model-architectures">Model Architectures</a></li>
             <li><a href="#models">Models</a></li>
         </ul>
     </li>
+    <li><a href="#results">Results</a></li>
     <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
     <li><a href="#acknowledgments">Acknowledgments</a></li>
+    <li><a href="#contributing">Contributing</a></li>
     <li><a href="#citation">Citation</a></li>
 
   </ol>
@@ -99,6 +102,9 @@ As an example to use `data_papyrus.py`:
 ```shell
 python uqdd/data/data_papyrus.py --activity xc50 --descriptor-protein ankh-large --descriptor-chemical ecfp2048 --split-type time --n-targets -1 --file-ext pkl --sanitize --verbose
 ```
+
+### Model Architectures
+![Overview of UQ Model Architectures](images/01_uq_models.png)
 
 ### Models
 The package provides several scripts to train and test different models. The main entry point is the `model_parser.py` script, which allows you to specify various options for data, model, and training configuration.
@@ -175,7 +181,12 @@ python uqdd/models/model_parser.py --model emc --num_mc_samples 100 --data_name 
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+<!-- RESULTS -->
+## Results
+![xC50 Results Barplot](images/03_xc50_barplot_tab10_r.png)
+![Kx Results Barplot](images/03_kx_barplot_tab10_r.png)
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- LICENSE -->
 ## License
@@ -215,3 +226,12 @@ If you find this work useful, please cite the following paper:
   year={2025}
 }
 ```
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- CONTRIBUTING -->
+## Contributing
+
+We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) file for guidelines on how to contribute to this project.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
