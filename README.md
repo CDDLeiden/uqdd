@@ -5,8 +5,7 @@
 [![python](https://img.shields.io/badge/-Python_3.8_%7C_3.9_%7C_3.10_%7C_3.11-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![pytorch](https://img.shields.io/badge/PyTorch_2.0+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
 [![wandb](https://img.shields.io/badge/Weights_%26_Biases-black?logo=weightsandbiases&logoColor=yellow)](https://wandb.ai/site)
-
-[//]: # ([![arxiv]&#40;https://img.shields.io/badge/Preprint-arXiv:123123&#41;]&#40;https://arxiv.org/&#41; )
+[![arxiv](https://img.shields.io/badge/Preprint-arXiv:123123)](https://arxiv.org/) 
 
 
 <!-- TABLE OF CONTENTS -->
@@ -28,9 +27,11 @@
         <a href="#usage">Usage</a>
         <ul>
             <li><a href="#dataprocessing">Data Processing</a></li>
+            <li><a href="#model-architectures">Model Architectures</a></li>
             <li><a href="#models">Models</a></li>
         </ul>
     </li>
+    <li><a href="#results">Results</a></li>
     <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
     <li><a href="#acknowledgments">Acknowledgments</a></li>
@@ -118,8 +119,12 @@ As an example to use `data_papyrus.py`:
 ```shell
 python uqdd/data/data_papyrus.py --activity xc50 --descriptor-protein ankh-large --descriptor-chemical ecfp2048 --split-type time --n-targets -1 --file-ext pkl --sanitize --verbose
 ```
-
 This command will preprocess the Papyrus dataset for the xC50 activity type, using the ANKH-large protein descriptor and ECFP2048 chemical descriptor, with a time-based split. The output will be saved in the specified file format (pkl) and will sanitize the data.
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- Model Architectures -->
+### Model Architectures
+![Overview of UQ Model Architectures](images/01_uq_models.png)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -196,6 +201,13 @@ To train and test the Evidential MC-Dropout model, use the following command:
 ```shell
 python uqdd/models/model_parser.py --model emc --num_mc_samples 100 --data_name papyrus --n_targets -1 --activity_type xc50 --descriptor_protein ankh-large --descriptor_chemical ecfp2048 --split_type random --ext pkl --task_type regression --wandb_project_name emc-test
 ```
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- RESULTS -->
+## Results
+![xC50 Results Barplot](images/03_xc50_barplot_tab10_r.png)
+![Kx Results Barplot](images/03_kx_barplot_tab10_r.png)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
