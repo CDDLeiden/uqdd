@@ -5,7 +5,8 @@
 [![python](https://img.shields.io/badge/-Python_3.8_%7C_3.9_%7C_3.10_%7C_3.11-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![pytorch](https://img.shields.io/badge/PyTorch_2.0+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
 [![wandb](https://img.shields.io/badge/Weights_%26_Biases-black?logo=weightsandbiases&logoColor=yellow)](https://wandb.ai/site)
-[![arxiv](https://img.shields.io/badge/Preprint-arXiv:123123)](https://arxiv.org/) 
+
+[//]: # ([![arxiv]&#40;https://img.shields.io/badge/Preprint-arXiv:123123&#41;]&#40;https://arxiv.org/&#41; )
 
 
 <!-- TABLE OF CONTENTS -->
@@ -20,6 +21,7 @@
       <ul>
         <li><a href="#prerequisites">Prerequisites</a></li>
         <li><a href="#installation">Installation</a></li>
+        <li><a href="#folder-structure">Folder Structure</a></li>
       </ul>
     </li>
     <li>
@@ -32,8 +34,8 @@
     <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
     <li><a href="#acknowledgments">Acknowledgments</a></li>
+    <li><a href="#contributing">Contributing</a></li>
     <li><a href="#citation">Citation</a></li>
-
   </ol>
 </details>
 
@@ -60,17 +62,26 @@ We recommend using a virtual environment (e.g. conda) to manage dependencies.
 - Weights & Biases (wandb)
 - scikit-learn, numpy, pandas, seaborn, matplotlib
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- INSTALLATION -->
 ### Installation
 
 **Create and activate the Conda environment:**
-    Use the `environment.yml` file to create the Conda environment. This file lists all necessary Python packages and dependencies.
-    ```bash
-    conda env create -f environment.yml
-    conda activate uqdd-env
-    ```
+To replicate this work, install dependencies using Conda
 
+```sh
+conda env create --file=environment_linux.yml
+conda activat uqdd-env
+```
 
-## Project Folder Structure
+* Please choose the correct file depending on your operating system
+* If the file environment_{OS}.yml gives you an error, please use the ones with "*_conda" suffix.
+* If any issues arise here, please raise an issue following the guidelines in [CONTRIBUTING.md](CONTRIBUTING.md) file.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+### Project Folder Structure
 
 The project is organized as follows:
 ```
@@ -87,6 +98,14 @@ The project is organized as follows:
 └── scripts/ # For generating the visualizations tested in notebooks/ but in more automated way
 ```
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- USAGE -->
+## Usage
+
+This package provides scripts for data processing and model training/testing. Below are the main components you will interact with.
+
+<!-- Data Processing -->
 ### Data Processing
 Run the following scripts to preprocess the datasets:
 
@@ -100,6 +119,11 @@ As an example to use `data_papyrus.py`:
 python uqdd/data/data_papyrus.py --activity xc50 --descriptor-protein ankh-large --descriptor-chemical ecfp2048 --split-type time --n-targets -1 --file-ext pkl --sanitize --verbose
 ```
 
+This command will preprocess the Papyrus dataset for the xC50 activity type, using the ANKH-large protein descriptor and ECFP2048 chemical descriptor, with a time-based split. The output will be saved in the specified file format (pkl) and will sanitize the data.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- Models -->
 ### Models
 The package provides several scripts to train and test different models. The main entry point is the `model_parser.py` script, which allows you to specify various options for data, model, and training configuration.
 
@@ -176,7 +200,6 @@ python uqdd/models/model_parser.py --model emc --num_mc_samples 100 --data_name 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
-
 <!-- LICENSE -->
 ## License
 
@@ -201,6 +224,12 @@ K.S. acknowledges funding from the ELLIS Unit Linz. The ELLIS Unit Linz, the LIT
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+<!-- CONTRIBUTING -->
+## Contributing
+
+We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) file for guidelines on how to contribute to this project.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- CITATION -->
 ## Citation
@@ -209,9 +238,9 @@ If you find this work useful, please cite the following paper:
 
 ```bibtex
 @article{Khalil2025,
-  title={Combining Bayesian and Evidential Uncertainty Quantification for Improved Bioactivity Modelling},
+  title={Combining Bayesian and Evidential Uncertainty Quantification for Improved Bioactivity Modeling},
   author={Khalil, Bola and Schweighofer, Kajetan and Dyubankova, Natalia and van Westen, Gerard J.P. and van Vlijmen, Herman},
-  journal={Nature Machine Intelligence},
+  journal={Journal of Chemical Information and Modeling},
   year={2025}
 }
 ```

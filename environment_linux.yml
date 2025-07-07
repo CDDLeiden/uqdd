@@ -1,20 +1,20 @@
 name: uqdd-env
 channels:
   - conda-forge
-  - pytorch
   - defaults
-  - rdkit
-  - nvidia
+  - pytorch
 dependencies:
   - python=3.11
+  - gcc=12.1.0
   - pip
-  - cmake
-  - mapie
+  - sentencepiece
+  - libgcc-ng
+  - libstdcxx-ng=12
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu124
       - torch
       - chembl_webresource_client
-      - https://github.com/OlivierBeq/Papyrus-scripts/archive/refs/tags/2.0.0.tar.gz
+      - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
       - uncertainty-toolbox
       - transformers
       - rdkit
@@ -34,3 +34,5 @@ dependencies:
       - fastcluster
       - ankh
       - https://github.com/bolak92/bio-transformers/tarball/main
+      - sentence-transformers
+      - chembl-downloader
