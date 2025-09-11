@@ -32,3 +32,5 @@ dependencies:
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
       - https://github.com/bolak92/bio-transformers/tarball/main
       - ankh
+      - scikit-posthocs
+      - scienceplots

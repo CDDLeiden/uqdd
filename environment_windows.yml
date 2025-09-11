@@ -33,3 +33,5 @@ dependencies:
       - https://github.com/bolak92/bio-transformers/tarball/main
       - sentence-transformers
       - chembl-downloader
+      - scikit-posthocs
+      - scienceplots

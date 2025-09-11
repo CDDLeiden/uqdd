@@ -34,4 +34,6 @@ dependencies:
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
       - ankh
       - https://github.com/bolak92/bio-transformers/tarball/main
+      - scikit-posthocs
+      - scienceplots
       # Ensure there's no duplicate seaborn if it was also in the original pip list
