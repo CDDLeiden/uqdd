@@ -2,6 +2,9 @@ import argparse
 import itertools
 import os
 import shutil
+# In all plotting functions, only call plt.show() if running interactively
+import sys
+import warnings
 from typing import List, Dict, Optional, Union
 
 import matplotlib.gridspec as gridspec
@@ -19,8 +22,9 @@ from sklearn.metrics import mean_squared_error, auc
 from sklearn.utils import resample
 
 # mpl.rcParams.update({"font.family": "sans-serif", "font.size": 7})
-
 # plt.style.use(["science", "no-latex", "nature"])
+
+INTERACTIVE_MODE = hasattr(sys, "ps1") or sys.flags.interactive
 
 # DESCRIPTORS
 descriptor_protein = "ankh-large"
@@ -424,7 +428,17 @@ def save_plot(fig, save_dir, plot_name, tighten=True, show_legend=False):
         if legend is not None:
             legend.remove()
     if tighten:
-        plt.tight_layout()
+        try:
+            # Suppress the specific tight_layout warning
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="This figure includes Axes that are not compatible with tight_layout",
+                )
+                fig.tight_layout()
+        except (ValueError, RuntimeError):
+            # If tight_layout fails with an actual exception, use subplots_adjust instead
+            fig.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
 
     if save_dir and tighten:
         os.makedirs(save_dir, exist_ok=True)
@@ -435,16 +449,18 @@ def save_plot(fig, save_dir, plot_name, tighten=True, show_legend=False):
         fig.savefig(
             os.path.join(save_dir, f"{plot_name}.pdf"), dpi=300, bbox_inches="tight"
         )
-        fig.savefig(
-            os.path.join(save_dir, f"{plot_name}.eps"), dpi=300, bbox_inches="tight"
-        )
+        # Issue 2: Remove EPS format to avoid PostScript transparency issues
+        # fig.savefig(
+        #     os.path.join(save_dir, f"{plot_name}.eps"), dpi=300, bbox_inches="tight"
+        # )
 
     elif save_dir and not tighten:
         os.makedirs(save_dir, exist_ok=True)
         fig.savefig(os.path.join(save_dir, f"{plot_name}.png"), dpi=300)
         fig.savefig(os.path.join(save_dir, f"{plot_name}.svg"))
         fig.savefig(os.path.join(save_dir, f"{plot_name}.pdf"), dpi=300)
-        fig.savefig(os.path.join(save_dir, f"{plot_name}.eps"), dpi=300)
+        # Issue 2: Remove EPS format to avoid PostScript transparency issues
+        # fig.savefig(os.path.join(save_dir, f"{plot_name}.eps"), dpi=300)
 
 
 # Function to handle inf values
@@ -477,6 +493,7 @@ def plot_pairplot(
     save_plot(plt.gcf(), save_dir, plot_name, tighten=False, show_legend=show_legend)
     if INTERACTIVE_MODE:
         plt.show()
+    plt.close()  # Close figure to free memory
 
 
 # Function to plot line metrics
@@ -484,8 +501,8 @@ def plot_line_metrics(
     df, title, metrics, save_dir=None, group_order=group_order, show_legend=False
 ):
     df = handle_inf_values(df)
-    plt.figure(figsize=(14, 7))
     for metric in metrics:
+        plt.figure(figsize=(14, 7))  # this might ruin it.
         sns.lineplot(
             data=df,
             x="wandb run",
@@ -494,7 +511,7 @@ def plot_line_metrics(
             marker="o",
             palette="Set2",
             hue_order=group_order,
-            label=metric,  # Ensure lines are labeled
+            label=metric,  # Ensure lines are labeled # FIXME?
         )
         plt.title(f"{title} - {metric}")
         plt.xticks(rotation=45)
@@ -505,6 +522,7 @@ def plot_line_metrics(
         save_plot(
             plt.gcf(), save_dir, plot_name, tighten=False, show_legend=show_legend
         )
+        plt.close()  # Close figure to free memory
 
 
 # Function to plot histograms for metrics
@@ -518,8 +536,8 @@ def plot_histogram_metrics(
     show_legend=False,
 ):
     df = handle_inf_values(df)
-    plt.figure(figsize=(14, 7))
     for metric in metrics:
+        plt.figure(figsize=(14, 7))
         sns.histplot(
             data=df,
             x=metric,
@@ -532,10 +550,12 @@ def plot_histogram_metrics(
             alpha=0.7,
         )
         plt.title(f"{title} - {metric}")
-        plt.show()
+        if INTERACTIVE_MODE:
+            plt.show()
 
         plot_name = f"histogram_{title.replace(' ', '_')}_{metric}"
         save_plot(plt.gcf(), save_dir, plot_name, show_legend=show_legend)
+        plt.close()  # Close figure to free memory
 
 
 # Function to plot pairwise scatter plots for metrics
@@ -588,7 +608,9 @@ def plot_pairwise_scatter_metrics(
     fig.subplots_adjust(top=0.95, wspace=0.4, hspace=0.4)
     plot_name = f"pairwise_scatter_{title.replace(' ', '_')}"
     save_plot(fig, save_dir, plot_name, tighten=True, show_legend=show_legend)
-    plt.show()
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()  # Close figure to free memory
 
 
 def plot_metrics(
@@ -699,7 +721,7 @@ def plot_metrics(
     for i, metric in enumerate(metrics):
         metric_data = combined_stats_df[combined_stats_df["Metric"] == metric]
         # Sort the data according to group_order
-        metric_data["Group"] = pd.Categorical(
+        metric_data.loc[:, "Group"] = pd.Categorical(
             metric_data["Group"], categories=group_order, ordered=True
         )
         metric_data = metric_data.sort_values("Group").reset_index(drop=True)
@@ -778,7 +800,7 @@ def plot_metrics(
         plot_name = f"barplot_{cmap}_{metrics_names}"
         save_plot(fig, save_dir, plot_name, show_legend=show_legend)  #  tighten=True
 
-    if show:
+    if INTERACTIVE_MODE:
         plt.show()
         plt.close()
 
@@ -816,7 +838,8 @@ def find_highly_correlated_metrics(
     metrics_names = "_".join(metrics)
     plot_name = f"correlation_matrix_{threshold}_{metrics_names}"
     save_plot(plt.gcf(), save_dir, plot_name, show_legend=show_legend)
-    plt.show()
+    if INTERACTIVE_MODE:
+        plt.show()
 
     return highly_correlated_pairs
 
@@ -880,24 +903,18 @@ def plot_comparison_metrics(
     stats_dfs = []
     for metric in metrics:
         mean_df = (
-            df.groupby(["Split", "Model type"])[metric].mean().rename(f"{metric}_mean")
+            df.groupby(["Split", "Model type", "Calibration"])[metric]
+            .mean()
+            .rename(f"{metric}_mean")
         )
         std_df = (
-            df.groupby(["Split", "Model type"])[metric].std().rename(f"{metric}_std")
+            df.groupby(["Split", "Model type", "Calibration"])[metric]
+            .std()
+            .rename(f"{metric}_std")
         )
         stats_df = pd.merge(
             mean_df, std_df, left_index=True, right_index=True
         ).reset_index()
-
-        # stats_df["Group"] = stats_df.apply(
-        #     lambda row: f"{row['Split']}_{row['Model type']}",
-        #     axis=1,
-        # )
-        # if group_order:
-        #     stats_df["Group"] = pd.Categorical(
-        #         stats_df["Group"], categories=group_order, ordered=True
-        #     )
-
         stats_df["Group"] = stats_df.apply(
             lambda row: f"{row['Split']}_{row['Model type']}_{row['Calibration']}",
             axis=1,
@@ -1091,14 +1108,44 @@ def plot_comparison_metrics(
 
     if save_dir:
         metrics_names = "_".join(metrics)
-        plot_name = f"barplot_{cmap}_{metrics_names}"
+        plot_name = f"comparison_barplot_{cmap}_{metrics_names}"
         save_plot(fig, save_dir, plot_name, show_legend=show_legend)  #  tighten=True
 
-    if show:
+    if INTERACTIVE_MODE:
         plt.show()
         plt.close()
 
-    return color_dict
+
+# def save_plot(fig, save_dir, plot_name, tighten=True)
+def load_and_aggregate_calibration_data(base_path, paths):
+    """
+    Loads calibration data for multiple paths, computes mean and bounds for observed proportions.
+    """
+    expected_values = []
+    observed_values = []
+
+    for path in paths:
+        file_path = os.path.join(base_path, path, "calibration_plot_data.csv")
+        if os.path.exists(file_path):
+            data = pd.read_csv(file_path)
+            expected_values = data["Expected Proportion"]
+            # expected_values.append(data['Expected Proportion'])
+            observed_values.append(data["Observed Proportion"])
+        else:
+            print(f"File not found: {file_path}")
+
+    # Convert lists to numpy arrays for aggregation
+    expected_values = np.array(expected_values)
+    observed_values = np.array(observed_values)
+
+    # Aggregate mean, min, and max for shading
+    # mean_expected = np.mean(expected_values,
+    # mean_expected = np.mean(expected_values, axis=0)
+    mean_observed = np.mean(observed_values, axis=0)
+    lower_bound = np.min(observed_values, axis=0)
+    upper_bound = np.max(observed_values, axis=0)
+
+    return expected_values, mean_observed, lower_bound, upper_bound
 
 
 def plot_calibration_data(
@@ -1138,6 +1185,9 @@ def plot_calibration_data(
         Width of the **inner plot box** (not the full figure), by default None.
     fig_height : Optional[float], optional
         Height of the **inner plot box** (not the full figure), by default None.
+    show_legend : bool, optional
+        Whether to display the legend, by default False.
+
     """
 
     # Default plot area size if not provided
@@ -1214,9 +1264,9 @@ def plot_calibration_data(
     if save_dir:
         plot_name = f"{title.replace(' ', '_')}"
         save_plot(fig, save_dir, plot_name, tighten=True, show_legend=show_legend)
-
-    plt.show()
-    plt.close()
+    if INTERACTIVE_MODE:
+        plt.show()
+        plt.close()
 
 
 def move_model_folders(df, search_dirs, output_dir, overwrite=False):
@@ -1447,6 +1497,8 @@ def plot_rmse_rejection_curves(
         Width of the **inner plot box** (not the full figure), by default None.
     fig_height : Optional[float], optional
         Height of the **inner plot box** (not the full figure), by default None.
+    show_legend : bool, optional
+        Whether to display the legend, by default True.
 
     Returns
     -------
@@ -1485,6 +1537,8 @@ def plot_rmse_rejection_curves(
 
     color_dict["random reject"] = "black"  # Set "random reject" to black
 
+    # Issue 3 Fix: Create a proper copy of the DataFrame to avoid SettingWithCopyWarning
+    df = df.copy()
     df.loc[:, "model_path"] = df["project_model"].apply(
         lambda x: (
             str(os.path.join(base_dir, x)) if not str(x).startswith(base_dir) else x
@@ -1610,9 +1664,9 @@ def plot_rmse_rejection_curves(
         else "rmse_rejection_curve"
     )
     save_plot(fig, save_dir_plot, plot_name, tighten=True, show_legend=show_legend)
-
-    plt.show()
-    plt.close()
+    if INTERACTIVE_MODE:
+        plt.show()
+        plt.close()
 
     return pd.DataFrame(stats_dfs)
 
@@ -1659,6 +1713,8 @@ def plot_auc_comparison(
         Width of the **inner plot box**, by default None.
     fig_height : Optional[float], optional
         Height of the **inner plot box**, by default None.
+    show_legend : bool, optional
+        Whether to display the legend, by default False.
 
     Returns
     -------
@@ -1807,22 +1863,16 @@ def plot_auc_comparison(
     ax.set_ylabel("RRC-AUC")
     ax.set_ylim(min_y_axis, 1.0)
 
-    # fig.subplots_adjust(left=0.12, right=0.85, top=0.9, bottom=0.2)
+    # fig.subplots_adjust(left=0.12, right=0.85, top=0.9, bottom=0.15)
     # plt.tight_layout()  # Ensures compact figure layout
 
     # **Save and show the plot**
     plot_name = f"auc_comparison_barplot_{cmap}"
     plot_name += f"_{add_to_title}" if add_to_title else ""
     save_plot(fig, save_dir, plot_name, tighten=True, show_legend=show_legend)
-
-    plt.show()
-    plt.close()
-
-
-# In all plotting functions, only call plt.show() if running interactively
-import sys
-
-INTERACTIVE_MODE = hasattr(sys, "ps1") or sys.flags.interactive
+    if INTERACTIVE_MODE:
+        plt.show()
+        plt.close()
 
 
 # we want to create a function to save stats_df to a csv file
@@ -2428,8 +2478,9 @@ def plot_critical_difference_diagram(
         save_plot(fig, save_dir, plot_name)
 
     plt.tight_layout()
-    plt.show()
-    plt.close()
+    if INTERACTIVE_MODE:
+        plt.show()
+        plt.close()
 
 
 def generate_statistical_report(results, save_dir=None):
@@ -2657,7 +2708,7 @@ if __name__ == "__main__":
     df_3 = pd.read_csv(file_3, header=0)
     df_main = pd.concat([df_1, df_2, df_3])
     # Reporting if there are duplicates and how many?
-    num_duplicates = df_main.duplicated(subset=["wandb run"]).sum()
+    num_duplicates = df_main.duplicated(subset=["wandb run", "Task"]).sum()
     if num_duplicates > 0:
         print(f"Found {num_duplicates} duplicate entries based on 'wandb run' column.")
     else:
@@ -2665,7 +2716,7 @@ if __name__ == "__main__":
 
     # Dropping duplicates according to 'wandb run' column and keeping first occurence
     print(f"Dataframe shape before removing duplicates: {df_main.shape}")
-    df_main = df_main.drop_duplicates(subset=["wandb run"], keep="first")
+    df_main = df_main.drop_duplicates(subset=["wandb run", "Task"], keep="first")
     print(f"Dataframe shape after removing duplicates: {df_main.shape}")
 
     # # replace random with stratified for the random split
@@ -3110,7 +3161,7 @@ if __name__ == "__main__":
             ):
                 stats_df = plot_rmse_rejection_curves(
                     df,
-                    base_dir,
+                    base_path,
                     cmap=color_map_2,
                     color_dict=color_dict_2,
                     save_dir_plot=save_dir_plot,
