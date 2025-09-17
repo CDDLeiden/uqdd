@@ -36,4 +36,5 @@ dependencies:
       - https://github.com/bolak92/bio-transformers/tarball/main
       - scikit-posthocs
       - scienceplots
+      - pingouin
       # Ensure there's no duplicate seaborn if it was also in the original pip list
