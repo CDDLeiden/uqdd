@@ -223,8 +223,6 @@ def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=N
 
 
 # -------------- Plotting routines -------------------#
-
-
 def make_boxplots_parametric(df, metric_ls):
     """
     Create boxplots for each metric using repeated measures ANOVA.
@@ -845,8 +843,6 @@ def make_curve_plots(df):
 ###################################################
 # Other utility functions
 ###################################################
-
-
 def harmonize_columns(df):
     df = df.copy()
     # Map your columns to the function expectations
@@ -1222,124 +1218,6 @@ def bootstrap_auc_difference(
     }
 
 
-def comprehensive_statistical_analysis(
-    df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
-):
-    """
-    Perform comprehensive statistical analysis including all requested tests.
-
-    Parameters:
-    - df: DataFrame with performance data
-    - metrics: list of metrics to analyze
-    - models: list of models to compare
-    - tasks: list of tasks to include
-    - splits: list of splits to include
-    - save_dir: directory to save results
-    - alpha: significance level
-
-    Returns:
-    - dict with all statistical test results
-    """
-    print("Performing comprehensive statistical analysis...")
-
-    results = {}
-
-    # 1. Pairwise Wilcoxon tests with Cliff's Delta
-    print("1. Running pairwise Wilcoxon signed-rank tests...")
-    pairwise_results = pairwise_model_comparison(
-        df, metrics, models, tasks, splits, alpha
-    )
-    results["pairwise_tests"] = pairwise_results
-
-    # 2. Friedman test with Nemenyi post-hoc
-    print("2. Running Friedman tests with Nemenyi post-hoc...")
-    friedman_results = friedman_nemenyi_test(df, metrics, models, alpha)
-    results["friedman_nemenyi"] = friedman_results
-
-    # 3. AUC bootstrap comparisons (if AUC columns exist)
-    auc_columns = [col for col in df.columns if "AUC" in col or "auc" in col]
-    if auc_columns:
-        print("3. Running bootstrap comparisons for AUC metrics...")
-        auc_bootstrap_results = {}
-
-        for auc_col in auc_columns:
-            auc_bootstrap_results[auc_col] = {}
-
-            if models is None:
-                available_models = df["Model type"].unique()
-            else:
-                available_models = models
-
-            # Pairwise AUC comparisons
-            for i, model_a in enumerate(available_models):
-                for j, model_b in enumerate(available_models):
-                    if i < j:
-                        auc_a = df[df["Model type"] == model_a][auc_col].dropna().values
-                        auc_b = df[df["Model type"] == model_b][auc_col].dropna().values
-
-                        if len(auc_a) > 0 and len(auc_b) > 0:
-                            bootstrap_result = bootstrap_auc_difference(auc_a, auc_b)
-                            auc_bootstrap_results[auc_col][
-                                f"{model_a}_vs_{model_b}"
-                            ] = bootstrap_result
-
-        results["auc_bootstrap"] = auc_bootstrap_results
-
-    # Save results if directory provided
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-
-        # Save pairwise results
-        if not pairwise_results.empty:
-            pairwise_results.to_csv(
-                os.path.join(save_dir, "pairwise_statistical_tests.csv"), index=False
-            )
-
-        # Save Friedman/Nemenyi results
-        import json
-
-        with open(os.path.join(save_dir, "friedman_nemenyi_results.json"), "w") as f:
-            # Convert numpy types to regular Python types for JSON serialization
-            json_compatible_results = {}
-            for metric, result in friedman_results.items():
-                json_compatible_results[metric] = {}
-                for key, value in result.items():
-                    if isinstance(value, (np.ndarray, np.generic)):
-                        json_compatible_results[metric][key] = value.tolist()
-                    elif isinstance(value, dict):
-                        json_compatible_results[metric][key] = {
-                            str(k): (
-                                float(v)
-                                if isinstance(v, (np.ndarray, np.generic))
-                                else v
-                            )
-                            for k, v in value.items()
-                        }
-                    else:
-                        json_compatible_results[metric][key] = (
-                            float(value)
-                            if isinstance(value, (np.ndarray, np.generic))
-                            else value
-                        )
-
-            json.dump(json_compatible_results, f, indent=2)
-
-        # Save AUC bootstrap results
-        if auc_columns:
-            with open(os.path.join(save_dir, "auc_bootstrap_results.json"), "w") as f:
-                json_compatible_auc = {}
-                for auc_col, comparisons in results["auc_bootstrap"].items():
-                    json_compatible_auc[auc_col] = {}
-                    for comparison, result in comparisons.items():
-                        json_compatible_auc[auc_col][comparison] = {
-                            k: v.tolist() if isinstance(v, np.ndarray) else v
-                            for k, v in result.items()
-                        }
-                json.dump(json_compatible_auc, f, indent=2)
-
-    return results
-
-
 def plot_critical_difference_diagram(
     friedman_results, metric, save_dir=None, alpha=0.05
 ):
@@ -1507,6 +1385,124 @@ def analyze_significance(df_raw, metrics, direction_dict, effect_dict):
                 # Significance heatmap (Conover-Holm) & critical difference
                 make_sign_plots_nonparametric(df_s, [metric])
                 make_critical_difference_diagrams(df_s, [metric])
+
+
+def comprehensive_statistical_analysis(
+    df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
+):
+    """
+    Perform comprehensive statistical analysis including all requested tests.
+
+    Parameters:
+    - df: DataFrame with performance data
+    - metrics: list of metrics to analyze
+    - models: list of models to compare
+    - tasks: list of tasks to include
+    - splits: list of splits to include
+    - save_dir: directory to save results
+    - alpha: significance level
+
+    Returns:
+    - dict with all statistical test results
+    """
+    print("Performing comprehensive statistical analysis...")
+
+    results = {}
+
+    # 1. Pairwise Wilcoxon tests with Cliff's Delta
+    print("1. Running pairwise Wilcoxon signed-rank tests...")
+    pairwise_results = pairwise_model_comparison(
+        df, metrics, models, tasks, splits, alpha
+    )
+    results["pairwise_tests"] = pairwise_results
+
+    # 2. Friedman test with Nemenyi post-hoc
+    print("2. Running Friedman tests with Nemenyi post-hoc...")
+    friedman_results = friedman_nemenyi_test(df, metrics, models, alpha)
+    results["friedman_nemenyi"] = friedman_results
+
+    # 3. AUC bootstrap comparisons (if AUC columns exist)
+    auc_columns = [col for col in df.columns if "AUC" in col or "auc" in col]
+    if auc_columns:
+        print("3. Running bootstrap comparisons for AUC metrics...")
+        auc_bootstrap_results = {}
+
+        for auc_col in auc_columns:
+            auc_bootstrap_results[auc_col] = {}
+
+            if models is None:
+                available_models = df["Model type"].unique()
+            else:
+                available_models = models
+
+            # Pairwise AUC comparisons
+            for i, model_a in enumerate(available_models):
+                for j, model_b in enumerate(available_models):
+                    if i < j:
+                        auc_a = df[df["Model type"] == model_a][auc_col].dropna().values
+                        auc_b = df[df["Model type"] == model_b][auc_col].dropna().values
+
+                        if len(auc_a) > 0 and len(auc_b) > 0:
+                            bootstrap_result = bootstrap_auc_difference(auc_a, auc_b)
+                            auc_bootstrap_results[auc_col][
+                                f"{model_a}_vs_{model_b}"
+                            ] = bootstrap_result
+
+        results["auc_bootstrap"] = auc_bootstrap_results
+
+    # Save results if directory provided
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Save pairwise results
+        if not pairwise_results.empty:
+            pairwise_results.to_csv(
+                os.path.join(save_dir, "pairwise_statistical_tests.csv"), index=False
+            )
+
+        # Save Friedman/Nemenyi results
+        import json
+
+        with open(os.path.join(save_dir, "friedman_nemenyi_results.json"), "w") as f:
+            # Convert numpy types to regular Python types for JSON serialization
+            json_compatible_results = {}
+            for metric, result in friedman_results.items():
+                json_compatible_results[metric] = {}
+                for key, value in result.items():
+                    if isinstance(value, (np.ndarray, np.generic)):
+                        json_compatible_results[metric][key] = value.tolist()
+                    elif isinstance(value, dict):
+                        json_compatible_results[metric][key] = {
+                            str(k): (
+                                float(v)
+                                if isinstance(v, (np.ndarray, np.generic))
+                                else v
+                            )
+                            for k, v in value.items()
+                        }
+                    else:
+                        json_compatible_results[metric][key] = (
+                            float(value)
+                            if isinstance(value, (np.ndarray, np.generic))
+                            else value
+                        )
+
+            json.dump(json_compatible_results, f, indent=2)
+
+        # Save AUC bootstrap results
+        if auc_columns:
+            with open(os.path.join(save_dir, "auc_bootstrap_results.json"), "w") as f:
+                json_compatible_auc = {}
+                for auc_col, comparisons in results["auc_bootstrap"].items():
+                    json_compatible_auc[auc_col] = {}
+                    for comparison, result in comparisons.items():
+                        json_compatible_auc[auc_col][comparison] = {
+                            k: v.tolist() if isinstance(v, np.ndarray) else v
+                            for k, v in result.items()
+                        }
+                json.dump(json_compatible_auc, f, indent=2)
+
+    return results
 
 
 def generate_statistical_report(results, save_dir=None):
