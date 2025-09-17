@@ -1,40 +1,34 @@
 import logging
+import math
 import os
+from bisect import bisect_left
 from pathlib import Path
 from typing import Tuple, Dict, Union, Optional, List, Any, Callable
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy.stats as ss
 import seaborn as sns
-import matplotlib.pyplot as plt
 import torch
 import uncertainty_toolbox as uct
+import wandb
+from matplotlib.ticker import MaxNLocator
+from openpyxl import load_workbook
+from scipy.integrate import quad
+from scipy.stats import bootstrap
+from scipy.stats import norm
+from scipy.stats import spearmanr
 from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
+from tdc import Evaluator
 from uncertainty_toolbox import viz as uct_viz
 from uncertainty_toolbox.metrics import get_all_metrics, METRIC_NAMES
-from tdc import Evaluator
-import wandb
-from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
-
-from openpyxl import load_workbook
 from wandb import Image
 
 from uqdd import FIGS_DIR, DATA_DIR
-from matplotlib.ticker import MaxNLocator
-
-
 from uqdd.utils import create_logger, save_df, save_pickle
-
-import math
-
-import scipy.stats as ss
-
-from sklearn.linear_model import LinearRegression
-from scipy.stats import spearmanr
-from scipy.stats import norm
-from scipy.stats import bootstrap
-from scipy.integrate import quad
-from bisect import bisect_left
 
 string_types = (type(b""), type(""))
 sns.set_theme(style="white")
@@ -1922,6 +1916,7 @@ class MetricsTable:
         self.data_specific_path = config.get("data_specific_path", None)
         self.model_name = config.get("model_name", "ensemble")
         self.dropout = config.get("dropout", None)
+        self.seed = config.get("seed", 42)
         self.add_plots_to_table = add_plots_to_table
         self.wandb_run_name = run_name or wandb.run.name
         self.wandb_project_name = project_name or wandb.run.project
@@ -1930,7 +1925,14 @@ class MetricsTable:
         if self.model_type:
             cols += ["Model type", "Task"]
 
-        cols += ["Activity", "Split", "desc_prot", "desc_chem", "dropout"]
+        cols += [
+            "Activity",
+            "Split",
+            "desc_prot",
+            "desc_chem",
+            "dropout",
+            "seed",
+        ]  # Added Seed to the retrieved columns
         if self.task_type == "regression":
             cols.extend(
                 [
@@ -2230,6 +2232,7 @@ class MetricsTable:
                 self.desc_prot,
                 self.desc_chem,
                 self.dropout,
+                self.seed,
             ]
         )
         if self.task_type == "regression":
