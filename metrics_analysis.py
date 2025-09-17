@@ -802,7 +802,7 @@ def plot_metrics(
 
     if INTERACTIVE_MODE:
         plt.show()
-        plt.close()
+    plt.close()
 
     return color_dict
 
@@ -1113,7 +1113,7 @@ def plot_comparison_metrics(
 
     if INTERACTIVE_MODE:
         plt.show()
-        plt.close()
+    plt.close()
 
 
 # def save_plot(fig, save_dir, plot_name, tighten=True)
@@ -1266,7 +1266,7 @@ def plot_calibration_data(
         save_plot(fig, save_dir, plot_name, tighten=True, show_legend=show_legend)
     if INTERACTIVE_MODE:
         plt.show()
-        plt.close()
+    plt.close()
 
 
 def move_model_folders(df, search_dirs, output_dir, overwrite=False):
@@ -1666,7 +1666,7 @@ def plot_rmse_rejection_curves(
     save_plot(fig, save_dir_plot, plot_name, tighten=True, show_legend=show_legend)
     if INTERACTIVE_MODE:
         plt.show()
-        plt.close()
+    plt.close()
 
     return pd.DataFrame(stats_dfs)
 
@@ -1872,7 +1872,7 @@ def plot_auc_comparison(
     save_plot(fig, save_dir, plot_name, tighten=True, show_legend=show_legend)
     if INTERACTIVE_MODE:
         plt.show()
-        plt.close()
+    plt.close()
 
 
 # we want to create a function to save stats_df to a csv file
@@ -2480,7 +2480,7 @@ def plot_critical_difference_diagram(
     plt.tight_layout()
     if INTERACTIVE_MODE:
         plt.show()
-        plt.close()
+    plt.close()
 
 
 def generate_statistical_report(results, save_dir=None):
@@ -3114,7 +3114,7 @@ if __name__ == "__main__":
             add_to_title += "-" + uct_t
             stats_df = plot_rmse_rejection_curves(
                 df_no_time,
-                base_dir,
+                base_path,
                 cmap=color_map_2,
                 # color_dict=color_dict_2,
                 save_dir_plot=save_dir_plot,
