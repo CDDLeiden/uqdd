@@ -223,7 +223,7 @@ def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=N
 
 
 # -------------- Plotting routines -------------------#
-def make_boxplots_parametric(df, metric_ls):
+def make_boxplots_parametric(df, metric_ls, save_dir=None):
     """
     Create boxplots for each metric using repeated measures ANOVA.
 
@@ -266,9 +266,13 @@ def make_boxplots_parametric(df, metric_ls):
         ax.set_xticks(list(range(0, len(x_tick_labels))))
         ax.set_xticklabels(new_xtick_labels)
     plt.tight_layout()
+    save_plot(figure, save_dir, f"boxplot_parametric_{'_'.join(metric_ls)}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
 
 
-def make_boxplots_nonparametric(df, metric_ls):
+def make_boxplots_nonparametric(df, metric_ls, save_dir=None):
     sns.set_context("notebook")
     sns.set(rc={"figure.figsize": (4, 3)}, font_scale=1.5)
     sns.set_style("whitegrid")
@@ -297,9 +301,13 @@ def make_boxplots_nonparametric(df, metric_ls):
         ax.set_xticks(list(range(0, len(x_tick_labels))))
         ax.set_xticklabels(new_xtick_labels)
     plt.tight_layout()
+    save_plot(figure, save_dir, f"boxplot_nonparametric_{'_'.join(metric_ls)}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
 
 
-def make_sign_plots_nonparametric(df, metric_ls):
+def make_sign_plots_nonparametric(df, metric_ls, save_dir=None):
     heatmap_args = {
         "linewidths": 0.25,
         "linecolor": "0.5",
@@ -318,13 +326,16 @@ def make_sign_plots_nonparametric(df, metric_ls):
             p_adjust="holm",
             melted=True,
         )
-        sub_ax, sub_c = sp.sign_plot(
-            pc, **heatmap_args, ax=axes[i], xticklabels=True
-        )  # Update xticklabels parameter
+        sub_ax, sub_c = sp.sign_plot(pc, **heatmap_args, ax=axes[i], xticklabels=True)
         sub_ax.set_title(stat.upper())
+    plt.tight_layout()
+    save_plot(figure, save_dir, f"sign_plot_nonparametric_{'_'.join(metric_ls)}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
 
 
-def make_critical_difference_diagrams(df, metric_ls):
+def make_critical_difference_diagrams(df, metric_ls, save_dir=None):
     figure, axes = plt.subplots(6, 1, sharex=True, sharey=False, figsize=(16, 10))
     for i, stat in enumerate(metric_ls):
         avg_rank = df.groupby("cv_cycle")[stat].rank(pct=True).groupby(df.method).mean()
@@ -339,9 +350,13 @@ def make_critical_difference_diagrams(df, metric_ls):
         sp.critical_difference_diagram(avg_rank, pc, ax=axes[i])
         axes[i].set_title(stat.upper())
     plt.tight_layout()
+    save_plot(figure, save_dir, f"critical_difference_diagram_{'_'.join(metric_ls)}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
 
 
-def make_normality_diagnostic(df, metric_ls):
+def make_normality_diagnostic(df, metric_ls, save_dir=None):
     """
     Create a normality diagnostic plot grid with histograms and QQ plots for the given metrics.
 
@@ -386,6 +401,10 @@ def make_normality_diagnostic(df, metric_ls):
         ax.set_title("")
 
     plt.tight_layout()
+    save_plot(fig, save_dir, f"normality_diagnostic_{'_'.join(metric_ls)}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
 
 
 def mcs_plot(
@@ -502,6 +521,7 @@ def make_mcs_plot_grid(
     axis_text_size=12,
     title_text_size=16,
     sort_axes=False,
+        save_dir=None,
 ):
     """
     Create a grid of multiple comparison of means plots using Tukey HSD test results.
@@ -583,10 +603,20 @@ def make_mcs_plot_grid(
             ax[row, col].set_visible(False)
 
     plt.tight_layout()
+    save_plot(fig, save_dir, f"mcs_plot_grid_{'_'.join(stats)}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
 
 
 def make_scatterplot(
-    df, val_col, pred_col, thresh, cycle_col="cv_cycle", group_col="method"
+        df,
+        val_col,
+        pred_col,
+        thresh,
+        cycle_col="cv_cycle",
+        group_col="method",
+        save_dir=None,
 ):
     """
     Create scatter plots for each method showing the relationship between predicted and measured values.
@@ -637,7 +667,10 @@ def make_scatterplot(
         ax.set_ylabel("Measured")
 
     plt.tight_layout()
-    plt.show()
+    save_plot(fig, save_dir, f"scatterplot_{val_col}_vs_{pred_col}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
 
 
 def ci_plot(result_tab, ax_in, name):
@@ -678,7 +711,7 @@ def ci_plot(result_tab, ax_in, name):
     ax.set_xlim(-0.2, 0.2)
 
 
-def make_ci_plot_grid(df_in, metric_list, group_col="method"):
+def make_ci_plot_grid(df_in, metric_list, group_col="method", save_dir=None):
     """
     Create a grid of confidence interval plots for multiple metrics using Tukey HSD test results.
 
@@ -849,7 +882,7 @@ def harmonize_columns(df):
     rename_map = {
         "Model type": "method",  # or 'project_model' -> 'method' if you prefer that
         "Split": "split",
-        "seed": "cv_cycle",
+        "Group_Number": "cv_cycle",
     }
     df.rename(
         columns={k: v for k, v in rename_map.items() if k in df.columns}, inplace=True
@@ -1323,15 +1356,13 @@ def plot_critical_difference_diagram(
     plt.close()
 
 
-def analyze_significance(df_raw, metrics, direction_dict, effect_dict):
+def analyze_significance(df_raw, metrics, direction_dict, effect_dict, save_dir=None):
     df = harmonize_columns(df_raw)
     for split in df["split"].unique():
         df_s = df[df["split"] == split].copy()
         print(f"\n=== Split: {split} ===")
-
         # 3.a) Normality diagnostics for all metrics (one go)
-        make_normality_diagnostic(df_s, metrics)
-
+        make_normality_diagnostic(df_s, metrics, save_dir=save_dir)
         # 3.b) For each metric: parametric vs non-parametric branch
         for metric in metrics:
             print(f"\n-- Metric: {metric}")
@@ -1344,12 +1375,9 @@ def analyze_significance(df_raw, metrics, direction_dict, effect_dict):
             from scipy.stats import shapiro
 
             W, p_norm = shapiro(vals) if len(vals) >= 3 else (None, 0.0)
-
             # 3.c) Parametric RM-ANOVA + Tukey path
             if (p_norm is not None) and (p_norm >= 0.05):
-                # Boxplot w/ RM-ANOVA p-value in title
-                make_boxplots_parametric(df_s, [metric])
-                # Tukey-style matrix + MCS heatmap and CI plots
+                make_boxplots_parametric(df_s, [metric], save_dir=save_dir)
                 tukey_tab, means, means_diff, pmat = rm_tukey_hsd(
                     df=df_s.rename(
                         columns={metric: metric.lower()}
@@ -1371,20 +1399,20 @@ def analyze_significance(df_raw, metrics, direction_dict, effect_dict):
                     effect_dict=effect_dict,
                     show_diff=True,
                     sort_axes=True,
+                    save_dir=save_dir,
                 )
                 # Confidence-interval forest for pairwise diffs
                 make_ci_plot_grid(
                     df_s.rename(columns={metric: metric.lower()}),
                     [metric.lower()],
                     group_col="method",
+                    save_dir=save_dir,
                 )
-
             # 3.d) Non-parametric Friedman + Conover path
             else:
-                make_boxplots_nonparametric(df_s, [metric])
-                # Significance heatmap (Conover-Holm) & critical difference
-                make_sign_plots_nonparametric(df_s, [metric])
-                make_critical_difference_diagrams(df_s, [metric])
+                make_boxplots_nonparametric(df_s, [metric], save_dir=save_dir)
+                make_sign_plots_nonparametric(df_s, [metric], save_dir=save_dir)
+                make_critical_difference_diagrams(df_s, [metric], save_dir=save_dir)
 
 
 def comprehensive_statistical_analysis(
@@ -1505,7 +1533,14 @@ def comprehensive_statistical_analysis(
     return results
 
 
-def generate_statistical_report(results, save_dir=None):
+def generate_statistical_report(
+        results,
+        save_dir=None,
+        df_raw=None,
+        metrics=None,
+        direction_dict=None,
+        effect_dict=None,
+):
     """
     Generate a comprehensive statistical analysis report.
 
@@ -1636,7 +1671,177 @@ def generate_statistical_report(results, save_dir=None):
         with open(os.path.join(save_dir, "statistical_analysis_report.txt"), "w") as f:
             f.write(report_text)
 
-    # Print to console
     print(report_text)
 
+    # Call analyze_significance as part of the report generation if raw data and configs are provided
+    if (
+            df_raw is not None
+            and metrics is not None
+            and direction_dict is not None
+            and effect_dict is not None
+    ):
+        analyze_significance(
+            df_raw, metrics, direction_dict, effect_dict, save_dir=save_dir
+        )
+
     return report_text
+
+
+if __name__ == "__main__":
+    # test with file input
+    xc50 = "/home/bkhalil/Repos/uqdd/results_revision/final_xc50.csv"
+    kx = "/home/bkhalil/Repos/uqdd/results_revision/final_kx.csv"
+
+    df_xc50 = pd.read_csv(xc50)
+    df_kx = pd.read_csv(kx)
+
+    metrics = [
+        "R2",
+        "RMSE",
+        "Miscalibration Area",
+        "Sharpness",
+        "NLL",
+        "Interval",
+        "CRPS",
+    ]
+    direction_dict = {
+        "R2": "maximize",  # Higher is better
+        "RMSE": "minimize",  # Lower is better
+        "Miscalibration Area": "minimize",  # Lower is better
+        "Sharpness": "minimize",  # Lower is better
+        "NLL": "minimize",  # Lower is better
+        "Interval": "minimize",  # Lower is better
+        "CRPS": "minimize",  # Lower is better
+    }
+
+    effect_dict = {}
+
+    save_dir = "stat_analysis_results"
+    os.makedirs(save_dir, exist_ok=True)
+    # perform comprehensive statistical analysis
+
+    # let's start with xc50 and analyze significance
+    analyze_significance(
+        df_xc50, metrics, direction_dict, effect_dict, save_dir=save_dir
+    )
+
+    results_xc50 = comprehensive_statistical_analysis(
+        df_xc50,
+        metrics=metrics,
+        models=None,
+        tasks=None,
+        splits=None,
+        save_dir=save_dir,
+        alpha=0.05,
+    )
+    report_xc50 = generate_statistical_report(
+        results_xc50,
+        save_dir=save_dir,
+        df_raw=df_xc50,
+        metrics=metrics,
+        direction_dict=direction_dict,
+        effect_dict=effect_dict,
+    )
+
+    # now let's do the same for kx
+    analyze_significance(df_kx, metrics, direction_dict, effect_dict, save_dir=save_dir)
+    results_kx = comprehensive_statistical_analysis(
+        df_kx,
+        metrics=metrics,
+        models=None,
+        tasks=None,
+        splits=None,
+        save_dir=save_dir,
+        alpha=0.05,
+    )
+    report_kx = generate_statistical_report(
+        results_kx,
+        save_dir=save_dir,
+        df_raw=df_kx,
+        metrics=metrics,
+        direction_dict=direction_dict,
+        effect_dict=effect_dict,
+    )
+
+    # import argparse
+    #
+    # parser = argparse.ArgumentParser(
+    #     description="Statistical analysis of model performance metrics"
+    # )
+    # parser.add_argument(
+    #     "--input_csv",
+    #     type=str,
+    #     required=True,
+    #     help="Path to input CSV file with performance metrics",
+    # )
+    # parser.add_argument(
+    #     "--output_dir",
+    #     type=str,
+    #     default="stat_analysis_results",
+    #     help="Directory to save analysis results",
+    # )
+    # parser.add_argument(
+    #     "--metrics",
+    #     type=str,
+    #     nargs="+",
+    #     required=True,
+    #     help="List of metric columns to analyze (e.g., roc_auc pr_auc mcc)",
+    # )
+    # parser.add_argument(
+    #     "--models",
+    #     type=str,
+    #     nargs="+",
+    #     default=None,
+    #     help="List of models to compare (default: all models in data)",
+    # )
+    # parser.add_argument(
+    #     "--tasks",
+    #     type=str,
+    #     nargs="+",
+    #     default=None,
+    #     help="List of tasks to include (default: all tasks in data)",
+    # )
+    # parser.add_argument(
+    #     "--splits",
+    #     type=str,
+    #     nargs="+",
+    #     default=None,
+    #     help="List of splits to include (default: all splits in data)",
+    # )
+    # parser.add_argument(
+    #     "--alpha",
+    #     type=float,
+    #     default=0.05,
+    #     help="Significance level for statistical tests (default: 0.05)",
+    # )
+    # args = parser.parse_args()
+    #
+    # # Load data
+    # df = pd.read_csv(args.input_csv)
+    #
+    # # Define expected directionality and effect size interpretations for metrics
+    # direction_dict = {
+    #     "roc_auc": "greater",  # Higher is better
+    #     "pr_auc": "greater",  # Higher is better
+    #     "mcc": "greater",  # Higher is better
+    #     "recall": "greater",  # Higher is better
+    #     "tnr": "greater",  # Higher is better
+    # }
+    # effect_dict = {
+    #     "roc_auc": "AUC difference",
+    #     "pr_auc": "AUC difference",
+    #     "mcc": "MCC difference",
+    #     "recall": "Recall difference",
+    #     "tnr": "TNR difference",
+    # }
+    #
+    # # Perform comprehensive statistical analysis
+    # results = comprehensive_statistical_analysis(
+    #     df,
+    #     metrics=args.metrics,
+    #     models=args.models,
+    #     tasks=args.tasks,
+    #     splits=args.splits,
+    #     save_dir=args.output_dir,
+    #     alpha=args.alpha,
+    # )
