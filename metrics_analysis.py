@@ -12,14 +12,11 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scikit_posthocs as sp
 import seaborn as sns
 # from matplotlib import colormaps  # Use the new colormaps API
 from matplotlib.cm import ScalarMappable
 # Statistical analysis imports
-from scipy.stats import wilcoxon, friedmanchisquare
 from sklearn.metrics import mean_squared_error, auc
-from sklearn.utils import resample
 
 # mpl.rcParams.update({"font.family": "sans-serif", "font.size": 7})
 # plt.style.use(["science", "no-latex", "nature"])
@@ -1884,742 +1881,6 @@ def load_stats_df(save_dir, add_to_title=""):
     return pd.read_csv(os.path.join(save_dir, f"stats_df_{add_to_title}.csv"))
 
 
-# Bootstrap functionality
-def bootstrap_ci(data, func=np.mean, n_bootstrap=1000, ci=95, random_state=42):
-    """
-    Calculate bootstrap confidence intervals for a statistic.
-    """
-    np.random.seed(random_state)
-    bootstrap_samples = []
-    for _ in range(n_bootstrap):
-        sample = resample(data, random_state=np.random.randint(0, 10000))
-        bootstrap_samples.append(func(sample))
-
-    alpha = (100 - ci) / 2
-    lower = np.percentile(bootstrap_samples, alpha)
-    upper = np.percentile(bootstrap_samples, 100 - alpha)
-    return lower, upper
-
-
-# STATISTICAL RELEVANCE ANALYSIS FUNCTIONS
-def cliffs_delta(x, y):
-    """
-    Calculate Cliff's Delta effect size measure.
-
-    Parameters:
-    - x, y: array-like, the two samples to compare
-
-    Returns:
-    - delta: float, Cliff's Delta value
-    - interpretation: str, interpretation of the effect size
-    """
-    x, y = np.array(x), np.array(y)
-    m, n = len(x), len(y)
-
-    # Calculate all pairwise comparisons
-    comparisons = 0
-    for xi in x:
-        for yi in y:
-            if xi > yi:
-                comparisons += 1
-            elif xi < yi:
-                comparisons -= 1
-
-    delta = comparisons / (m * n)
-
-    # Interpret effect size
-    abs_delta = abs(delta)
-    if abs_delta < 0.147:
-        interpretation = "negligible"
-    elif abs_delta < 0.33:
-        interpretation = "small"
-    elif abs_delta < 0.474:
-        interpretation = "medium"
-    else:
-        interpretation = "large"
-
-    return delta, interpretation
-
-
-def wilcoxon_pairwise_test(
-    df, metric, model_a, model_b, task=None, split=None, seed_col=None
-):
-    """
-    Perform Wilcoxon signed-rank test between two models for a specific metric.
-
-    Parameters:
-    - df: DataFrame with performance data
-    - metric: str, name of the metric column
-    - model_a, model_b: str, model names to compare
-    - task: str, optional task filter
-    - split: str, optional split filter
-    - seed_col: str, column name for seeds/runs
-
-    Returns:
-    - dict with test results
-    """
-    # Filter data
-    data = df.copy()
-    if task is not None:
-        data = data[data["Task"] == task]
-    if split is not None:
-        data = data[data["Split"] == split]
-
-    # Get metric values for each model
-    values_a = data[data["Model type"] == model_a][metric].values
-    values_b = data[data["Model type"] == model_b][metric].values
-
-    if len(values_a) == 0 or len(values_b) == 0:
-        return None
-
-    # Ensure same length (paired test)
-    min_len = min(len(values_a), len(values_b))
-    values_a = values_a[:min_len]
-    values_b = values_b[:min_len]
-
-    # Wilcoxon signed-rank test
-    statistic, p_value = wilcoxon(values_a, values_b, alternative="two-sided")
-
-    # Cliff's Delta effect size
-    delta, effect_size_interpretation = cliffs_delta(values_a, values_b)
-
-    # Median difference and bootstrap CI
-    differences = values_a - values_b
-    median_diff = np.median(differences)
-    ci_lower, ci_upper = bootstrap_ci(differences, np.median, n_bootstrap=1000)
-
-    # Practical significance assessment
-    if ci_lower <= 0 <= ci_upper:
-        practical_significance = "difference is small (CI includes 0)"
-    elif abs(median_diff) < 0.1 * np.std(np.concatenate([values_a, values_b])):
-        practical_significance = "difference is small"
-    else:
-        practical_significance = "difference may be meaningful"
-
-    return {
-        "model_a": model_a,
-        "model_b": model_b,
-        "metric": metric,
-        "task": task,
-        "split": split,
-        "n_pairs": min_len,
-        "wilcoxon_statistic": statistic,
-        "p_value": p_value,
-        "cliffs_delta": delta,
-        "effect_size_interpretation": effect_size_interpretation,
-        "median_difference": median_diff,
-        "ci_lower": ci_lower,
-        "ci_upper": ci_upper,
-        "practical_significance": practical_significance,
-    }
-
-
-def holm_bonferroni_correction(p_values):
-    """
-    Apply Holm-Bonferroni correction for multiple comparisons.
-
-    Parameters:
-    - p_values: list or array of p-values
-
-    Returns:
-    - corrected_p_values: array of corrected p-values
-    - rejected: boolean array indicating which hypotheses are rejected
-    """
-    p_values = np.array(p_values)
-    n = len(p_values)
-
-    # Sort p-values and keep track of original indices
-    sorted_indices = np.argsort(p_values)
-    sorted_p_values = p_values[sorted_indices]
-
-    # Apply Holm-Bonferroni correction
-    corrected_p_values = np.zeros(n)
-    rejected = np.zeros(n, dtype=bool)
-
-    for i in range(n):
-        # Correction factor decreases with each step
-        correction_factor = n - i
-        corrected_p_values[sorted_indices[i]] = min(
-            1.0, sorted_p_values[i] * correction_factor
-        )
-
-        # Check if hypothesis is rejected (alpha = 0.05)
-        if corrected_p_values[sorted_indices[i]] < 0.05:
-            rejected[sorted_indices[i]] = True
-        else:
-            # Once we fail to reject, all subsequent hypotheses are also not rejected
-            break
-
-    return corrected_p_values, rejected
-
-
-def pairwise_model_comparison(
-    df, metrics, models=None, tasks=None, splits=None, alpha=0.05
-):
-    """
-    Perform comprehensive pairwise model comparisons with statistical tests.
-
-    Parameters:
-    - df: DataFrame with performance data
-    - metrics: list of metrics to compare
-    - models: list of models to compare (if None, use all models)
-    - tasks: list of tasks to include (if None, use all tasks)
-    - splits: list of splits to include (if None, use all splits)
-    - alpha: significance level
-
-    Returns:
-    - DataFrame with test results
-    """
-    if models is None:
-        models = df["Model type"].unique()
-    if tasks is None:
-        tasks = df["Task"].unique()
-    if splits is None:
-        splits = df["Split"].unique()
-
-    results = []
-
-    for metric in metrics:
-        for task in tasks:
-            for split in splits:
-                # All pairwise combinations
-                for i, model_a in enumerate(models):
-                    for j, model_b in enumerate(models):
-                        if i < j:  # Avoid duplicate comparisons
-                            result = wilcoxon_pairwise_test(
-                                df, metric, model_a, model_b, task, split
-                            )
-                            if result is not None:
-                                results.append(result)
-
-    if not results:
-        return pd.DataFrame()
-
-    results_df = pd.DataFrame(results)
-
-    # Apply Holm-Bonferroni correction
-    p_values = results_df["p_value"].values
-    corrected_p_values, rejected = holm_bonferroni_correction(p_values)
-
-    results_df["corrected_p_value"] = corrected_p_values
-    results_df["significant_after_correction"] = rejected
-
-    return results_df
-
-
-def friedman_nemenyi_test(df, metrics, models=None, alpha=0.05):
-    """
-    Perform Friedman test followed by Nemenyi post-hoc test for multiple model comparison.
-
-    Parameters:
-    - df: DataFrame with performance data
-    - metrics: list of metrics to compare
-    - models: list of models to compare
-    - alpha: significance level
-
-    Returns:
-    - dict with Friedman test results and post-hoc comparisons
-    """
-    if models is None:
-        models = df["Model type"].unique()
-
-    results = {}
-
-    for metric in metrics:
-        # Prepare data for Friedman test
-        # Each row should be a "block" (task/split combination)
-        # Each column should be a model
-        pivot_data = df.pivot_table(
-            values=metric, index=["Task", "Split"], columns="Model type", aggfunc="mean"
-        )
-
-        # Filter to only include specified models
-        available_models = [m for m in models if m in pivot_data.columns]
-        pivot_data = pivot_data[available_models]
-
-        # Remove rows with any NaN values
-        pivot_data = pivot_data.dropna()
-
-        if pivot_data.shape[0] < 2 or pivot_data.shape[1] < 3:
-            results[metric] = {
-                "error": "Insufficient data for Friedman test",
-                "data_shape": pivot_data.shape,
-            }
-            continue
-
-        # Friedman test
-        try:
-            friedman_stat, friedman_p = friedmanchisquare(
-                *[pivot_data[col].values for col in pivot_data.columns]
-            )
-
-            # Calculate average ranks
-            ranks = pivot_data.rank(
-                axis=1, ascending=False
-            )  # Higher values get better ranks
-            mean_ranks = ranks.mean()
-
-            result = {
-                "friedman_statistic": friedman_stat,
-                "friedman_p_value": friedman_p,
-                "mean_ranks": mean_ranks.to_dict(),
-                "significant": friedman_p < alpha,
-            }
-
-            # If Friedman test is significant, perform Nemenyi post-hoc test
-            if friedman_p < alpha:
-                try:
-                    # Convert to format expected by scikit_posthocs
-                    data_array = pivot_data.values
-                    nemenyi_result = sp.posthoc_nemenyi_friedman(
-                        data_array.T  # Transpose for correct format
-                    )
-                    nemenyi_result.index = available_models
-                    nemenyi_result.columns = available_models
-
-                    result["nemenyi_p_values"] = nemenyi_result.to_dict()
-                    result["critical_difference"] = calculate_critical_difference(
-                        len(available_models), pivot_data.shape[0], alpha
-                    )
-                except Exception as e:
-                    result["nemenyi_error"] = str(e)
-
-            results[metric] = result
-
-        except Exception as e:
-            results[metric] = {"error": str(e)}
-
-    return results
-
-
-def calculate_critical_difference(k, n, alpha=0.05):
-    """
-    Calculate critical difference for Nemenyi test.
-
-    Parameters:
-    - k: number of models
-    - n: number of data sets (blocks)
-    - alpha: significance level
-
-    Returns:
-    - critical difference value
-    """
-    from scipy.stats import studentized_range
-
-    # Critical value from studentized range distribution
-    q_alpha = studentized_range.ppf(1 - alpha, k, np.inf) / np.sqrt(2)
-
-    # Critical difference
-    cd = q_alpha * np.sqrt(k * (k + 1) / (6 * n))
-
-    return cd
-
-
-def bootstrap_auc_difference(
-    auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42
-):
-    """
-    Calculate bootstrap confidence intervals for AUC differences.
-
-    Parameters:
-    - auc_values_a, auc_values_b: arrays of AUC values for two methods
-    - n_bootstrap: number of bootstrap samples
-    - ci: confidence interval percentage
-    - random_state: random seed
-
-    Returns:
-    - dict with difference statistics and CI
-    """
-    np.random.seed(random_state)
-
-    differences = []
-    for _ in range(n_bootstrap):
-        # Bootstrap sample from each group
-        sample_a = resample(auc_values_a, random_state=np.random.randint(0, 10000))
-        sample_b = resample(auc_values_b, random_state=np.random.randint(0, 10000))
-
-        # Calculate difference of means
-        diff = np.mean(sample_a) - np.mean(sample_b)
-        differences.append(diff)
-
-    differences = np.array(differences)
-
-    # Calculate confidence interval
-    alpha = (100 - ci) / 2
-    ci_lower = np.percentile(differences, alpha)
-    ci_upper = np.percentile(differences, 100 - alpha)
-
-    # Original difference
-    original_diff = np.mean(auc_values_a) - np.mean(auc_values_b)
-
-    return {
-        "mean_difference": original_diff,
-        "ci_lower": ci_lower,
-        "ci_upper": ci_upper,
-        "bootstrap_differences": differences,
-    }
-
-
-def comprehensive_statistical_analysis(
-    df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
-):
-    """
-    Perform comprehensive statistical analysis including all requested tests.
-
-    Parameters:
-    - df: DataFrame with performance data
-    - metrics: list of metrics to analyze
-    - models: list of models to compare
-    - tasks: list of tasks to include
-    - splits: list of splits to include
-    - save_dir: directory to save results
-    - alpha: significance level
-
-    Returns:
-    - dict with all statistical test results
-    """
-    print("Performing comprehensive statistical analysis...")
-
-    results = {}
-
-    # 1. Pairwise Wilcoxon tests with Cliff's Delta
-    print("1. Running pairwise Wilcoxon signed-rank tests...")
-    pairwise_results = pairwise_model_comparison(
-        df, metrics, models, tasks, splits, alpha
-    )
-    results["pairwise_tests"] = pairwise_results
-
-    # 2. Friedman test with Nemenyi post-hoc
-    print("2. Running Friedman tests with Nemenyi post-hoc...")
-    friedman_results = friedman_nemenyi_test(df, metrics, models, alpha)
-    results["friedman_nemenyi"] = friedman_results
-
-    # 3. AUC bootstrap comparisons (if AUC columns exist)
-    auc_columns = [col for col in df.columns if "AUC" in col or "auc" in col]
-    if auc_columns:
-        print("3. Running bootstrap comparisons for AUC metrics...")
-        auc_bootstrap_results = {}
-
-        for auc_col in auc_columns:
-            auc_bootstrap_results[auc_col] = {}
-
-            if models is None:
-                available_models = df["Model type"].unique()
-            else:
-                available_models = models
-
-            # Pairwise AUC comparisons
-            for i, model_a in enumerate(available_models):
-                for j, model_b in enumerate(available_models):
-                    if i < j:
-                        auc_a = df[df["Model type"] == model_a][auc_col].dropna().values
-                        auc_b = df[df["Model type"] == model_b][auc_col].dropna().values
-
-                        if len(auc_a) > 0 and len(auc_b) > 0:
-                            bootstrap_result = bootstrap_auc_difference(auc_a, auc_b)
-                            auc_bootstrap_results[auc_col][
-                                f"{model_a}_vs_{model_b}"
-                            ] = bootstrap_result
-
-        results["auc_bootstrap"] = auc_bootstrap_results
-
-    # Save results if directory provided
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-
-        # Save pairwise results
-        if not pairwise_results.empty:
-            pairwise_results.to_csv(
-                os.path.join(save_dir, "pairwise_statistical_tests.csv"), index=False
-            )
-
-        # Save Friedman/Nemenyi results
-        import json
-
-        with open(os.path.join(save_dir, "friedman_nemenyi_results.json"), "w") as f:
-            # Convert numpy types to regular Python types for JSON serialization
-            json_compatible_results = {}
-            for metric, result in friedman_results.items():
-                json_compatible_results[metric] = {}
-                for key, value in result.items():
-                    if isinstance(value, (np.ndarray, np.generic)):
-                        json_compatible_results[metric][key] = value.tolist()
-                    elif isinstance(value, dict):
-                        json_compatible_results[metric][key] = {
-                            str(k): (
-                                float(v)
-                                if isinstance(v, (np.ndarray, np.generic))
-                                else v
-                            )
-                            for k, v in value.items()
-                        }
-                    else:
-                        json_compatible_results[metric][key] = (
-                            float(value)
-                            if isinstance(value, (np.ndarray, np.generic))
-                            else value
-                        )
-
-            json.dump(json_compatible_results, f, indent=2)
-
-        # Save AUC bootstrap results
-        if auc_columns:
-            with open(os.path.join(save_dir, "auc_bootstrap_results.json"), "w") as f:
-                json_compatible_auc = {}
-                for auc_col, comparisons in results["auc_bootstrap"].items():
-                    json_compatible_auc[auc_col] = {}
-                    for comparison, result in comparisons.items():
-                        json_compatible_auc[auc_col][comparison] = {
-                            k: v.tolist() if isinstance(v, np.ndarray) else v
-                            for k, v in result.items()
-                        }
-                json.dump(json_compatible_auc, f, indent=2)
-
-    return results
-
-
-def plot_critical_difference_diagram(
-    friedman_results, metric, save_dir=None, alpha=0.05
-):
-    """
-    Plot Critical Difference diagram for Nemenyi test results.
-
-    Parameters:
-    - friedman_results: results from friedman_nemenyi_test
-    - metric: metric name to plot
-    - save_dir: directory to save plot
-    - alpha: significance level
-    """
-    if metric not in friedman_results:
-        print(f"Metric {metric} not found in Friedman results")
-        return
-
-    result = friedman_results[metric]
-
-    if "error" in result:
-        print(f"Error in Friedman test for {metric}: {result['error']}")
-        return
-
-    if not result["significant"]:
-        print(f"Friedman test not significant for {metric}, skipping CD diagram")
-        return
-
-    mean_ranks = result["mean_ranks"]
-    models = list(mean_ranks.keys())
-    ranks = [mean_ranks[model] for model in models]
-
-    # Sort by rank (lower rank = better performance)
-    sorted_indices = np.argsort(ranks)
-    sorted_models = [models[i] for i in sorted_indices]
-    sorted_ranks = [ranks[i] for i in sorted_indices]
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    # Plot ranks on x-axis
-    y_pos = 0
-    ax.scatter(sorted_ranks, [y_pos] * len(sorted_ranks), s=100, c="blue")
-
-    # Add model labels
-    for i, (model, rank) in enumerate(zip(sorted_models, sorted_ranks)):
-        ax.annotate(
-            model,
-            (rank, y_pos),
-            xytext=(0, 20),
-            textcoords="offset points",
-            ha="center",
-            rotation=45,
-        )
-
-    # Add critical difference bar
-    if "critical_difference" in result:
-        cd = result["critical_difference"]
-
-        # Find groups of models that are not significantly different
-        groups = []
-        for i, model_a in enumerate(sorted_models):
-            group = [model_a]
-            rank_a = sorted_ranks[i]
-
-            for j, model_b in enumerate(sorted_models):
-                if i != j:
-                    rank_b = sorted_ranks[j]
-                    if abs(rank_a - rank_b) <= cd:
-                        if model_b not in [m for g in groups for m in g]:
-                            group.append(model_b)
-
-            if len(group) > 1:
-                groups.append(group)
-
-        # Draw lines connecting non-significantly different models
-        colors = plt.cm.Set3(np.linspace(0, 1, len(groups)))
-        for group, color in zip(groups, colors):
-            if len(group) > 1:
-                group_ranks = [sorted_ranks[sorted_models.index(m)] for m in group]
-                min_rank, max_rank = min(group_ranks), max(group_ranks)
-                ax.plot(
-                    [min_rank, max_rank],
-                    [y_pos - 0.05, y_pos - 0.05],
-                    color=color,
-                    linewidth=3,
-                    alpha=0.7,
-                )
-
-    ax.set_xlim(min(sorted_ranks) - 0.5, max(sorted_ranks) + 0.5)
-    ax.set_ylim(-0.3, 0.5)
-    ax.set_xlabel("Average Rank")
-    ax.set_title(f"Critical Difference Diagram - {metric}")
-    ax.grid(True, alpha=0.3)
-
-    # Remove y-axis
-    ax.set_yticks([])
-
-    if save_dir:
-        plot_name = f"critical_difference_{metric.replace(' ', '_')}"
-        save_plot(fig, save_dir, plot_name)
-
-    plt.tight_layout()
-    if INTERACTIVE_MODE:
-        plt.show()
-    plt.close()
-
-
-def generate_statistical_report(results, save_dir=None):
-    """
-    Generate a comprehensive statistical analysis report.
-
-    Parameters:
-    - results: output from comprehensive_statistical_analysis
-    - save_dir: directory to save report
-    """
-    report = []
-
-    report.append("=" * 80)
-    report.append("COMPREHENSIVE STATISTICAL ANALYSIS REPORT")
-    report.append("=" * 80)
-    report.append("")
-
-    # 1. Pairwise Tests Summary
-    if "pairwise_tests" in results and not results["pairwise_tests"].empty:
-        pairwise_df = results["pairwise_tests"]
-
-        report.append("1. PAIRWISE MODEL COMPARISONS (Wilcoxon Signed-Rank Test)")
-        report.append("-" * 60)
-
-        # Significant differences after correction
-        significant = pairwise_df[pairwise_df["significant_after_correction"] == True]
-
-        report.append(f"Total pairwise comparisons performed: {len(pairwise_df)}")
-        report.append(
-            f"Significant differences (after Holm-Bonferroni correction): {len(significant)}"
-        )
-        report.append("")
-
-        if len(significant) > 0:
-            report.append("Significant differences found:")
-            for _, row in significant.iterrows():
-                effect_size = row["effect_size_interpretation"]
-                report.append(
-                    f"  • {row['model_a']} vs {row['model_b']} ({row['metric']}, {row['split']}):"
-                )
-                report.append(
-                    f"    - p-value: {row['p_value']:.4f} (corrected: {row['corrected_p_value']:.4f})"
-                )
-                report.append(
-                    f"    - Cliff's Δ: {row['cliffs_delta']:.3f} ({effect_size} effect)"
-                )
-                report.append(
-                    f"    - Median difference: {row['median_difference']:.4f} [{row['ci_lower']:.4f}, {row['ci_upper']:.4f}]"
-                )
-                report.append(f"    - {row['practical_significance']}")
-                report.append("")
-        else:
-            report.append(
-                "No significant differences found after multiple comparison correction."
-            )
-            report.append("")
-
-    # 2. Friedman/Nemenyi Tests Summary
-    if "friedman_nemenyi" in results:
-        friedman_results = results["friedman_nemenyi"]
-
-        report.append("2. MULTIPLE MODEL COMPARISONS (Friedman + Nemenyi Tests)")
-        report.append("-" * 60)
-
-        for metric, result in friedman_results.items():
-            if "error" in result:
-                report.append(f"{metric}: {result['error']}")
-                continue
-
-            report.append(f"Metric: {metric}")
-            report.append(f"  Friedman test p-value: {result['friedman_p_value']:.4f}")
-
-            if result["significant"]:
-                report.append(
-                    "  Result: Significant difference between models detected"
-                )
-
-                # Show mean ranks
-                mean_ranks = result["mean_ranks"]
-                sorted_ranks = sorted(mean_ranks.items(), key=lambda x: x[1])
-                report.append("  Model rankings (lower rank = better performance):")
-                for i, (model, rank) in enumerate(sorted_ranks, 1):
-                    report.append(f"    {i}. {model}: {rank:.2f}")
-
-                # Critical difference
-                if "critical_difference" in result:
-                    report.append(
-                        f"  Critical difference: {result['critical_difference']:.3f}"
-                    )
-
-            else:
-                report.append("  Result: No significant difference between models")
-
-            report.append("")
-
-    # 3. AUC Bootstrap Results Summary
-    if "auc_bootstrap" in results:
-        auc_results = results["auc_bootstrap"]
-
-        report.append("3. AUC BOOTSTRAP COMPARISONS")
-        report.append("-" * 60)
-
-        for auc_col, comparisons in auc_results.items():
-            report.append(f"AUC Metric: {auc_col}")
-
-            for comparison, result in comparisons.items():
-                model_a, model_b = comparison.split("_vs_")
-                mean_diff = result["mean_difference"]
-                ci_lower = result["ci_lower"]
-                ci_upper = result["ci_upper"]
-
-                # Practical significance
-                if ci_lower <= 0 <= ci_upper:
-                    significance = "difference is small (CI includes 0)"
-                else:
-                    significance = "difference may be meaningful"
-
-                report.append(f"  {model_a} vs {model_b}:")
-                report.append(
-                    f"    Mean difference: {mean_diff:.4f} [{ci_lower:.4f}, {ci_upper:.4f}]"
-                )
-                report.append(f"    {significance}")
-
-            report.append("")
-
-    # Save report
-    report_text = "\n".join(report)
-
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "statistical_analysis_report.txt"), "w") as f:
-            f.write(report_text)
-
-    # Print to console
-    print(report_text)
-
-    return report_text
-
-
 # lets run this file
 if __name__ == "__main__":
     # plt.style.use("tableau-colorblind10")
@@ -3221,3 +2482,73 @@ if __name__ == "__main__":
         group_order=group_order_no_time,
         show_legend=show_legend,
     )
+
+    #####################################################
+    # Statistical analysis
+    #####################################################
+    # Define direction for each metric (to know if higher is better or lower is better)
+    direction_dict = {
+        "R2": "maximize",
+        "RMSE": "minimize",
+        "Miscalibration Area": "minimize",
+        "Sharpness": "minimize",
+        "NLL": "minimize",
+        "CRPS": "minimize",
+        "Interval": "minimize",
+    }
+    # Optional scaling for color bars in mcs heatmaps
+    effect_dict = {k: 0.1 for k in direction_dict.keys()}
+
+    uq_metrics = ["Miscalibration Area", "Sharpness", "NLL", "CRPS", "Interval"]
+    perf_metrics = ["R2"]  # or ["RMSE"] if you prefer
+    all_metrics = perf_metrics + uq_metrics
+
+    # # Assume df is a DataFrame with columns: model, split, seed, R2, Miscalibration, Sharpness, NLL, CRPS, Interval
+    # metrics = ["R2", "Miscalibration Area", "Sharpness", "NLL", "CRPS", "Interval"]
+    #
+    # # Iterate over each split type (e.g., "stratified" and "scaffold_cluster")
+    # for split_type in df_no_time["Split"].unique():
+    #     df_split = df_no_time[df_no_time["Split"] == split_type]
+    #     print(f"\nStatistical comparison for split: {split_type}")
+    #     for metric in metrics:
+    #         print(f"Metric: {metric}")
+    #         # Pivot data to wide format: rows = seeds, columns = models (for this split)
+    #         data_wide = df_split.pivot(
+    #             index="Seed", columns="Model Type", values=metric
+    #         )
+    #         # Compute residuals by subtracting each seed's mean (to assess normality)
+    #         seed_means = data_wide.mean(axis=1)
+    #         residuals = (
+    #             data_wide.T - seed_means
+    #         ).T  # subtract each seed's mean from that seed's model values
+    #         resid_values = residuals.values.flatten()
+    #         resid_values = resid_values[~np.isnan(resid_values)]
+    #         # Normality test on residuals (Shapiro-Wilk)
+    #         W, p_normal = shapiro(resid_values)
+    #         if p_normal >= 0.05:
+    #             # Perform repeated-measures ANOVA
+    #             anova = AnovaRM(
+    #                 df_split, depvar=metric, subject="Seed", within=["Model Type"]
+    #             ).fit()
+    #             pval = anova.anova_table["Pr > F"][0]
+    #             print(f"ANOVA p-value = {pval:.3g}")
+    #             if pval < 0.05:
+    #                 # Tukey HSD post-hoc comparisons
+    #                 tukey = pairwise_tukeyhsd(
+    #                     endog=df_split[metric],
+    #                     groups=df_split["Model Type"],
+    #                     alpha=0.05,
+    #                 )
+    #                 print("Tukey HSD pairwise p-values:")
+    #                 print(tukey.summary())
+    #         else:
+    #             # Perform Friedman test (non-parametric repeated-measures ANOVA)
+    #             # Prepare data as a list of model columns for scipy (each list element is array of values for a model across seeds)
+    #             groups = [data_wide[col].values for col in data_wide.columns]
+    #             stat, pval = friedmanchisquare(*groups)
+    #             print(f"Friedman chi-square = {stat:.3f}, p-value = {pval:.3g}")
+    #             if pval < 0.05:
+    #                 # Conover post-hoc test (Holm correction for multiple comparisons)
+    #                 conover = sp.posthoc_conover_friedman(data_wide, p_adjust="holm")
+    #                 print("Conover post-hoc p-value matrix:")
+    #                 print(conover)
