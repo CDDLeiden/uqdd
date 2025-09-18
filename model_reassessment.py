@@ -1,4 +1,5 @@
 import argparse
+
 # # Importing models and their predict functions
 # from uqdd.models.utils_train import predict # for ensemble
 # import matplotlib.pyplot as plt
@@ -17,6 +18,7 @@ from uqdd.models.mcdropout import mc_predict
 from uqdd.models.pnn import PNN
 from uqdd.models.utils_metrics import process_preds, create_df_preds
 from uqdd.models.utils_models import load_model, get_model_config
+
 # METRICS
 from uqdd.models.utils_train import (
     predict,

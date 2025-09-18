@@ -521,7 +521,7 @@ def make_mcs_plot_grid(
     axis_text_size=12,
     title_text_size=16,
     sort_axes=False,
-        save_dir=None,
+    save_dir=None,
 ):
     """
     Create a grid of multiple comparison of means plots using Tukey HSD test results.
@@ -610,13 +610,13 @@ def make_mcs_plot_grid(
 
 
 def make_scatterplot(
-        df,
-        val_col,
-        pred_col,
-        thresh,
-        cycle_col="cv_cycle",
-        group_col="method",
-        save_dir=None,
+    df,
+    val_col,
+    pred_col,
+    thresh,
+    cycle_col="cv_cycle",
+    group_col="method",
+    save_dir=None,
 ):
     """
     Create scatter plots for each method showing the relationship between predicted and measured values.
@@ -1534,12 +1534,12 @@ def comprehensive_statistical_analysis(
 
 
 def generate_statistical_report(
-        results,
-        save_dir=None,
-        df_raw=None,
-        metrics=None,
-        direction_dict=None,
-        effect_dict=None,
+    results,
+    save_dir=None,
+    df_raw=None,
+    metrics=None,
+    direction_dict=None,
+    effect_dict=None,
 ):
     """
     Generate a comprehensive statistical analysis report.
@@ -1675,10 +1675,10 @@ def generate_statistical_report(
 
     # Call analyze_significance as part of the report generation if raw data and configs are provided
     if (
-            df_raw is not None
-            and metrics is not None
-            and direction_dict is not None
-            and effect_dict is not None
+        df_raw is not None
+        and metrics is not None
+        and direction_dict is not None
+        and effect_dict is not None
     ):
         analyze_significance(
             df_raw, metrics, direction_dict, effect_dict, save_dir=save_dir

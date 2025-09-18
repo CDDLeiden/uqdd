@@ -11,8 +11,10 @@ import numpy as np
 import pandas as pd
 import scikit_posthocs as sp
 import seaborn as sns
+
 # from matplotlib import colormaps  # Use the new colormaps API
 from matplotlib.cm import ScalarMappable
+
 # Statistical analysis imports
 from scipy.stats import wilcoxon, friedmanchisquare
 from sklearn.metrics import mean_squared_error, auc
