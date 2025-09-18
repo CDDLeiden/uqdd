@@ -1908,7 +1908,7 @@ def cliffs_delta(x, y):
 
 
 def wilcoxon_pairwise_test(
-        df, metric, model_a, model_b, task=None, split=None, seed_col=None
+    df, metric, model_a, model_b, task=None, split=None, seed_col=None
 ):
     """
     Perform Wilcoxon signed-rank test between two models for a specific metric.
@@ -2020,7 +2020,7 @@ def holm_bonferroni_correction(p_values):
 
 
 def pairwise_model_comparison(
-        df, metrics, models=None, tasks=None, splits=None, alpha=0.05
+    df, metrics, models=None, tasks=None, splits=None, alpha=0.05
 ):
     """
     Perform comprehensive pairwise model comparisons with statistical tests.
@@ -2182,7 +2182,7 @@ def calculate_critical_difference(k, n, alpha=0.05):
 
 
 def bootstrap_auc_difference(
-        auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42
+    auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42
 ):
     """
     Calculate bootstrap confidence intervals for AUC differences.
@@ -2227,7 +2227,7 @@ def bootstrap_auc_difference(
 
 
 def comprehensive_statistical_analysis(
-        df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
+    df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
 ):
     """
     Perform comprehensive statistical analysis including all requested tests.
@@ -2345,7 +2345,7 @@ def comprehensive_statistical_analysis(
 
 
 def plot_critical_difference_diagram(
-        friedman_results, metric, save_dir=None, alpha=0.05
+    friedman_results, metric, save_dir=None, alpha=0.05
 ):
     """
     Plot Critical Difference diagram for Nemenyi test results.
@@ -2710,12 +2710,19 @@ if __name__ == "__main__":
     # Extracting the necessary parts for plotting and make copies to avoid SettingWithCopyWarning
     # df_pcm with exact match of task pcm
     df_pcm = df_merged[df_merged["Task"] == "PCM"].copy()
+    # export this df_pcm to csv
+    df_pcm.to_csv(
+        os.path.join(save_dir, f"all_{activity_type}_results_before_processing.csv"),
+        index=False,
+    )
+
     df_before_calib = df_merged[df_merged["Task"] == "PCM_before_calibration"].copy()
     df_before_calib["Calibration"] = "Before Calibration"
 
     df_after_calib = df_merged[
         df_merged["Task"] == "PCM_after_calibration_with_isotonic_regression"
     ].copy()
+
     df_after_calib["Calibration"] = "After Calibration"
 
     df_calib = pd.concat([df_before_calib, df_after_calib])
