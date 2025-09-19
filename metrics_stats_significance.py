@@ -1,6 +1,5 @@
 import math
 import os
-import sys
 import warnings
 
 import matplotlib.pyplot as plt
@@ -25,11 +24,13 @@ from sklearn.utils import resample
 from statsmodels.stats.anova import AnovaRM
 from statsmodels.stats.libqsturng import psturng, qsturng
 
-INTERACTIVE_MODE = hasattr(sys, "ps1") or sys.flags.interactive
+# INTERACTIVE_MODE = hasattr(sys, "ps1") or sys.flags.interactive
+# INTERACTIVE_MODE = True  # False
+INTERACTIVE_MODE = False
 
 
 # HELPER FUNCTIONS FOR PLOTTING #
-def save_plot(fig, save_dir, plot_name, tighten=True, show_legend=False):
+def save_plot(fig, save_dir, plot_name, tighten=False, show_legend=True):
     # Get current axes
     ax = fig.gca()
     # Remove legend only if it exists and show_legend is False
@@ -174,6 +175,9 @@ def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=N
 
     tukey_se = np.sqrt(2 * mse / (n_per_group))
     q = qsturng(1 - alpha, n_groups, df_resid)
+    # Ensure q is a scalar
+    if isinstance(q, (tuple, list, np.ndarray)):
+        q = q[0]
 
     num_comparisons = len(methods) * (len(methods) - 1) // 2
     result_tab = pd.DataFrame(
@@ -194,7 +198,7 @@ def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=N
                 mean_diff = group1.mean() - group2.mean()
                 studentized_range = np.abs(mean_diff) / tukey_se
                 adjusted_p = psturng(studentized_range * np.sqrt(2), n_groups, df_resid)
-                if isinstance(adjusted_p, np.ndarray):
+                if isinstance(adjusted_p, (tuple, list, np.ndarray)):
                     adjusted_p = adjusted_p[0]
                 lower = mean_diff - (q / np.sqrt(2) * tukey_se)
                 upper = mean_diff + (q / np.sqrt(2) * tukey_se)
@@ -223,21 +227,23 @@ def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=N
 
 
 # -------------- Plotting routines -------------------#
-def make_boxplots_parametric(df, metric_ls, save_dir=None, name_prefix=""):
+def make_boxplots_parametric(
+        df, metric_ls, save_dir=None, name_prefix="", model_order=None
+):
     """
     Create boxplots for each metric using repeated measures ANOVA.
 
     Parameters:
     df (pd.DataFrame): Input dataframe containing the data.
     metric_ls (list of str): List of metric column names to create boxplots for.
+    model_order (list of str): Specific order of models for x-axis. Default is None.
 
     Returns:
     None
     """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    sns.set_context("notebook")
-    sns.set(rc={"figure.figsize": (4, 3)}, font_scale=1.5)
+    sns.set_theme(context="paper", font_scale=1.5)
     sns.set_style("whitegrid")
     figure, axes = plt.subplots(
         1, len(metric_ls), sharex=False, sharey=False, figsize=(28, 8)
@@ -257,6 +263,8 @@ def make_boxplots_parametric(df, metric_ls, save_dir=None, name_prefix=""):
             data=df,
             palette="Set2",
             legend=False,
+            order=model_order,
+            hue_order=model_order,
         )
         title = stat.upper()
         ax.set_title(f"p={p_value:.1e}")
@@ -266,8 +274,12 @@ def make_boxplots_parametric(df, metric_ls, save_dir=None, name_prefix=""):
         label_text_list = [x.get_text() for x in x_tick_labels]
         new_xtick_labels = ["\n".join(x.split("_")) for x in label_text_list]
         ax.set_xticks(list(range(0, len(x_tick_labels))))
-        ax.set_xticklabels(new_xtick_labels)
-    plt.tight_layout()
+        ax.set_xticklabels(new_xtick_labels, rotation=45, ha="right")
+
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
+
+    # plt.tight_layout()
     save_plot(
         figure, save_dir, f"{name_prefix}_boxplot_parametric_{'_'.join(metric_ls)}"
     )
@@ -276,7 +288,9 @@ def make_boxplots_parametric(df, metric_ls, save_dir=None, name_prefix=""):
     plt.close()
 
 
-def make_boxplots_nonparametric(df, metric_ls, save_dir=None, name_prefix=""):
+def make_boxplots_nonparametric(
+        df, metric_ls, save_dir=None, name_prefix="", model_order=None
+):
     """
     Create boxplots for each metric using Friedman test followed by Conover post-hoc test.
 
@@ -284,16 +298,19 @@ def make_boxplots_nonparametric(df, metric_ls, save_dir=None, name_prefix=""):
     df (pd.DataFrame): Input dataframe containing the data.
     metric_ls (list of str): List of metric column names to create boxplots for.
     save_dir (str): Directory to save the plots. Default is None.
+    model_order (list of str): Specific order of models for x-axis. Default is None.
 
     Returns:
     None
     """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    sns.set_context("notebook")
-    sns.set(rc={"figure.figsize": (4, 3)}, font_scale=1.5)
+    n_metrics = len(metric_ls)
+    sns.set_theme(context="paper", font_scale=1.5)
     sns.set_style("whitegrid")
-    figure, axes = plt.subplots(1, 6, sharex=False, sharey=False, figsize=(28, 8))
+    figure, axes = plt.subplots(
+        1, n_metrics, sharex=False, sharey=False, figsize=(28, 8)
+    )
     for i, stat in enumerate(metric_ls):
         friedman = pg.friedman(df, dv=stat, within="method", subject="cv_cycle")[
             "p-unc"
@@ -306,6 +323,8 @@ def make_boxplots_nonparametric(df, metric_ls, save_dir=None, name_prefix=""):
             data=df,
             palette="Set2",
             legend=False,
+            order=model_order,
+            hue_order=model_order,
         )
         title = stat.replace("_", " ").upper()
         ax.set_title(f"p={friedman:.1e}")
@@ -315,8 +334,12 @@ def make_boxplots_nonparametric(df, metric_ls, save_dir=None, name_prefix=""):
         label_text_list = [x.get_text() for x in x_tick_labels]
         new_xtick_labels = ["\n".join(x.split("_")) for x in label_text_list]
         ax.set_xticks(list(range(0, len(x_tick_labels))))
-        ax.set_xticklabels(new_xtick_labels)
-    plt.tight_layout()
+        ax.set_xticklabels(new_xtick_labels, rotation=45, ha="right")
+
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
+
+    # # plt.tight_layout()
     save_plot(
         figure, save_dir, f"{name_prefix}_boxplot_nonparametric_{'_'.join(metric_ls)}"
     )
@@ -325,61 +348,116 @@ def make_boxplots_nonparametric(df, metric_ls, save_dir=None, name_prefix=""):
     plt.close()
 
 
-def make_sign_plots_nonparametric(df, metric_ls, save_dir=None, name_prefix=""):
+def make_sign_plots_nonparametric(
+        df, metric_ls, save_dir=None, name_prefix="", model_order=None
+):
     """
     Create significance plots for nonparametric tests (e.g., Conover test) results.
 
     Parameters:
     df (pd.DataFrame): Input dataframe containing the data.
     metric_ls (list of str): List of metric column names to create significance plots for.
+    model_order (list of str): Specific order of models for x/y axis. Default is None.
 
     Returns:
     None
     """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    # Ensure unique block ID for each block (cv_cycle + method + split)
+    # if not "block_id" in df.columns:
+    #     df["block_id"] = (
+    #         df["cv_cycle"].astype(str)
+    #         + "_"
+    #         + df["method"].astype(str)
+    #         + "_"
+    #         + df["split"].astype(str)
+    #     )
+    # if not "block_id" in df.columns:
+    #     df["block_id"] = (
+    #         df["cv_cycle"].astype(str)
+    #         + "_"
+    #         + df["method"].astype(str)
+    #         + "_"
+    #         + df["split"].astype(str)
+    #     )
     heatmap_args = {
         "linewidths": 0.25,
         "linecolor": "0.5",
         "clip_on": True,
         "square": True,
+        # Add cbar_kws to control colorbar placement
+        "cbar_kws": {"pad": 0.05, "location": "right"},  # "shrink": 0.8,
     }
-    sns.set(rc={"figure.figsize": (4, 3)}, font_scale=1.5)
-    figure, axes = plt.subplots(1, 6, sharex=False, sharey=True, figsize=(26, 8))
+    n_metrics = len(metric_ls)
+    sns.set_theme(context="paper", font_scale=1.5)
+    figure, axes = plt.subplots(
+        1, n_metrics, sharex=False, sharey=True, figsize=(26, 8)
+    )
+    if n_metrics == 1:
+        axes = [axes]
     for i, stat in enumerate(metric_ls):
         pc = sp.posthoc_conover_friedman(
             df,
             y_col=stat,
             group_col="method",
             block_col="cv_cycle",
+            block_id_col="cv_cycle",
             p_adjust="holm",
             melted=True,
         )
+        # plt.tight_layout()
+        # Convert melted pc to square matrix and reindex to model_order
+        # pc_matrix = pc.pivot(index="group1", columns="group2", values="p-adjusted")
+        if model_order is not None:
+            pc = pc.reindex(index=model_order, columns=model_order)
         sub_ax, sub_c = sp.sign_plot(pc, **heatmap_args, ax=axes[i], xticklabels=True)
+
         sub_ax.set_title(stat.upper())
-    plt.tight_layout()
+        # If colorbar exists, adjust its position to avoid overlap
+        if sub_c is not None and hasattr(sub_c, "ax"):
+            # Move colorbar to the right of the plot
+            figure.subplots_adjust(right=0.85)
+            sub_c.ax.set_position(
+                [0.87, 0.5, 0.02, 0.2]
+            )  # [left, bottom, width, height]
+
+    # Adjust layout to prevent overlap
+    # plt.subplots_adjust(hspace=0.3, wspace=0.3)
+
+    # Ensure layout is tight and legend does not overlap
+    # figure.tight_layout(rect=[0, 0, 0.85, 1])
     save_plot(
-        figure, save_dir, f"{name_prefix}_sign_plot_nonparametric_{'_'.join(metric_ls)}"
+        figure,
+        save_dir,
+        f"{name_prefix}_sign_plot_nonparametric_{'_'.join(metric_ls)}",
+        tighten=False,
     )
     if INTERACTIVE_MODE:
         plt.show()
     plt.close()
 
 
-def make_critical_difference_diagrams(df, metric_ls, save_dir=None, name_prefix=""):
+def make_critical_difference_diagrams(
+        df, metric_ls, save_dir=None, name_prefix="", model_order=None
+):
     """
     Create critical difference diagrams for model comparison using Nemenyi test.
 
     Parameters:
     df (pd.DataFrame): Input dataframe containing the data.
     metric_ls (list of str): List of metric column names to create critical difference diagrams for.
+    model_order (list of str): Specific order of models for x-axis. Default is None.
 
     Returns:
     None
     """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    figure, axes = plt.subplots(6, 1, sharex=True, sharey=False, figsize=(16, 10))
+    n_metrics = len(metric_ls)
+    figure, axes = plt.subplots(
+        n_metrics, 1, sharex=True, sharey=False, figsize=(16, 10)
+    )
     for i, stat in enumerate(metric_ls):
         avg_rank = df.groupby("cv_cycle")[stat].rank(pct=True).groupby(df.method).mean()
         pc = sp.posthoc_conover_friedman(
@@ -387,12 +465,21 @@ def make_critical_difference_diagrams(df, metric_ls, save_dir=None, name_prefix=
             y_col=stat,
             group_col="method",
             block_col="cv_cycle",
+            block_id_col="cv_cycle",
             p_adjust="holm",
             melted=True,
         )
+        if model_order is not None:
+            avg_rank = avg_rank.reindex(model_order)
+            pc = pc.reindex(index=model_order, columns=model_order)
+
         sp.critical_difference_diagram(avg_rank, pc, ax=axes[i])
         axes[i].set_title(stat.upper())
-    plt.tight_layout()
+
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
+
+    # plt.tight_layout()
     save_plot(
         figure,
         save_dir,
@@ -431,7 +518,7 @@ def make_normality_diagnostic(df, metric_ls, save_dir=None, name_prefix=""):
         value_name="value",
     )
 
-    sns.set_context("paper", font_scale=1.5)
+    sns.set_theme(context="paper", font_scale=1.5)
     sns.set_style("whitegrid")
 
     metrics = df_norm["metric"].unique()
@@ -441,16 +528,32 @@ def make_normality_diagnostic(df, metric_ls, save_dir=None, name_prefix=""):
 
     for i, metric in enumerate(metrics):
         ax = axes[0, i]
+
         sns.histplot(df_norm[df_norm["metric"] == metric]["value"], kde=True, ax=ax)
+
         ax.set_title(f"{metric}", fontsize=16)
+        # we want those in axes[0] to share the same y_axis label
+        ax.set_xlabel("")
+        if i == 0:
+            ax.set_ylabel("Count")
+        else:
+            ax.set_ylabel("")
 
     for i, metric in enumerate(metrics):
         ax = axes[1, i]
         metric_data = df_norm[df_norm["metric"] == metric]["value"]
         stats.probplot(metric_data, dist="norm", plot=ax)
         ax.set_title("")
+        ax.set_xlabel("Theoretical Quantiles")
+        if i == 0:
+            ax.set_ylabel("Ordered Values")
+        else:
+            ax.set_ylabel("")
 
-    plt.tight_layout()
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(hspace=0.3, wspace=0.8)
+
+    # plt.tight_layout()
     save_plot(
         fig, save_dir, f"{name_prefix}_normality_diagnostic_{'_'.join(metric_ls)}"
     )
@@ -468,13 +571,13 @@ def mcs_plot(
     cbar_ax_bbox=None,
     ax=None,
     show_diff=True,
-    cell_text_size=16,
-    axis_text_size=12,
+        cell_text_size=10,  # smaller font for cell text
+        axis_text_size=8,  # smaller font for axis labels
     show_cbar=True,
     reverse_cmap=False,
     vlim=None,
-    save_dir=None,
-    name_prefix="",
+        # save_dir=None,
+        # name_prefix="",
     **kwargs,
 ):
     """
@@ -489,8 +592,8 @@ def mcs_plot(
     cbar_ax_bbox (tuple): Bounding box for the colorbar axis. Default is None.
     ax (matplotlib.axes.Axes): The axes on which to plot the heatmap. Default is None.
     show_diff (bool): Whether to show the mean differences in the plot. Default is True.
-    cell_text_size (int): Font size for the cell text. Default is 16.
-    axis_text_size (int): Font size for the axis text. Default is 12.
+    cell_text_size (int): Font size for the cell text. Default is 10 (smaller).
+    axis_text_size (int): Font size for the axis text. Default is 8 (smaller).
     show_cbar (bool): Whether to show the colorbar. Default is True.
     reverse_cmap (bool): Whether to reverse the colormap. Default is False.
     vlim (float): Limit for the colormap. Default is None.
@@ -504,7 +607,8 @@ def mcs_plot(
             del kwargs[key]
 
     if not cmap:
-        cmap = "coolwarm"
+        # cmap = "coolwarm"
+        cmap = "YlGnBu"
     if reverse_cmap:
         cmap = cmap + "_r"
 
@@ -518,7 +622,8 @@ def mcs_plot(
 
     # Create a DataFrame for the annotations
     if show_diff:
-        annotations = effect_size.round(3).astype(str) + significance
+        # Only show mean difference and significance inside the cell
+        annotations = effect_size.round(2).astype(str) + significance
     else:
         annotations = significance
 
@@ -532,28 +637,33 @@ def mcs_plot(
         annot_kws={"size": cell_text_size},
         vmin=-2 * vlim if vlim else None,
         vmax=2 * vlim if vlim else None,
+        square=True,  # make cells square
         **kwargs,
     )
 
     if labels:
         label_list = list(means.index)
-        x_label_list = [x + f"\n{means.loc[x].round(2)}" for x in label_list]
-        y_label_list = [x + f"\n{means.loc[x].round(2)}\n" for x in label_list]
+        # x_label_list = [x + f"\n{means.loc[x].round(2)}" for x in label_list]
+        # y_label_list = [x + f"\n{means.loc[x].round(2)}\n" for x in label_list]
+        x_label_list = label_list
+        y_label_list = label_list
+        # Ensure tick locations match label count
+        xtick_positions = np.arange(len(label_list))
+        hax.set_xticks(xtick_positions + 0.5)
         hax.set_xticklabels(
             x_label_list,
             size=axis_text_size,
             ha="center",
-            va="top",
-            rotation=0,
-            rotation_mode="anchor",
+            va="center",
+            rotation=90,  # Perpendicular to plot
         )
+        hax.set_yticks(xtick_positions + 0.5)
         hax.set_yticklabels(
             y_label_list,
             size=axis_text_size,
             ha="center",
             va="center",
-            rotation=90,
-            rotation_mode="anchor",
+            rotation=0,  # Horizontal
         )
 
     hax.set_xlabel("")
@@ -575,14 +685,14 @@ def mcs_plot(
     #
     # plt.setp(hax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     # plt.setp(hax.get_yticklabels(), rotation=0)
-    plt.tight_layout()
+    # plt.tight_layout()
 
-    if save_dir:
-        fig = hax.get_figure()
-        save_plot(fig, save_dir, f"{name_prefix}_mcs_plot")
-    if INTERACTIVE_MODE:
-        plt.show()
-    plt.close()
+    # if save_dir:
+    #     fig = hax.get_figure()
+    #     save_plot(fig, save_dir, f"{name_prefix}_mcs_plot")
+    # if INTERACTIVE_MODE:
+    #     plt.show()
+    # plt.close()
 
     return hax
 
@@ -593,8 +703,8 @@ def make_mcs_plot_grid(
     group_col,
     alpha=0.05,
     figsize=(20, 10),
-    direction_dict={},
-    effect_dict={},
+        direction_dict=None,
+        effect_dict=None,
     show_diff=True,
     cell_text_size=16,
     axis_text_size=12,
@@ -602,6 +712,7 @@ def make_mcs_plot_grid(
     sort_axes=False,
     save_dir=None,
     name_prefix="",
+        model_order=None,
 ):
     """
     Create a grid of multiple comparison of means plots using Tukey HSD test results.
@@ -637,11 +748,11 @@ def make_mcs_plot_grid(
     for key in ["r2", "rho", "prec", "recall"]:
         effect_dict.setdefault(key, 0.1)
 
-    direction_dict = {k.lower(): v for k, v in direction_dict.items()}
-    effect_dict = {k.lower(): v for k, v in effect_dict.items()}
+    # direction_dict = {k.lower(): v for k, v in direction_dict.items()}
+    # effect_dict = {k.lower(): v for k, v in effect_dict.items()}
 
     for i, stat in enumerate(stats):
-        stat = stat.lower()
+        # stat = stat.lower()
 
         row = i // 3
         col = i % 3
@@ -663,6 +774,13 @@ def make_mcs_plot_grid(
             df, stat, group_col, alpha, sort_axes, direction_dict
         )
 
+        if model_order is not None:
+            df_means = df_means.reindex(model_order)
+            df_means_diff = df_means_diff.reindex(
+                index=model_order, columns=model_order
+            )
+            pc = pc.reindex(index=model_order, columns=model_order)
+
         hax = mcs_plot(
             pc,
             effect_size=df_means_diff,
@@ -683,8 +801,55 @@ def make_mcs_plot_grid(
             row = i // 3
             col = i % 3
             ax[row, col].set_visible(False)
+    # we need to add a legend with the significance stars
+    # Create a custom legend
+    from matplotlib.lines import Line2D
 
-    plt.tight_layout()
+    legend_elements = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="p < 0.001 (***): Highly Significant",
+            markerfacecolor="black",
+            markersize=10,
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="p < 0.01 (**): Very Significant",
+            markerfacecolor="black",
+            markersize=10,
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="p < 0.05 (*): Significant",
+            markerfacecolor="black",
+            markersize=10,
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="p >= 0.05: Not Significant",
+            markerfacecolor="black",
+            markersize=10,
+        ),
+    ]
+    fig.legend(
+        handles=legend_elements, loc="upper right", ncol=2, fontsize=12, frameon=False
+    )
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(top=0.88)
+
+    # plt.tight_layout()
     save_plot(fig, save_dir, f"{name_prefix}_mcs_plot_grid_{'_'.join(stats)}")
     if INTERACTIVE_MODE:
         plt.show()
@@ -750,7 +915,10 @@ def make_scatterplot(
         ax.set_xlabel("Predicted")
         ax.set_ylabel("Measured")
 
-    plt.tight_layout()
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
+
+    # plt.tight_layout()
     save_plot(fig, save_dir, f"scatterplot_{val_col}_vs_{pred_col}")
     if INTERACTIVE_MODE:
         plt.show()
@@ -781,8 +949,7 @@ def ci_plot(
             result_tab["upper"] - result_tab["meandiff"],
         ]
     )
-    sns.set(rc={"figure.figsize": (6, 2)})
-    sns.set_context("notebook")
+    sns.set_theme(context="paper")
     sns.set_style("whitegrid")
     ax = sns.pointplot(
         x=result_tab.meandiff, y=result_tab.index, marker="o", linestyle="", ax=ax_in
@@ -800,7 +967,7 @@ def ci_plot(
     ax.set_title(name)
     ax.set_xlim(-0.2, 0.2)
 
-    # plt.tight_layout()
+    # # plt.tight_layout()
     # save_plot(
     #     ax.get_figure(), save_dir, f"{name_prefix}_ci_plot_{name}"
     # )
@@ -810,7 +977,12 @@ def ci_plot(
 
 
 def make_ci_plot_grid(
-    df_in, metric_list, group_col="method", save_dir=None, name_prefix=""
+        df_in,
+        metric_list,
+        group_col="method",
+        save_dir=None,
+        name_prefix="",
+        model_order=None,
 ):
     """
     Create a grid of confidence interval plots for multiple metrics using Tukey HSD test results.
@@ -825,6 +997,7 @@ def make_ci_plot_grid(
     """
     df_in = df_in.copy()
     df_in.replace([np.inf, -np.inf], np.nan, inplace=True)
+
     figure, axes = plt.subplots(
         len(metric_list), 1, figsize=(8, 2 * len(metric_list)), sharex=False
     )
@@ -832,9 +1005,14 @@ def make_ci_plot_grid(
         axes = np.array([axes])
     for i, metric in enumerate(metric_list):
         df_tukey, _, _, _ = rm_tukey_hsd(df_in, metric, group_col=group_col)
+        if model_order is not None:
+            df_tukey = df_tukey.reindex(index=model_order)
         ci_plot(df_tukey, ax_in=axes[i], name=metric)
     figure.suptitle("Multiple Comparison of Means\nTukey HSD, FWER=0.05")
-    plt.tight_layout()
+    # plt.tight_layout()
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(hspace=0.9, wspace=0.3)
+
     save_plot(figure, save_dir, f"{name_prefix}_ci_plot_grid_{'_'.join(metric_list)}")
     if INTERACTIVE_MODE:
         plt.show()
@@ -976,7 +1154,7 @@ def make_curve_plots(df):
     axes[1].set_ylabel("Precision")
     axes[1].set_title("Precision-Recall Curve")
     axes[1].legend()
-    plt.tight_layout()
+    # plt.tight_layout()
 
 
 ###################################################
@@ -1456,14 +1634,21 @@ def plot_critical_difference_diagram(
         plot_name = f"critical_difference_{metric.replace(' ', '_')}"
         save_plot(fig, save_dir, plot_name)
 
-    plt.tight_layout()
+    # plt.tight_layout()
     if INTERACTIVE_MODE:
         plt.show()
     plt.close()
 
 
-def analyze_significance(df_raw, metrics, direction_dict, effect_dict, save_dir=None):
+def analyze_significance(
+        df_raw, metrics, direction_dict, effect_dict, save_dir=None, model_order=None
+):
     df = harmonize_columns(df_raw)
+    # we need to make sure the metrics cols are floats (not object/string)
+    for metric in metrics:
+        df[metric] = pd.to_numeric(df[metric], errors="coerce")
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+
     for split in df["split"].unique():
         df_s = df[df["split"] == split].copy()
         print(f"\n=== Split: {split} ===")
@@ -1480,64 +1665,117 @@ def analyze_significance(df_raw, metrics, direction_dict, effect_dict, save_dir=
             vals = vals[~np.isnan(vals)]
 
             W, p_norm = shapiro(vals) if len(vals) >= 3 else (None, 0.0)
-            # 3.c) Parametric RM-ANOVA + Tukey path
-            if (p_norm is not None) and (p_norm >= 0.05):
-                make_boxplots_parametric(
-                    df_s, [metric], save_dir=save_dir, name_prefix=split
+            if p_norm is None:
+                print(
+                    f"Not enough data for Shapiro-Wilk test (need at least 3 non-NaN values), assuming non-normality"
                 )
-                tukey_tab, means, means_diff, pmat = rm_tukey_hsd(
-                    df=df_s.rename(
-                        columns={metric: metric.lower()}
-                    ),  # rm_tukey_hsd expects lower-case metric key
-                    metric=metric.lower(),
-                    group_col="method",
-                    alpha=0.05,
-                    sort=True,
-                    direction_dict={k.lower(): v for k, v in direction_dict.items()},
+            elif p_norm < 0.05:
+                print(
+                    f"Shapiro-Wilk test for {metric} indicates non-normality (W={W:.3f}, p={p_norm:.3f})"
                 )
-
             else:
-                # 3.d) Non-parametric Friedman + Conover path
-                make_boxplots_nonparametric(
-                    df_s, [metric], save_dir=save_dir, name_prefix=split
+                print(
+                    f"Shapiro-Wilk test for {metric} indicates normality (W={W:.3f}, p={p_norm:.3f})"
                 )
-                friedman_res = friedman_nemenyi_test(df_s, [metric], alpha=0.05)
-                print(friedman_res)
-
-                make_sign_plots_nonparametric(
-                    df_s, [metric], save_dir=save_dir, name_prefix=split
-                )
-                # Critical Difference diagrams
-                make_critical_difference_diagrams(
-                    df_s, [metric], save_dir=save_dir, name_prefix=split
-                )
-                make_critical_difference_diagrams(
-                    df_s, [metric], save_dir=save_dir, name_prefix=split
-                )
-
+            # # 3.c) Parametric RM-ANOVA + Tukey path
+            # if (p_norm is not None) and (p_norm >= 0.05):
+            #     make_boxplots_parametric(
+            #         df_s, [metric], save_dir=save_dir, name_prefix=split, model_order=model_order
+            #     )
+            #     tukey_tab, means, means_diff, pmat = rm_tukey_hsd(
+            #         df=df_s.rename(
+            #             columns={metric: metric.lower()}
+            #         ),  # rm_tukey_hsd expects lower-case metric key
+            #         metric=metric.lower(),
+            #         group_col="method",
+            #         alpha=0.05,
+            #         sort=True,
+            #         direction_dict={k.lower(): v for k, v in direction_dict.items()},
+            #     )
+            #     # use the values from rm_tukey_hsd
+            #     print(tukey_tab)
             #
-            # Multiple-comparisons (MCS) heatmap
-            make_mcs_plot_grid(
-                df=df_s.rename(columns={metric: metric.lower()}),
-                stats=[metric],
-                group_col="method",
-                alpha=0.05,
-                figsize=(6, 4),
-                direction_dict=direction_dict,
-                effect_dict=effect_dict,
-                show_diff=True,
-                sort_axes=True,
-                save_dir=save_dir,
-                name_prefix=split,
-            )
-            # Confidence-interval forest for pairwise diffs
-            make_ci_plot_grid(
-                df_s.rename(columns={metric: metric.lower()}),
-                [metric.lower()],
-                group_col="method",
-                save_dir=save_dir,
-                name_prefix=split,
-            )
+            # else:
+            #     # 3.d) Non-parametric Friedman + Conover path
+            #     make_boxplots_nonparametric(
+            #         df_s, [metric], save_dir=save_dir, name_prefix=split, model_order=model_order
+            #     )
+            #     friedman_res = friedman_nemenyi_test(df_s, [metric], alpha=0.05)
+            #     print(friedman_res)
+            #
+            #     make_sign_plots_nonparametric(
+            #         df_s, [metric], save_dir=save_dir, name_prefix=split
+            #     )
+            #     # Critical Difference diagrams
+            #     make_critical_difference_diagrams(
+            #         df_s, [metric], save_dir=save_dir, name_prefix=split
+            #     )
+
+        ################################################################################
+        # TEMPORARY
+        ################################################################################
+        make_boxplots_parametric(
+            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+        )
+        make_boxplots_nonparametric(
+            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+        )
+        # friedman_res = friedman_nemenyi_test(df_s, [metric], alpha=0.05)
+        # print(friedman_res)
+
+        make_sign_plots_nonparametric(
+            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+        )
+        # Critical Difference diagrams
+        make_critical_difference_diagrams(
+            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+        )
+
+        ################################################################################
+        # Multiple-comparisons (MCS) heatmap
+        make_mcs_plot_grid(
+            df=df_s,
+            stats=metrics,
+            group_col="method",
+            alpha=0.05,
+            # df=df_s.rename(columns={metric: metric.lower()}),
+            figsize=(30, 15),
+            direction_dict=direction_dict,
+            effect_dict=effect_dict,
+            show_diff=True,
+            sort_axes=True,
+            # df_s.rename(columns={metric: metric.lower()}),
+            save_dir=save_dir,
+            name_prefix=split + "_diff_",
+            model_order=model_order,
+        )
+
+        make_mcs_plot_grid(
+            df=df_s,
+            stats=metrics,
+            group_col="method",
+            alpha=0.05,
+            # df=df_s.rename(columns={metric: metric.lower()}),
+            figsize=(30, 15),
+            direction_dict=direction_dict,
+            effect_dict=effect_dict,
+            show_diff=False,
+            sort_axes=True,
+            # df_s.rename(columns={metric: metric.lower()}),
+            save_dir=save_dir,
+            name_prefix=split,
+            model_order=model_order,
+        )
+
+        # Confidence-interval forest for pairwise diffs
+        make_ci_plot_grid(
+            df_s,
+            metrics,
+            group_col="method",
+            save_dir=save_dir,
+            name_prefix=split,
+            model_order=model_order,
+        )
 
 
 def comprehensive_statistical_analysis(
@@ -1840,7 +2078,16 @@ if __name__ == "__main__":
         "CRPS": "minimize",  # Lower is better
     }
 
-    effect_dict = {}
+    effect_dict = {
+        "RMSE": 0.1,
+        "Miscalibration Area": 0.1,
+        "Sharpness": 0.1,
+        "NLL": 0.1,
+        "Interval": 0.1,
+        "CRPS": 0.1,
+    }
+
+    model_order = ["pnn", "ensemble", "eoe", "evidential", "emc", "mcdropout"]
 
     save_dir = "stat_analysis_results"
     os.makedirs(save_dir, exist_ok=True)
@@ -1850,8 +2097,15 @@ if __name__ == "__main__":
     save_dir_xc50 = os.path.join(save_dir, "xc50")
     os.makedirs(save_dir_xc50, exist_ok=True)
 
+    print(f"\n=== Activity: xc50 ===")
+
     analyze_significance(
-        df_xc50, metrics, direction_dict, effect_dict, save_dir=save_dir_xc50
+        df_xc50,
+        metrics,
+        direction_dict,
+        effect_dict,
+        save_dir=save_dir_xc50,
+        model_order=model_order,
     )
 
     results_xc50 = comprehensive_statistical_analysis(
@@ -1875,9 +2129,14 @@ if __name__ == "__main__":
     # now let's do the same for kx
     save_dir_kx = os.path.join(save_dir, "kx")
     os.makedirs(save_dir_kx, exist_ok=True)
-
+    print(f"\n=== Activity: kx ===")
     analyze_significance(
-        df_kx, metrics, direction_dict, effect_dict, save_dir=save_dir_kx
+        df_kx,
+        metrics,
+        direction_dict,
+        effect_dict,
+        save_dir=save_dir_kx,
+        model_order=model_order,
     )
 
     results_kx = comprehensive_statistical_analysis(
@@ -1889,6 +2148,7 @@ if __name__ == "__main__":
         save_dir=save_dir_kx,
         alpha=0.05,
     )
+
     # report_kx = generate_statistical_report(
     #     results_kx,
     #     save_dir=save_dir,
@@ -1950,7 +2210,7 @@ if __name__ == "__main__":
     #     help="Significance level for statistical tests (default: 0.05)",
     # )
     # args = parser.parse_args()
-    #
+    #     type=float,
     # # Load data
     # df = pd.read_csv(args.input_csv)
     #
