@@ -1821,16 +1821,17 @@ if __name__ == "__main__":
     df_kx = pd.read_csv(kx)
 
     metrics = [
-        "R2",
+        # "R2",
         "RMSE",
         "Miscalibration Area",
-        "Sharpness",
         "NLL",
-        "Interval",
         "CRPS",
+        "Interval",
+        "Sharpness",
     ]
+
     direction_dict = {
-        "R2": "maximize",  # Higher is better
+        # "R2": "maximize",  # Higher is better
         "RMSE": "minimize",  # Lower is better
         "Miscalibration Area": "minimize",  # Lower is better
         "Sharpness": "minimize",  # Lower is better
@@ -1846,8 +1847,11 @@ if __name__ == "__main__":
     # perform comprehensive statistical analysis
 
     # let's start with xc50 and analyze significance
+    save_dir_xc50 = os.path.join(save_dir, "xc50")
+    os.makedirs(save_dir_xc50, exist_ok=True)
+
     analyze_significance(
-        df_xc50, metrics, direction_dict, effect_dict, save_dir=save_dir
+        df_xc50, metrics, direction_dict, effect_dict, save_dir=save_dir_xc50
     )
 
     results_xc50 = comprehensive_statistical_analysis(
@@ -1856,37 +1860,43 @@ if __name__ == "__main__":
         models=None,
         tasks=None,
         splits=None,
-        save_dir=save_dir,
+        save_dir=save_dir_xc50,
         alpha=0.05,
     )
-    report_xc50 = generate_statistical_report(
-        results_xc50,
-        save_dir=save_dir,
-        df_raw=df_xc50,
-        metrics=metrics,
-        direction_dict=direction_dict,
-        effect_dict=effect_dict,
-    )
+    # report_xc50 = generate_statistical_report(
+    #     results_xc50,
+    #     save_dir=save_dir,
+    #     df_raw=df_xc50,
+    #     metrics=metrics,
+    #     direction_dict=direction_dict,
+    #     effect_dict=effect_dict,
+    # )
 
     # now let's do the same for kx
-    analyze_significance(df_kx, metrics, direction_dict, effect_dict, save_dir=save_dir)
+    save_dir_kx = os.path.join(save_dir, "kx")
+    os.makedirs(save_dir_kx, exist_ok=True)
+
+    analyze_significance(
+        df_kx, metrics, direction_dict, effect_dict, save_dir=save_dir_kx
+    )
+
     results_kx = comprehensive_statistical_analysis(
         df_kx,
         metrics=metrics,
         models=None,
         tasks=None,
         splits=None,
-        save_dir=save_dir,
+        save_dir=save_dir_kx,
         alpha=0.05,
     )
-    report_kx = generate_statistical_report(
-        results_kx,
-        save_dir=save_dir,
-        df_raw=df_kx,
-        metrics=metrics,
-        direction_dict=direction_dict,
-        effect_dict=effect_dict,
-    )
+    # report_kx = generate_statistical_report(
+    #     results_kx,
+    #     save_dir=save_dir,
+    #     df_raw=df_kx,
+    #     metrics=metrics,
+    #     direction_dict=direction_dict,
+    #     effect_dict=effect_dict,
+    # )
 
     # import argparse
     #
