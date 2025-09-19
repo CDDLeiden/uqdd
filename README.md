@@ -5,7 +5,8 @@
 [![python](https://img.shields.io/badge/-Python_3.8_%7C_3.9_%7C_3.10_%7C_3.11-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![pytorch](https://img.shields.io/badge/PyTorch_2.0+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
 [![wandb](https://img.shields.io/badge/Weights_%26_Biases-black?logo=weightsandbiases&logoColor=yellow)](https://wandb.ai/site)
-[![arxiv](https://img.shields.io/badge/Preprint-arXiv:123123)](https://arxiv.org/) 
+
+[//]: # ([![arxiv]&#40;https://img.shields.io/badge/Preprint-arXiv:123123&#41;]&#40;https://arxiv.org/&#41; )
 
 
 <!-- TABLE OF CONTENTS -->
@@ -37,6 +38,7 @@
     <li><a href="#acknowledgments">Acknowledgments</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#citation">Citation</a></li>
+    <li><a href="#statistical-significance-analysis">Statistical Significance Analysis</a></li>
   </ol>
 </details>
 
@@ -256,3 +258,15 @@ If you find this work useful, please cite the following paper:
   year={2025}
 }
 ```
+
+## Statistical Significance Analysis
+
+This project includes rigorous statistical significance testing to compare model performance and uncertainty
+quantification. The following tests are performed automatically:
+
+- **Wilcoxon signed-rank test** for pairwise model comparisons, with Cliff's Delta effect size.
+- **Friedman test** for multiple model comparison, followed by Nemenyi post-hoc analysis.
+- **Bootstrap confidence intervals** for differences in AUC and other metrics.
+
+Results and a detailed report are saved in the output directory (e.g., `figures/{data}/{activity}/all/{project}/`).
+These analyses help determine whether observed differences between models are statistically and practically significant.
