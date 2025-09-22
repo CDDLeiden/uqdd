@@ -261,12 +261,17 @@ If you find this work useful, please cite the following paper:
 
 ## Statistical Significance Analysis
 
-This project includes rigorous statistical significance testing to compare model performance and uncertainty
-quantification. The following tests are performed automatically:
+This project provides comprehensive statistical significance analysis for model performance and uncertainty
+quantification. The main function, `analyze_significance`, performs the following steps automatically:
 
-- **Wilcoxon signed-rank test** for pairwise model comparisons, with Cliff's Delta effect size.
-- **Friedman test** for multiple model comparison, followed by Nemenyi post-hoc analysis.
-- **Bootstrap confidence intervals** for differences in AUC and other metrics.
+- **Normality diagnostics**: Uses the Shapiro-Wilk test to assess whether metric residuals are normally distributed for
+  each data split.
+- **Parametric and non-parametric tests**: If normality is met, parametric tests (RM-ANOVA + Tukey HSD) are available;
+  otherwise, non-parametric tests (Friedman test with Nemenyi post-hoc analysis) are performed by default.
+- **Pairwise comparisons**: Includes Wilcoxon signed-rank tests and Cliff's Delta effect size for model pairs.
+- **Bootstrap confidence intervals**: Computes confidence intervals for differences in AUC and other metrics.
+- **Comprehensive visualizations**: Generates boxplots, critical difference diagrams, multiple-comparisons heatmaps (MCS
+  plots), and confidence-interval forest plots for pairwise differences.
 
-Results and a detailed report are saved in the output directory (e.g., `figures/{data}/{activity}/all/{project}/`).
-These analyses help determine whether observed differences between models are statistically and practically significant.
+All results and plots are saved in the output directory (e.g., `figures/{data}/{activity}/all/{project}/`). These
+analyses help determine whether observed differences between models are statistically and practically significant.
