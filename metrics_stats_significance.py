@@ -227,6 +227,63 @@ def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=N
 
 
 # -------------- Plotting routines -------------------#
+def make_boxplots(df, metric_ls, save_dir=None, name_prefix="", model_order=None):
+    """
+    Create boxplots for each metric using repeated measures ANOVA.
+
+    Parameters:
+    df (pd.DataFrame): Input dataframe containing the data.
+    metric_ls (list of str): List of metric column names to create boxplots for.
+    model_order (list of str): Specific order of models for x-axis. Default is None.
+
+    Returns:
+    None
+    """
+    df = df.copy()
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    sns.set_theme(context="paper", font_scale=1.5)
+    sns.set_style("whitegrid")
+    figure, axes = plt.subplots(
+        1, len(metric_ls), sharex=False, sharey=False, figsize=(28, 8)
+    )
+    # figure, axes = plt.subplots(1, 3, sharex=False, sharey=False, figsize=(16, 8))
+
+    for i, stat in enumerate(metric_ls):
+        # model = AnovaRM(
+        #     data=df, depvar=stat, subject="cv_cycle", within=["method"]
+        # ).fit()
+        # p_value = model.anova_table["Pr > F"].iloc[0]
+        ax = sns.boxplot(
+            y=stat,
+            x="method",
+            hue="method",
+            ax=axes[i],
+            data=df,
+            palette="Set2",
+            legend=False,
+            order=model_order,
+            hue_order=model_order,
+        )
+        title = stat.upper()
+        # ax.set_title(f"p={p_value:.1e}")
+        ax.set_xlabel("")
+        ax.set_ylabel(title)
+        x_tick_labels = ax.get_xticklabels()
+        label_text_list = [x.get_text() for x in x_tick_labels]
+        new_xtick_labels = ["\n".join(x.split("_")) for x in label_text_list]
+        ax.set_xticks(list(range(0, len(x_tick_labels))))
+        ax.set_xticklabels(new_xtick_labels, rotation=45, ha="right")
+
+    # Adjust layout to prevent overlap
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
+
+    # plt.tight_layout()
+    save_plot(figure, save_dir, f"{name_prefix}_boxplot_{'_'.join(metric_ls)}")
+    if INTERACTIVE_MODE:
+        plt.show()
+    plt.close()
+
+
 def make_boxplots_parametric(
         df, metric_ls, save_dir=None, name_prefix="", model_order=None
 ):
@@ -668,31 +725,6 @@ def mcs_plot(
 
     hax.set_xlabel("")
     hax.set_ylabel("")
-
-    # if show_cbar:
-    #     cbar = hax.collections[0].colorbar
-    #     if vlim:
-    #         cbar.set_ticks([-vlim, 0, vlim])
-    #         cbar.set_ticklabels([f"-{vlim}", "0", f"{vlim}"])
-    #     cbar.ax.tick_params(labelsize=axis_text_size)
-    #     if cbar_ax_bbox:
-    #         cbar.ax.set_position(cbar_ax_bbox)
-    #     cbar.set_label("Mean Difference", size=axis_text_size)
-    #     cbar.outline.set_linewidth(0.5)
-    #     cbar.outline.set_edgecolor("0.5")
-    #     cbar.ax.yaxis.set_tick_params(width=0.5, size=2)
-    #     cbar.ax.yaxis.set_tick_params(which="minor", width=0.5, size=2)
-    #
-    # plt.setp(hax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    # plt.setp(hax.get_yticklabels(), rotation=0)
-    # plt.tight_layout()
-
-    # if save_dir:
-    #     fig = hax.get_figure()
-    #     save_plot(fig, save_dir, f"{name_prefix}_mcs_plot")
-    # if INTERACTIVE_MODE:
-    #     plt.show()
-    # plt.close()
 
     return hax
 
@@ -1641,7 +1673,13 @@ def plot_critical_difference_diagram(
 
 
 def analyze_significance(
-        df_raw, metrics, direction_dict, effect_dict, save_dir=None, model_order=None
+        df_raw,
+        metrics,
+        direction_dict,
+        effect_dict,
+        save_dir=None,
+        model_order=None,
+        activity=None,
 ):
     df = harmonize_columns(df_raw)
     # we need to make sure the metrics cols are floats (not object/string)
@@ -1653,7 +1691,10 @@ def analyze_significance(
         df_s = df[df["split"] == split].copy()
         print(f"\n=== Split: {split} ===")
         # 3.a) Normality diagnostics for all metrics (one go)
-        make_normality_diagnostic(df_s, metrics, save_dir=save_dir, name_prefix=split)
+        name_prefix = f"06_{activity}_{split}" if activity else f"{split}"
+        make_normality_diagnostic(
+            df_s, metrics, save_dir=save_dir, name_prefix=name_prefix
+        )
         # 3.b) For each metric: parametric vs non-parametric branch
         for metric in metrics:
             print(f"\n-- Metric: {metric}")
@@ -1714,21 +1755,44 @@ def analyze_significance(
         ################################################################################
         # TEMPORARY
         ################################################################################
+        make_boxplots(
+            df_s,
+            metrics,
+            save_dir=save_dir,
+            name_prefix=name_prefix,
+            model_order=model_order,
+        )
         make_boxplots_parametric(
-            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+            df_s,
+            metrics,
+            save_dir=save_dir,
+            name_prefix=name_prefix,
+            model_order=model_order,
         )
         make_boxplots_nonparametric(
-            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+            df_s,
+            metrics,
+            save_dir=save_dir,
+            name_prefix=name_prefix,
+            model_order=model_order,
         )
         # friedman_res = friedman_nemenyi_test(df_s, [metric], alpha=0.05)
         # print(friedman_res)
 
         make_sign_plots_nonparametric(
-            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+            df_s,
+            metrics,
+            save_dir=save_dir,
+            name_prefix=name_prefix,
+            model_order=model_order,
         )
         # Critical Difference diagrams
         make_critical_difference_diagrams(
-            df_s, metrics, save_dir=save_dir, name_prefix=split, model_order=model_order
+            df_s,
+            metrics,
+            save_dir=save_dir,
+            name_prefix=name_prefix,
+            model_order=model_order,
         )
 
         ################################################################################
@@ -1746,10 +1810,9 @@ def analyze_significance(
             sort_axes=True,
             # df_s.rename(columns={metric: metric.lower()}),
             save_dir=save_dir,
-            name_prefix=split + "_diff_",
+            name_prefix=name_prefix + "_diff",
             model_order=model_order,
         )
-
         make_mcs_plot_grid(
             df=df_s,
             stats=metrics,
@@ -1763,7 +1826,7 @@ def analyze_significance(
             sort_axes=True,
             # df_s.rename(columns={metric: metric.lower()}),
             save_dir=save_dir,
-            name_prefix=split,
+            name_prefix=name_prefix,
             model_order=model_order,
         )
 
@@ -1773,7 +1836,7 @@ def analyze_significance(
             metrics,
             group_col="method",
             save_dir=save_dir,
-            name_prefix=split,
+            name_prefix=name_prefix,
             model_order=model_order,
         )
 
@@ -2106,6 +2169,7 @@ if __name__ == "__main__":
         effect_dict,
         save_dir=save_dir_xc50,
         model_order=model_order,
+        activity="xc50",
     )
 
     results_xc50 = comprehensive_statistical_analysis(
@@ -2137,6 +2201,7 @@ if __name__ == "__main__":
         effect_dict,
         save_dir=save_dir_kx,
         model_order=model_order,
+        activity="kx",
     )
 
     results_kx = comprehensive_statistical_analysis(
