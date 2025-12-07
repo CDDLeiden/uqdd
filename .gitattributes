@@ -1,7 +1,3 @@
-uqdd/** linguist-vendored=true
-scripts/** linguist-vendored=true
-images/** linguist-vendored=true
-
 *.sh linguist-language=Shell
 *.md linguist-language=Markdown
 *.json linguist-language=JSON
