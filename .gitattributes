@@ -1,0 +1,10 @@
+uqdd/** linguist-vendored=true
+scripts/** linguist-vendored=true
+images/** linguist-vendored=true
+
+*.sh linguist-language=Shell
+*.md linguist-language=Markdown
+*.json linguist-language=JSON
+*.yml linguist-language=YAML
+*.yaml linguist-language=YAML
+*.py linguist-language=Python
