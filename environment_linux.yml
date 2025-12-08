@@ -1,15 +1,12 @@
-name: uqdd-env
+name: uqdd-env-new
 channels:
   - conda-forge
   - defaults
   - pytorch
 dependencies:
   - python=3.11
-  - gcc=12.1.0
   - pip
   - sentencepiece
-  - libgcc-ng
-  - libstdcxx-ng=12
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu124
       - torch
@@ -39,3 +36,8 @@ dependencies:
       - chembl-downloader
       - scienceplots
       - pingouin
+      - mkdocs
+      - mkdocs-material
+      - mkdocstrings
+      - mkdocs-git-revision-date-localized-plugin
+      - mkdocs-plugin-tags
