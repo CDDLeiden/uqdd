@@ -259,9 +259,6 @@ def run_pnn(config: Optional[dict] = None) -> nn.Module:  # uq: bool = False
     config : Optional[dict], optional
         Configuration dictionary for model training, by default None.
 
-    uq : bool
-        Whether to use aleatoric uncertainty estimation, by default
-
     Returns
     -------
     nn.Module
@@ -273,33 +270,6 @@ def run_pnn(config: Optional[dict] = None) -> nn.Module:  # uq: bool = False
         model_type="pnn",
         logger=LOGGER,
     )
-
-    # if uq:
-    #     dataloaders = get_dataloader(config, device=DEVICE, logger=LOGGER)
-    #     preds, labels, alea_vars = predict(
-    #         best_model, dataloaders["test"], device=DEVICE
-    #     )
-    #     # Then comes the predict metrics part
-    #     metrics, plots, uct_logger = evaluate_predictions(
-    #         config, preds, labels, alea_vars, "pnn", LOGGER
-    #     )
-    #     # RECALIBRATION # Get Calibration / Validation Set
-    #     preds_val, labels_val, alea_vars_val = predict(
-    #         best_model, dataloaders["val"], device=DEVICE
-    #     )
-    #     iso_recal_model = recalibrate_model(
-    #         preds_val,
-    #         labels_val,
-    #         alea_vars_val,
-    #         preds,
-    #         labels,
-    #         alea_vars,
-    #         config=config,
-    #         uct_logger=uct_logger,
-    #     )
-    #     uct_logger.wandb_log()
-    #     wandb.finish()
-    #     return best_model, iso_recal_model, metrics, plots
 
     return best_model
 
