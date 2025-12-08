@@ -193,18 +193,6 @@ def check_na(
     -------
     AssertionError :
         If any column from `cols` is not present in the DataFrame.
-
-    Example:
-    --------
-    >>> df = pd.DataFrame({'A': [1, 2, np.nan], 'B': [np.nan, 4, 5], 'C': [7, 8, 9]})
-    >>> df_clean, df_nan = check_na(df, cols=['A', 'B'], nan_dup_source='original')
-    >>> print(df_clean)
-    #    A    B  C
-    # 1  2.0  4.0  8
-    >>> print(df_nan)
-    #      A    B  C nan_dup_source
-    # 0  1.0  NaN  7       original
-    # 2  NaN  5.0  9       original
     """
     if not isinstance(cols, list):
         cols = [cols]
@@ -275,18 +263,6 @@ def check_duplicates(
         If any column from `cols` is not present in the DataFrame.
         If sorting_col is not present in the DataFrame.
         If keep is not one of 'first', 'last', or False.
-
-    Example:
-    --------
-    >>> df = pd.DataFrame({'A': [1, 2, 2], 'B': [4, 5, 4], 'C': [7, 8, 9]})
-    >>> df_clean, df_dup = check_duplicates(df, cols=['A', 'B'], keep='last', nan_dup_source='original')
-    >>> print(df_clean)
-    #    A  B  C
-    # 0  1  4  7
-    # 2  2  4  9
-    >>> print(df_dup)
-    #    A  B  C nan_dup_source
-    # 1  2  5  8       original
     """
     if not isinstance(cols, list):
         cols = [cols]
