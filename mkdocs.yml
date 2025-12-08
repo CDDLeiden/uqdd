@@ -1,0 +1,131 @@
+site_name: UQDD - Hybrid Models
+site_description: Documentation for the UQDD repository (models, data pipeline, analysis)
+site_author: Bola Khalil
+repo_url: https://github.com/CDDLeiden/uqdd
+repo_name: CDDLeiden/uqdd
+site_url: https://CDDLeiden.github.io/uqdd/
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.expand
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+  # Logo and favicon can be added under docs/assets
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - footnotes
+  - def_list
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed
+  - pymdownx.emoji:
+      emoji_generator: materialx.emoji.to_svg
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.arithmatex:
+      generic: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["uqdd"]
+          options:
+            show_source: false
+            docstring_style: numpy
+            separate_signature: true
+            line_length: 88
+            members_order: source
+            filters: ["!^_", "!^__"]
+            docstring_section_style: list
+            merge_init_into_class: true
+            show_root_heading: true
+            show_signature: true
+            heading_level: 2
+            show_submodules: true
+  - mike
+  - git-revision-date-localized:
+      enabled_if_env: CI
+      fallback_to_build_date: true
+      enable_creation_date: true
+      enable_git_follow: false
+  - tags
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/CDDLeiden/uqdd
+      name: GitHub
+  homepage: https://CDDLeiden.github.io/uqdd/
+
+extra_css:
+  - styles/overrides.css
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Overview: getting-started/overview.md
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+  - User Guide:
+    - Data Pipeline: user-guide/data.md
+    - Models & Training: user-guide/models.md
+    - Configuration: user-guide/configuration.md
+    - Metrics & Analysis: user-guide/metrics.md
+    - Notebooks: user-guide/notebooks.md
+  - API Reference:
+    - Package: api/uqdd.md
+    - Core Utils: api/uqdd-utils.md
+    - Data: api/uqdd-data.md
+    - Models: api/uqdd-models.md
+  - Reference:
+    - Project Structure: reference/project-structure.md
+    - CLI & Scripts: reference/scripts.md
+    - Reproducibility: reference/reproducibility.md
+    - Paper Mind Map: reference/mind-map.md
+  - Tags: tags.md
+  - Changelog: changelog.md
+
+watch:
+  - uqdd
+  - docs
