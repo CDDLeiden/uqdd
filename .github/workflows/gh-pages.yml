@@ -39,7 +39,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "mkdocs>=1.5" "mkdocs-material>=9.5"
-          pip install "mkdocstrings>=0.25" mkdocstrings-python "mike>=2.0" mkdocs-autorefs mkdocs-git-revision-date-localized-plugin
+          pip install "mkdocstrings>=0.25" "mkdocstrings-python>=1.9" "mike>=2.0" "mkdocs-autorefs>=1.0" "mkdocs-git-revision-date-localized-plugin>=1.2"
       - name: Build site
         run: mkdocs build --strict
       - name: Upload artifact
