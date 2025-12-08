@@ -1,0 +1,102 @@
+site_name: UQDD - Uncertainty Quantification for Drug Discovery using Hybrid Models
+site_description: Documentation for the UQDD repository (models, data pipeline, analysis)
+site_author: Bola Khalil
+# Replace with your repository URL
+repo_url: https://github.com/CDDLeiden/uqdd
+repo_name: CDDLeiden/uqdd
+site_url: https://CDDLeiden.github.io/uqdd/
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.expand
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - footnotes
+  - def_list
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          setup_commands:
+            - import sys
+            - sys.path.append(".")
+          paths: ["uqdd"]
+          options:
+            show_source: false
+            docstring_style: google
+            separate_signature: true
+            line_length: 88
+            members_order: source
+            filters: ["!^_", "!^__"]
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/CDDLeiden/uqdd
+      name: GitHub
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Overview: getting-started/overview.md
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+  - User Guide:
+    - Data Pipeline: user-guide/data.md
+    - Models & Training: user-guide/models.md
+    - Configuration: user-guide/configuration.md
+    - Metrics & Analysis: user-guide/metrics.md
+    - Notebooks: user-guide/notebooks.md
+  - API Reference:
+    - uqdd package: api/uqdd.md
+  - Reference:
+    - Project Structure: reference/project-structure.md
+    - CLI & Scripts: reference/scripts.md
+    - Reproducibility: reference/reproducibility.md
+  - Changelog: changelog.md
+
+# Tell MkDocs to include images in docs/images
+watch:
+  - uqdd
+  - docs
+
