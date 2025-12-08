@@ -1,5 +1,12 @@
 <a id="readme-top"></a>
+
+<p align="center">
+  <img src="docs/assets/logo.png" alt="UQDD logo" width="220" />
+</p>
+
 # Hybrid Uncertainty Quantification for Bioactivity Assessment
+
+[Paper] Combining Bayesian and Evidential Uncertainty Quantification for Improved Bioactivity Modeling — https://pubs.acs.org/doi/10.1021/acs.jcim.5c01597
 
 
 [![python](https://img.shields.io/badge/-Python_3.8_%7C_3.9_%7C_3.10_%7C_3.11-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -75,7 +82,7 @@ To replicate this work, install dependencies using Conda
 
 ```sh
 conda env create --file=environment_linux.yml
-conda activat uqdd-env
+conda activate uqdd-env
 ```
 
 * Please choose the correct file depending on your operating system
@@ -127,6 +134,10 @@ This command will preprocess the Papyrus dataset for the xC50 activity type, usi
 <!-- Model Architectures -->
 ### Model Architectures
 ![Overview of UQ Model Architectures](images/01_uq_models.png)
+
+For a high-level conceptual overview, see the documentation’s Paper Mind Map page, which includes a large image:
+
+- docs page: `docs/reference/mind-map.md`
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -252,10 +263,12 @@ If you find this work useful, please cite the following paper:
 
 ```bibtex
 @article{Khalil2025,
-  title={Combining Bayesian and Evidential Uncertainty Quantification for Improved Bioactivity Modeling},
-  author={Khalil, Bola and Schweighofer, Kajetan and Dyubankova, Natalia and van Westen, Gerard J.P. and van Vlijmen, Herman},
-  journal={Journal of Chemical Information and Modeling},
-  year={2025}
+year = {2025}, 
+title = {{Combining Bayesian and Evidential Uncertainty Quantification for Improved Bioactivity Modeling}}, 
+author = {Khalil, Bola and Schweighofer, Kajetan and Dyubankova, Natalia and Westen, Gerard J P van and Vlijmen, Herman van}, 
+journal = {Journal of Chemical Information and Modeling}, 
+issn = {1549-9596}, 
+doi = {10.1021/acs.jcim.5c01597}
 }
 ```
 
@@ -275,3 +288,10 @@ quantification. The main function, `analyze_significance`, performs the followin
 
 All results and plots are saved in the output directory (e.g., `figures/{data}/{activity}/all/{project}/`). These
 analyses help determine whether observed differences between models are statistically and practically significant.
+
+## Documentation
+
+A full documentation site (MkDocs Material) is available and will be published via GitHub Pages:
+- https://CDDLeiden.github.io/uqdd/
+
+It includes getting started, user guide, API reference, and a mind map summarizing the paper.
