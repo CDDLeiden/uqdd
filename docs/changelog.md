@@ -17,3 +17,5 @@ tags:
 - Configured GitHub Pages deployment workflow (`.github/workflows/gh-pages.yml`).
 - Enabled versioning support via `mike` plugin (optional).
 - Improved local strict builds by enabling `git-revision-date-localized` only on CI.
+
+See also the [tags](tags.md) page for topic-based navigation.
