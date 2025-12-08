@@ -1,3 +1,10 @@
+---
+title: CLI & Scripts
+tags:
+  - reference
+  - scripts
+---
+
 # CLI & Scripts
 
 Primary entry points:
@@ -5,4 +12,3 @@ Primary entry points:
 - `uqdd/models/model_parser.py`
 
 Usage examples are in README.
-

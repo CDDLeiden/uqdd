@@ -1,3 +1,10 @@
+---
+title: Project Structure
+tags:
+  - reference
+  - project-structure
+---
+
 # Project Structure
 
 The project is organized as follows:

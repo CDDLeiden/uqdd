@@ -1,3 +1,11 @@
+---
+title: Installation
+tags:
+  - installation
+  - environment
+  - getting-started
+---
+
 # Installation
 
 We recommend using Conda for dependency management.

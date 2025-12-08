@@ -1,3 +1,10 @@
+---
+title: Quickstart
+tags:
+  - quickstart
+  - getting-started
+---
+
 # Quickstart
 
 1. Prepare data (Papyrus++)
