@@ -1,6 +1,23 @@
+# GitHub Linguist configuration
+# Goal: make Python the dominant language by excluding notebooks and generated/docs assets from stats.
+
+# Treat notebooks as documentation so they don't count toward language percentages
+*.ipynb linguist-documentation
+
+# Exclude built site from stats (MkDocs output)
+site/** linguist-generated
+
+# Exclude documentation content from stats
+docs/** linguist-documentation
+images/** linguist-documentation
+
+# Keep explicit language hints for common extensions
 *.sh linguist-language=Shell
 *.md linguist-language=Markdown
 *.json linguist-language=JSON
 *.yml linguist-language=YAML
 *.yaml linguist-language=YAML
 *.py linguist-language=Python
+
+# Ensure Python sources in uqdd/ are detectable (the default, but kept explicit for clarity)
+uqdd/** linguist-detectable=true
