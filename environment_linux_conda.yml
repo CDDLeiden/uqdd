@@ -1,7 +1,6 @@
 name: uqdd-env
 channels:
   - conda-forge
-  - defaults
   - pytorch
 dependencies:
   - python=3.11
@@ -37,4 +36,9 @@ dependencies:
       - scikit-posthocs
       - scienceplots
       - pingouin
+      - mkdocs
+      - mkdocs-material
+      - mkdocstrings
+      - mkdocs-git-revision-date-localized-plugin
+      - mkdocs-plugin-tags
       # Ensure there's no duplicate seaborn if it was also in the original pip list

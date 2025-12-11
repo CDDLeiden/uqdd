@@ -1,7 +1,6 @@
-name: uqdd-env-new
+name: uqdd-env
 channels:
   - conda-forge
-  - defaults
   - pytorch
 dependencies:
   - python=3.11

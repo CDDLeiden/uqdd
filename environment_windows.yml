@@ -1,7 +1,6 @@
 name: uqdd-env
 channels:
   - conda-forge
-  - defaults
   - pytorch
 dependencies:
   - python=3.11
@@ -36,3 +35,8 @@ dependencies:
       - chembl-downloader
       - scienceplots
       - pingouin
+      - mkdocs
+      - mkdocs-material
+      - mkdocstrings
+      - mkdocs-git-revision-date-localized-plugin
+      - mkdocs-plugin-tags
