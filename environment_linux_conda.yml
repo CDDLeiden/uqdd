@@ -41,4 +41,6 @@ dependencies:
       - mkdocstrings
       - mkdocs-git-revision-date-localized-plugin
       - mkdocs-plugin-tags
-      # Ensure there's no duplicate seaborn if it was also in the original pip list
+      - cmake
+      - mapie
+      - pandas-stubs

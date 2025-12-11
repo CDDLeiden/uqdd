@@ -40,3 +40,6 @@ dependencies:
       - mkdocstrings
       - mkdocs-git-revision-date-localized-plugin
       - mkdocs-plugin-tags
+      - cmake
+      - mapie
+      - pandas-stubs
