@@ -600,4 +600,3 @@ if __name__ == "__main__":
         show_legend=show_legend,
     )
 
-    # Optional: Statistical analysis placeholders can be implemented in future modules
