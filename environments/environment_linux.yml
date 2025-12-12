@@ -22,7 +22,6 @@ dependencies:
       - matplotlib
       - seaborn
       - plotly
-      - seaborn
       - pytest
       - tqdm
       - numpy
@@ -43,3 +42,5 @@ dependencies:
       - cmake
       - mapie
       - pandas-stubs
+      - setuptools
+      - wheel

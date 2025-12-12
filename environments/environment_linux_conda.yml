@@ -5,7 +5,9 @@ channels:
 dependencies:
   - python=3.11
   - pip
-  # Linux-specific packages removed
+  - gcc=12.1.0 # Keep linux specific packages for this file
+  - libgcc-ng
+  - libstdcxx-ng=12
   - chembl_webresource_client
   - uncertainty-toolbox
   - sentencepiece
@@ -25,12 +27,14 @@ dependencies:
   - onnx
   - fastcluster
   - sentence-transformers
-  - pip:
+  - setuptools
+  - wheel
+  - pip: # Pip section for packages not found on conda or for URL installs
       - torch
       - chembl-downloader
       - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
-      - https://github.com/bolak92/bio-transformers/tarball/main
       - ankh
+      - https://github.com/bolak92/bio-transformers/tarball/main
       - scikit-posthocs
       - scienceplots
       - pingouin

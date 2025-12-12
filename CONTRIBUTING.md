@@ -37,9 +37,9 @@ To set up the development environment, you will need Conda.
 
 1. Clone your forked repository to your local machine.
 2. Navigate to the project's root directory.
-3. Create and activate the Conda environment using the provided `environment_{OS}.yml` file, for example in Linux:
+3. Create and activate the Conda environment using the provided `environments/environment_{OS}.yml` file, for example in Linux:
    ```bash
-   conda env create -f environment_linux.yml
+   conda env create -f environments/environment_linux.yml
    conda activate uqdd-env
    ```
 

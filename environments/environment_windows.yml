@@ -43,3 +43,5 @@ dependencies:
       - cmake
       - mapie
       - pandas-stubs
+      - setuptools
+      - wheel

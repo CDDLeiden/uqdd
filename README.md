@@ -93,7 +93,7 @@ We recommend using a virtual environment (e.g. conda) to manage dependencies.
 To replicate this work, install dependencies using Conda
 
 ```sh
-conda env create --file=environment_linux.yml
+conda env create --file=environments/environment_linux.yml
 conda activate uqdd-env
 ```
 
@@ -111,14 +111,17 @@ The project is organized as follows:
 ├── .gitignore
 ├── LICENSE
 ├── README.md
-├── environment.yml
-├── uqdd/  # Source Code Directory
-│   ├── config/  # Configuration files for models and data
-│   ├── data/    # Scripts and utilities for data processing
-│   └── models/  # Model implementations and training scripts
-├── notebooks/  # Jupyter Notebooks for exploratory analysis and results
- visualization
-└── scripts/ # For generating the visualizations tested in notebooks/ but in more automated way
+├── environments/              # Conda and pip environment definitions
+│   ├── environment_linux.yml
+│   ├── environment_linux_conda.yml
+│   ├── environment_windows.yml
+│   └── environment_windows_conda.yml
+├── uqdd/                      # Source Code Directory
+│   ├── config/                # Configuration files for models and data
+│   ├── data/                  # Scripts and utilities for data processing
+│   └── models/                # Model implementations and training scripts
+├── notebooks/                 # Jupyter Notebooks for exploratory analysis and results visualization
+└── scripts/                   # Automated workflows to generate visualizations and analyses
 ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
