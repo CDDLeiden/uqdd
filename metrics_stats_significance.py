@@ -8,8 +8,12 @@ from uqdd.metrics import (
 
 
 if __name__ == "__main__":
-    xc50 = "/home/bkhalil/Repos/uqdd/results_revision/final_xc50.csv"
-    kx = "/home/bkhalil/Repos/uqdd/results_revision/final_kx.csv"
+    # Build paths relative to the repository root
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    results_dir = os.path.join(repo_root, "results_revision")
+
+    xc50 = os.path.join(results_dir, "final_xc50.csv")
+    kx = os.path.join(results_dir, "final_kx.csv")
 
     df_xc50 = pd.read_csv(xc50)
     df_kx = pd.read_csv(kx)
@@ -36,7 +40,7 @@ if __name__ == "__main__":
 
     model_order = ["pnn", "ensemble", "eoe", "evidential", "emc", "mcdropout"]
 
-    save_dir = "stat_analysis_results"
+    save_dir = os.path.join(repo_root, "stat_analysis_results")
     os.makedirs(save_dir, exist_ok=True)
 
     save_dir_xc50 = os.path.join(save_dir, "xc50")

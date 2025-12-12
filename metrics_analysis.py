@@ -81,13 +81,39 @@ if __name__ == "__main__":
 
     data_specific_path = f"{data_name}/{activity_type}/{type_n_targets}"
 
-    file_1 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_ensemble_mcdp_{activity_type}/metrics.csv"
-    file_2 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_evidential_{activity_type}/metrics.csv"
-    file_3 = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/papyrus/{activity_type}/all/reassess-runs_pnn_{activity_type}/metrics.csv"
+    # Build paths relative to the repository root
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    base_path = os.path.join(repo_root, "uqdd", "figures")
 
-    save_dir = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}/{color_map}/"
-    save_dir_no_time = f"/users/home/bkhalil/Repos/uqdd/uqdd/figures/{data_specific_path}/{project_out_name}-no-time/{color_map}/"
-    base_path = "/users/home/bkhalil/Repos/uqdd/uqdd/figures/"
+    file_1 = os.path.join(
+        base_path,
+        "papyrus",
+        activity_type,
+        "all",
+        f"reassess-runs_ensemble_mcdp_{activity_type}",
+        "metrics.csv",
+    )
+    file_2 = os.path.join(
+        base_path,
+        "papyrus",
+        activity_type,
+        "all",
+        f"reassess-runs_evidential_{activity_type}",
+        "metrics.csv",
+    )
+    file_3 = os.path.join(
+        base_path,
+        "papyrus",
+        activity_type,
+        "all",
+        f"reassess-runs_pnn_{activity_type}",
+        "metrics.csv",
+    )
+
+    save_dir = os.path.join(base_path, data_specific_path, project_out_name, color_map)
+    save_dir_no_time = os.path.join(
+        base_path, data_specific_path, f"{project_out_name}-no-time", color_map
+    )
 
     df_1 = pd.read_csv(file_1, header=0)
     df_2 = pd.read_csv(file_2, header=0)
