@@ -1,20 +1,32 @@
+"""UQDD package initialization.
+
+Provides global constants, paths, and configuration defaults used across the
+library. Importing this package should be lightweight and avoid heavy side
+effects. Logging is used instead of printing.
+"""
+
 import os
 from datetime import date
 from pathlib import Path
+import logging
 
 import torch
 import wandb
 
+# Avoid hard side effects when importing; keep env var as it affects CUDA debugging
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 # Add requirement for wandb core
-wandb.sdk.require("core")
-wandb.require("core")
+# wandb.sdk.require("core")
+# wandb.require("core")
+
+# Module logger
+_logger = logging.getLogger(__name__)
 
 # Define the global device setting
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Device: " + str(DEVICE))
-# print(torch.version.cuda) if DEVICE == "cuda" else None
+_logger.debug("UQDD Device: %s", DEVICE)
+# _logger.debug(torch.version.cuda) if DEVICE == "cuda" else None
 
 # Define the base directory as the parent of this file
 BASE_DIR = Path(__file__).parent
@@ -32,10 +44,9 @@ FIGS_DIR = BASE_DIR / "figures"
 TODAY = date.today().strftime("%Y%m%d")
 
 WANDB_DIR = LOGS_DIR / "wandb"
-WANDB_MODE = "online"  # 'offline'
-# WANDB_MODE = "offline"
+WANDB_MODE = "online"  # or 'offline'
 
-# create DIRs if they do not exist
+# Create directories if they do not exist
 for dir in [
     DATA_DIR,
     DATASET_DIR,
@@ -65,12 +76,12 @@ __all__ = [
 
 __author__ = "Bola Khalil"
 __contributors__ = (
-    "Kajetan Schweighofer, Natalia Dyubankova, Günter Klambauer, Sepp Hochreiter, "
+    "Kajetan Schweighofer, Natalia Dyubankova,"
     "Gerard van Westen*, Herman van Vlijmen*"
 )
-__copyright__ = "Copyright 2023-2024, Johnson & Johnson, Johannes-Kepler Universität Linz, Leiden University"
-__license__ = "All rights reserved, Johnson & Johnson, Johannes-Kepler Universität Linz, Leiden University"
-__version__ = "0.0.5"
+__copyright__ = "Copyright 2023-2025, Johnson & Johnson, Leiden University, Johannes-Kepler Universität Linz, "
+__license__ = "All rights reserved, Johnson & Johnson, Leiden University, Johannes-Kepler Universität Linz"
+__version__ = "0.0.6"
 __maintainer__ = "Bola Khalil"
-__email__ = "bkhalil@its.jnj.com"
+__email__ = "b.a.a.khalil@lacdr.leidenuniv.nl"
 __status__ = "Development"
