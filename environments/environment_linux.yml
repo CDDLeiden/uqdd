@@ -44,3 +44,4 @@ dependencies:
       - pandas-stubs
       - setuptools
       - wheel
+      - openpyxl

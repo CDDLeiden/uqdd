@@ -29,6 +29,7 @@ dependencies:
   - sentence-transformers
   - setuptools
   - wheel
+  - openpyxl
   - pip: # Pip section for packages not found on conda or for URL installs
       - torch
       - chembl-downloader

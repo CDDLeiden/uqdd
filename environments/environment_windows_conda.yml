@@ -27,6 +27,7 @@ dependencies:
   - sentence-transformers
   - setuptools
   - wheel
+  - openpyxl
   - pip:
       - torch
       - chembl-downloader
