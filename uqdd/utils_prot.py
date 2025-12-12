@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 from uqdd import DATA_DIR, DEVICE
 
 torch.cuda.empty_cache()
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 all_models = [
