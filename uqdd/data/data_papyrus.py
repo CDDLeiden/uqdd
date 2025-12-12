@@ -1,12 +1,12 @@
-import logging
 import argparse
+import itertools
+import logging
 from pathlib import Path
 from typing import Union, List, Optional, Tuple, Dict
-import itertools
+
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
 from papyrus_scripts.download import download_papyrus
 from papyrus_scripts.preprocess import (
     keep_quality,
@@ -16,16 +16,9 @@ from papyrus_scripts.preprocess import (
     consume_chunks,
 )
 from papyrus_scripts.reader import read_papyrus, read_protein_set
+from torch.utils.data import Dataset
+
 from uqdd import DATA_DIR, DATASET_DIR, DEVICE
-from uqdd.utils import (
-    create_logger,
-    get_config,
-    load_pickle,
-    save_df,
-    load_df,
-)
-from uqdd.utils_chem import standardize_df, get_chem_desc, merge_scaffolds
-from uqdd.utils_prot import get_embeddings
 from uqdd.data.utils_data import (
     split_data,
     export_dataset,
@@ -38,14 +31,23 @@ from uqdd.data.utils_data import (
     fig_label_distribution,
     from_split_data_to_idx,
 )
+from uqdd.utils import (
+    create_logger,
+    get_config,
+    load_pickle,
+    save_df,
+    load_df,
+)
+from uqdd.utils_chem import standardize_df, get_chem_desc, merge_scaffolds
+from uqdd.utils_prot import get_embeddings
 
 
 class Papyrus:
     def __init__(
-        self,
-        activity_type: Union[None, str, List] = None,
-        std_smiles: bool = True,
-        verbose_files: bool = False,
+            self,
+            activity_type: Union[None, str, List] = None,
+            std_smiles: bool = True,
+            verbose_files: bool = False,
     ):
         # LOGGING
         self.logger = create_logger(
@@ -83,24 +85,24 @@ class Papyrus:
         self.MT = None  # placeholder for multitask learning
 
     def __call__(
-        self,
-        n_targets: int = -1,
-        descriptor_protein: Union[str, None] = None,
-        descriptor_chemical: Union[str, None] = None,
-        all_descriptors: bool = False,
-        recalculate: bool = False,
-        split_type: str = "random",
-        split_proportions: List[float] = None,
-        stratify_by: Union[str, None] = None,
-        max_k_clusters: int = 500,
-        optimal_k: int = None,
-        min_datapoints: int = 50,
-        min_actives: int = 10,
-        active_threshold: float = 6.5,
-        only_normal: bool = False,
-        file_ext: str = "pkl",
-        batch_size: int = 2,
-        verbose: bool = False,
+            self,
+            n_targets: int = -1,
+            descriptor_protein: Union[str, None] = None,
+            descriptor_chemical: Union[str, None] = None,
+            all_descriptors: bool = False,
+            recalculate: bool = False,
+            split_type: str = "random",
+            split_proportions: List[float] = None,
+            stratify_by: Union[str, None] = None,
+            max_k_clusters: int = 500,
+            optimal_k: int = None,
+            min_datapoints: int = 50,
+            min_actives: int = 10,
+            active_threshold: float = 6.5,
+            only_normal: bool = False,
+            file_ext: str = "pkl",
+            batch_size: int = 2,
+            verbose: bool = False,
     ):
         """
         Processes the Papyrus dataset and exports it with the specified descriptors and splits.
@@ -162,7 +164,6 @@ class Papyrus:
             self.logger.debug(f"Dataset loaded with {len(df)} datapoints")
             self.logger.debug(f"Label column: {label_col}")
             if "target_id" in df.columns:
-
                 unique_targets = df["target_id"].nunique()
                 tar_tag += f"_{unique_targets}"
                 self.logger.debug(f"Unique Targets: {unique_targets}")
@@ -212,7 +213,7 @@ class Papyrus:
             d = len(split_types)
 
         for i, (descriptor_protein, descriptor_chemical, s_type) in enumerate(
-            args_combinations, start=1
+                args_combinations, start=1
         ):
             try:
                 self.logger.info(
@@ -270,11 +271,11 @@ class Papyrus:
                 continue
 
     def _call_assertions(
-        self,
-        descriptor_protein: Optional[str],
-        descriptor_chemical: Optional[str],
-        all_descriptors: bool,
-        n_targets: int,
+            self,
+            descriptor_protein: Optional[str],
+            descriptor_chemical: Optional[str],
+            all_descriptors: bool,
+            n_targets: int,
     ) -> Optional[str]:
         """
         Ensures valid descriptor selection based on multitask settings.
@@ -304,7 +305,7 @@ class Papyrus:
             )
             descriptor_protein = None
         assert (
-            descriptor_protein or descriptor_chemical or all_descriptors
+                descriptor_protein or descriptor_chemical or all_descriptors
         ), "Either a descriptor must be provided or calculate all of them by setting all_descriptors=True"
         return descriptor_protein
 
@@ -382,12 +383,12 @@ class Papyrus:
         return df_filtered, papyrus_protein_data
 
     def get_targeted_dataset(
-        self,
-        n_targets: int = 20,
-        min_datapoints: int = 50,
-        min_actives: int = 10,
-        active_threshold: float = 6.5,
-        only_normal: bool = True,
+            self,
+            n_targets: int = 20,
+            min_datapoints: int = 50,
+            min_actives: int = 10,
+            active_threshold: float = 6.5,
+            only_normal: bool = True,
     ) -> Tuple[pd.DataFrame, List[str]]:
         """
         Filters and retrieves a dataset based on target selection criteria.
@@ -452,16 +453,16 @@ class Papyrus:
         return df, label_col
 
     def split(
-        self,
-        df: pd.DataFrame,
-        split_type: str,
-        split_proportions: Optional[List[float]],
-        label_col: List[str],
-        stratify_by: Optional[str] = None,
-        max_k_clusters: int = 500,
-        optimal_k: Optional[int] = None,
-        export_path: Optional[Path] = None,
-        recalculate: bool = False,
+            self,
+            df: pd.DataFrame,
+            split_type: str,
+            split_proportions: Optional[List[float]],
+            label_col: List[str],
+            stratify_by: Optional[str] = None,
+            max_k_clusters: int = 500,
+            optimal_k: Optional[int] = None,
+            export_path: Optional[Path] = None,
+            recalculate: bool = False,
     ) -> Dict[str, List[int]]:
         """
         Splits the dataset into training, validation, and test sets.
@@ -524,7 +525,7 @@ class Papyrus:
 
     @staticmethod
     def get_cols_to_include(
-        desc_prot: str, desc_chem: str, n_targets: int, label_col: list
+            desc_prot: str, desc_chem: str, n_targets: int, label_col: list
     ):
         cols_to_include = [
             "SMILES",
@@ -541,7 +542,7 @@ class Papyrus:
         return list(filter(None, cols_to_include))
 
     def merge_protein_sequences(
-        self, df: pd.DataFrame, target_id_col: str = "target_id"
+            self, df: pd.DataFrame, target_id_col: str = "target_id"
     ) -> pd.DataFrame:
         """
         Merges protein sequences into the dataset using target identifiers.
@@ -568,11 +569,11 @@ class Papyrus:
         )
 
     def merge_descriptors(
-        self,
-        df: Optional[pd.DataFrame] = None,
-        desc_prot: Optional[str] = None,
-        desc_chem: Optional[str] = None,
-        batch_size: int = 4,
+            self,
+            df: Optional[pd.DataFrame] = None,
+            desc_prot: Optional[str] = None,
+            desc_chem: Optional[str] = None,
+            batch_size: int = 4,
     ) -> pd.DataFrame:
         """
         Merges chemical and protein descriptors into the dataset.
@@ -603,7 +604,7 @@ class Papyrus:
         return df
 
     def _prepare_query_col(
-        self, df: pd.DataFrame, desc: Optional[str]
+            self, df: pd.DataFrame, desc: Optional[str]
     ) -> Tuple[Optional[str], pd.DataFrame]:
         """
         Determines the appropriate query column based on the descriptor type.
@@ -653,7 +654,7 @@ class Papyrus:
         return query_col, df
 
     def _merge_desc(
-        self, df: pd.DataFrame, desc: Optional[str], desc_func: callable, **kwargs
+            self, df: pd.DataFrame, desc: Optional[str], desc_func: callable, **kwargs
     ) -> pd.DataFrame:
         """
         Merges descriptors into the dataset using the provided descriptor function.
@@ -685,7 +686,7 @@ class Papyrus:
 
     @staticmethod
     def _parse_activity_key(
-        activity_type: Union[str, List[str]]
+            activity_type: Union[str, List[str]]
     ) -> Tuple[str, List[str]]:
         """
         Parses and maps the activity key to corresponding activity types.
@@ -801,7 +802,7 @@ class Papyrus:
 
     @staticmethod
     def _get_top_targets(
-        df: pd.DataFrame, n_targets: int = 20
+            df: pd.DataFrame, n_targets: int = 20
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
         Selects the top protein targets based on the number of measurements.
@@ -833,7 +834,7 @@ class Papyrus:
         return filtered_df, top_targets
 
     def _filter_raw_file(
-        self, papyrus_data: pd.DataFrame, papyrus_protein_data: pd.DataFrame
+            self, papyrus_data: pd.DataFrame, papyrus_protein_data: pd.DataFrame
     ) -> pd.DataFrame:
         """
         Applies filtering criteria to the raw Papyrus dataset.
@@ -894,17 +895,17 @@ class Papyrus:
 
 class PapyrusDataset(Dataset):
     def __init__(
-        self,
-        file_path: Union[str, Path] = None,
-        desc_prot: Union[str, None] = None,
-        desc_chem: Union[str, None] = None,
-        task_type: str = "regression",
-        calc_median: bool = False,
-        median_scaling: bool = False,
-        median_point: float = 6.0,
-        logger: Union[None, logging.Logger] = None,
-        device=DEVICE,
-        **kwargs,
+            self,
+            file_path: Union[str, Path] = None,
+            desc_prot: Union[str, None] = None,
+            desc_chem: Union[str, None] = None,
+            task_type: str = "regression",
+            calc_median: bool = False,
+            median_scaling: bool = False,
+            median_point: float = 6.0,
+            logger: Union[None, logging.Logger] = None,
+            device=DEVICE,
+            **kwargs,
     ) -> None:
         """
         Initializes the Papyrus class for processing and handling Papyrus datasets.
@@ -986,23 +987,23 @@ class PapyrusDataset(Dataset):
         return len(self.labels)
 
     def __getitem__(
-        self, idx: int
+            self, idx: int
     ) -> Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         """Retrieves a single data point from the dataset."""
         return (self.prot_desc[idx], self.chem_desc[idx]), self.labels[idx]
 
 
 def get_datasets(
-    n_targets: int = -1,
-    activity_type: str = "xc50",
-    split_type: str = "random",
-    desc_prot: Optional[str] = None,
-    desc_chem: Optional[str] = None,
-    median_scaling: bool = False,
-    task_type: str = "regression",
-    ext: str = "pkl",
-    logger: Optional[logging.Logger] = None,
-    device=DEVICE,
+        n_targets: int = -1,
+        activity_type: str = "xc50",
+        split_type: str = "random",
+        desc_prot: Optional[str] = None,
+        desc_chem: Optional[str] = None,
+        median_scaling: bool = False,
+        task_type: str = "regression",
+        ext: str = "pkl",
+        logger: Optional[logging.Logger] = None,
+        device=DEVICE,
 ) -> Dict[str, PapyrusDataset]:
     """
     Loads Papyrus datasets for training, validation, and testing.
@@ -1214,6 +1215,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
     # # Example of how to use the Papyrus class
     # activity_type = "kx"
     # std_smiles = True

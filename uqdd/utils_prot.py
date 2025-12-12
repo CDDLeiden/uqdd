@@ -1,19 +1,20 @@
-import os
 import logging
+import os
 from typing import List, Dict, Union, Generator, Optional
 
-import torch
+import ankh
 import numpy as np
 import pandas as pd
-from biotransformers import BioTransformers
-import ankh
 import ray
-from uqdd import DATA_DIR, DEVICE
+import torch
+from biotransformers import BioTransformers
 from papyrus_scripts.reader import read_protein_descriptors
 from tqdm.auto import tqdm
 
+from uqdd import DATA_DIR, DEVICE
+
 torch.cuda.empty_cache()
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 all_models = [
@@ -34,7 +35,7 @@ num_gpus = torch.cuda.device_count()
 
 
 def create_results_dict(
-    entries: List[str], embeddings: List
+        entries: List[str], embeddings: List
 ) -> Dict[str, Union[List, torch.Tensor]]:
     """
     Creates a dictionary mapping each entry to its corresponding embedding.
@@ -89,14 +90,14 @@ def batch_generator(seq_list: List[str], size: int) -> Generator[List[str], None
         A generator yielding batches of the input list.
     """
     for i in range(0, len(seq_list), size):
-        yield seq_list[i : i + size]
+        yield seq_list[i: i + size]
 
 
 def compute_biotransformer_embeddings(
-    protein_sequences: List[str],
-    embedding_type: str,
-    batch_size: int = 8,
-    num_gpus: int = 1,
+        protein_sequences: List[str],
+        embedding_type: str,
+        batch_size: int = 8,
+        num_gpus: int = 1,
 ) -> Dict[str, torch.Tensor]:
     """
     Computes embeddings using BioTransformers.
@@ -140,7 +141,7 @@ def compute_biotransformer_embeddings(
 
 
 def compute_ankh_embeddings(
-    protein_sequences: List[str], embedding_type: str, batch_size: int = 32
+        protein_sequences: List[str], embedding_type: str, batch_size: int = 32
 ) -> Dict[str, torch.Tensor]:
     """
     Computes embeddings using the Ankh model.
@@ -174,9 +175,9 @@ def compute_ankh_embeddings(
 
     embeddings = []
     for batch_seqs in tqdm(
-        batch_generator(protein_sequences, batch_size),
-        desc=f"Processing Protein Embedding batches {embedding_type}",
-        total=len(protein_sequences) // batch_size,
+            batch_generator(protein_sequences, batch_size),
+            desc=f"Processing Protein Embedding batches {embedding_type}",
+            total=len(protein_sequences) // batch_size,
     ):
         # Tokenize the current batch of sequences
         outputs = tokenizer.batch_encode_plus(
@@ -199,7 +200,7 @@ def compute_ankh_embeddings(
 
 
 def get_papyrus_embeddings(
-    target_ids: Optional[List[str]] = None, desc_type: str = "unirep"
+        target_ids: Optional[List[str]] = None, desc_type: str = "unirep"
 ) -> Dict[str, np.ndarray]:
     """
     Retrieves protein embeddings from the Papyrus dataset.
@@ -241,10 +242,10 @@ def get_papyrus_embeddings(
 
 
 def merge_embeddings(
-    df: pd.DataFrame,
-    results_mapper: Dict[str, np.ndarray],
-    embedding_type: str,
-    query_col: str = "Sequence",
+        df: pd.DataFrame,
+        results_mapper: Dict[str, np.ndarray],
+        embedding_type: str,
+        query_col: str = "Sequence",
 ) -> pd.DataFrame:
     """
     Merges computed embeddings into the original DataFrame.
@@ -272,10 +273,10 @@ def merge_embeddings(
 
 
 def get_embeddings(
-    df: pd.DataFrame,
-    embedding_type: str,
-    query_col: str = "Sequence",
-    batch_size: int = 4,
+        df: pd.DataFrame,
+        embedding_type: str,
+        query_col: str = "Sequence",
+        batch_size: int = 4,
 ) -> pd.DataFrame:
     """
     Computes or retrieves protein sequence embeddings and adds them to the DataFrame.

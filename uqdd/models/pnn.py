@@ -1,15 +1,16 @@
 import logging
 from typing import Optional, Tuple, List
 
-import wandb
 import torch
 import torch.nn as nn
-from uqdd.utils import create_logger
+import wandb
+
 from uqdd.models.utils_models import (
     get_model_config,
     get_sweep_config,
 )
-from uqdd.models.utils_train import train_model_e2e, predict
+from uqdd.models.utils_train import train_model_e2e
+from uqdd.utils import create_logger
 
 
 class PNN(nn.Module):
@@ -56,11 +57,11 @@ class PNN(nn.Module):
     """
 
     def __init__(
-        self,
-        config: Optional[dict] = None,
-        logger: Optional[logging.Logger] = None,
-        aleavar_layer_included: bool = True,
-        **kwargs,
+            self,
+            config: Optional[dict] = None,
+            logger: Optional[logging.Logger] = None,
+            aleavar_layer_included: bool = True,
+            **kwargs,
     ) -> None:
         super(PNN, self).__init__()
         if config is None:
@@ -117,7 +118,7 @@ class PNN(nn.Module):
             nn.init.xavier_normal_(module.weight, gain=nn.init.calculate_gain("relu"))
 
     def forward(
-        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+            self, inputs: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass of the model.
@@ -154,7 +155,7 @@ class PNN(nn.Module):
 
     @staticmethod
     def create_mlp(
-        input_dim: int, layer_dims: List[int], dropout: float
+            input_dim: int, layer_dims: List[int], dropout: float
     ) -> nn.Sequential:
         """
         Creates a multi-layer perceptron (MLP) with ReLU activations and dropout.
@@ -186,11 +187,11 @@ class PNN(nn.Module):
         return nn.Sequential(*modules)  # , layer_dims[-1]
 
     def init_layers(
-        self,
-        config: dict,
-        chem_input_dim: Optional[int],
-        prot_input_dim: Optional[int],
-        output_dim: int,
+            self,
+            config: dict,
+            chem_input_dim: Optional[int],
+            prot_input_dim: Optional[int],
+            output_dim: int,
     ) -> None:
         """
         Initializes the feature extractors and regressor/classifier layers.
@@ -325,7 +326,6 @@ def run_pnn_hyperparam(**kwargs) -> None:
     print(f"Running sweep with SWEEP_ID: {sweep_id}")
 
     wandb.agent(sweep_id, function=run_pnn, count=sweep_count)
-
 
 # if __name__ == "__main__":
 #     data_name = "papyrus"

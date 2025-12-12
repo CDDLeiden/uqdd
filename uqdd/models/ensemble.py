@@ -2,17 +2,19 @@ import logging
 from typing import Optional, List, Type, Tuple, Any
 
 import numpy as np
-import wandb
 import torch
-import torch.nn as nn
 import torch.multiprocessing as mp
+import torch.nn as nn
+import wandb
 from numpy import ndarray
 from torch.nn import Module
 
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, DATASET_DIR
 from uqdd.models.pnn import PNN
-from uqdd.utils import create_logger, save_pickle
-
+from uqdd.models.utils_models import (
+    get_model_config,
+    set_seed,
+)
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
@@ -22,11 +24,7 @@ from uqdd.models.utils_train import (
     get_dataloader,
     post_training_save_model,
 )
-
-from uqdd.models.utils_models import (
-    get_model_config,
-    set_seed,
-)
+from uqdd.utils import create_logger, save_pickle
 
 mp.set_start_method("spawn", force=True)
 
@@ -48,11 +46,11 @@ class EnsembleDNN(nn.Module):
     """
 
     def __init__(
-        self,
-        config: Optional[dict] = None,
-        model_class: Type[nn.Module] = PNN,
-        model_list: Optional[List[nn.Module]] = None,
-        **kwargs,
+            self,
+            config: Optional[dict] = None,
+            model_class: Type[nn.Module] = PNN,
+            model_list: Optional[List[nn.Module]] = None,
+            **kwargs,
     ) -> None:
         super(EnsembleDNN, self).__init__()
         if config is None:
@@ -73,7 +71,7 @@ class EnsembleDNN(nn.Module):
         self.models = nn.ModuleList(models)
 
     def forward(
-        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+            self, inputs: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for the ensemble model.
@@ -210,11 +208,11 @@ def fill_to_max_epochs(array: np.ndarray, max_epochs: int) -> np.ndarray:
 
 
 def process_results_arrs(
-    result_arrs: List[np.ndarray | float],
-    test_arrs: List[np.ndarray | float],
-    config: dict,
-    logger: logging.Logger,
-    model_type: str = "ensemble",
+        result_arrs: List[np.ndarray | float],
+        test_arrs: List[np.ndarray | float],
+        config: dict,
+        logger: logging.Logger,
+        model_type: str = "ensemble",
 ) -> np.ndarray:
     """
     Processes and logs results from multiple ensemble models.
@@ -278,7 +276,7 @@ def process_results_arrs(
 
 # Function to train one model on a specific GPU
 def train_one_ensemble_member(
-    config: dict, gpu_id: int, model_idx: int, logger: logging.Logger
+        config: dict, gpu_id: int, model_idx: int, logger: logging.Logger
 ) -> tuple[Module, ndarray, float, dict[str, Any]]:
     """
     Trains a single ensemble model instance on a specified GPU.
@@ -327,7 +325,7 @@ def train_one_ensemble_member(
 
 
 def run_ensemble(
-    config: Optional[dict] = None,
+        config: Optional[dict] = None,
 ) -> Tuple[nn.Module, nn.Module, dict, dict]:
     """
     Trains and evaluates an ensemble of deep learning models.
@@ -449,7 +447,6 @@ def run_ensemble_wrapper(**kwargs):
     LOGGER = create_logger(name="ensemble", file_level="debug", stream_level="info")
     config = get_model_config(model_type="ensemble", **kwargs)
     return run_ensemble(config)
-
 
 # if __name__ == "__main__":
 #     ensemble_model, iso_recal_model, metrics, plots = run_ensemble_wrapper(

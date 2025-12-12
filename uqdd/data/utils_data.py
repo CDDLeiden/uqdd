@@ -1,15 +1,15 @@
+import logging
 import os
 import pickle
-import logging
 from pathlib import Path
 from typing import Union, List, Dict, Tuple, Callable
 
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
 import seaborn as sns
-from sklearn.model_selection import train_test_split
+from matplotlib import pyplot as plt
 from scipy.spatial.distance import jensenshannon
+from sklearn.model_selection import train_test_split
 
 from uqdd import DATASET_DIR
 from uqdd.utils import load_pickle, save_df, load_df, save_pickle
@@ -19,7 +19,7 @@ string_types = (type(b""), type(""))
 
 
 def export_tasks(
-    data_name: str, activity: str, n_targets: int, label_col: List[str]
+        data_name: str, activity: str, n_targets: int, label_col: List[str]
 ) -> None:
     """
     Exports the selected tasks to a pickle file.
@@ -34,6 +34,7 @@ def export_tasks(
         Number of targets.
     label_col : List[str]
         List of label column names.
+
     Returns:
     --------
     None
@@ -47,9 +48,9 @@ def export_tasks(
 
 
 def export_dataset(
-    subsets_dict: Dict[str, pd.DataFrame],
-    files_paths: Dict[str, Path],
-    cols_to_include: List[str] = None,
+        subsets_dict: Dict[str, pd.DataFrame],
+        files_paths: Dict[str, Path],
+        cols_to_include: List[str] = None,
 ) -> None:
     """
     Saves dataset splits to files.
@@ -62,6 +63,7 @@ def export_dataset(
         Dictionary containing file paths for each split.
     cols_to_include : List[str], optional
         Columns to include in the saved dataset.
+
     Returns:
     --------
     None
@@ -71,7 +73,7 @@ def export_dataset(
 
 
 def merge_preprocessed_desc(
-    df: pd.DataFrame, preprocessed_df: pd.DataFrame, matching_col: str, desc_col: str
+        df: pd.DataFrame, preprocessed_df: pd.DataFrame, matching_col: str, desc_col: str
 ) -> pd.DataFrame:
     """
     Merges preprocessed descriptors into the main dataset.
@@ -86,6 +88,7 @@ def merge_preprocessed_desc(
         Column to match entries on.
     desc_col : str
         Descriptor column to merge.
+
     Returns:
     --------
     pd.DataFrame
@@ -101,13 +104,13 @@ def merge_preprocessed_desc(
 
 
 def load_desc_preprocessed(
-    df: pd.DataFrame,
-    files_paths: Dict[str, Path],
-    desc_prot: str = None,
-    desc_chem: str = None,
-    prot_matching_col: str = "target_id",
-    chem_matching_col: str = "SMILES",
-    **kwargs,
+        df: pd.DataFrame,
+        files_paths: Dict[str, Path],
+        desc_prot: str = None,
+        desc_chem: str = None,
+        prot_matching_col: str = "target_id",
+        chem_matching_col: str = "SMILES",
+        **kwargs,
 ) -> pd.DataFrame:
     """
     Loads and merges preprocessed descriptors into the dataset.
@@ -126,6 +129,7 @@ def load_desc_preprocessed(
         Column name for protein matching.
     chem_matching_col : str, optional
         Column name for chemical matching.
+
     Returns:
     --------
     pd.DataFrame
@@ -204,7 +208,7 @@ def get_dataset_sizes(datasets: Dict[str, pd.DataFrame]) -> None:
 
 
 def get_data_info(
-    train_data: pd.DataFrame, val_data: pd.DataFrame, test_data: pd.DataFrame
+        train_data: pd.DataFrame, val_data: pd.DataFrame, test_data: pd.DataFrame
 ) -> pd.DataFrame:
     """
     Computes summary statistics on dataset splits.
@@ -235,7 +239,7 @@ def get_data_info(
 
 
 def create_split_dict(
-    split_type: str, train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame
+        split_type: str, train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Creates a dictionary containing dataset splits.
@@ -267,7 +271,7 @@ def create_split_dict(
 
 
 def from_split_data_to_idx(
-    split_dict: Dict[str, Dict[str, pd.DataFrame]]
+        split_dict: Dict[str, Dict[str, pd.DataFrame]]
 ) -> Dict[str, Dict[str, List[int]]]:
     """
     Converts dataset splits to index lists.
@@ -293,13 +297,13 @@ def from_split_data_to_idx(
 
 
 def random_split(
-    df: pd.DataFrame,
-    train_frac: float = 0.7,
-    val_frac: float = 0.15,
-    test_frac: float = 0.15,
-    stratify_col: str = None,
-    seed: int = 42,
-    print_info: bool = True,
+        df: pd.DataFrame,
+        train_frac: float = 0.7,
+        val_frac: float = 0.15,
+        test_frac: float = 0.15,
+        stratify_col: str = None,
+        seed: int = 42,
+        print_info: bool = True,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Splits a DataFrame into training, validation, and test sets based on specified fractions.
@@ -320,6 +324,7 @@ def random_split(
         The random seed for reproducibility.
     print_info : bool
         Whether to print split details.
+
     Returns:
     --------
     Dict[str, pd.DataFrame]
@@ -331,7 +336,7 @@ def random_split(
         st = df[stratify_col]
     elif stratify_col:
         assert (
-            stratify_col in df.columns
+                stratify_col in df.columns
         ), f"Column {stratify_col} not found in the DataFrame"
         st = df[stratify_col]
 
@@ -350,7 +355,7 @@ def random_split(
 
 
 def separate_min_count_df(
-    df: pd.DataFrame, counting_col: str = "scaffold", threshold_count: int = 3
+        df: pd.DataFrame, counting_col: str = "scaffold", threshold_count: int = 3
 ) -> (pd.DataFrame, pd.DataFrame):
     """
     Separates dataframe into subsets based on minimum count threshold.
@@ -378,15 +383,15 @@ def separate_min_count_df(
 
 
 def random_split_stratified(
-    df: pd.DataFrame,
-    stratify_by: str = "scaffold",
-    max_k: int = 500,
-    optimal_k: Union[int, None] = None,
-    train_frac: float = 0.7,
-    val_frac: float = 0.15,
-    test_frac: float = 0.15,
-    seed: int = 42,
-    export_path: Union[str, None] = None,
+        df: pd.DataFrame,
+        stratify_by: str = "scaffold",
+        max_k: int = 500,
+        optimal_k: Union[int, None] = None,
+        train_frac: float = 0.7,
+        val_frac: float = 0.15,
+        test_frac: float = 0.15,
+        seed: int = 42,
+        export_path: Union[str, None] = None,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Splits a dataset into training, validation, and test sets with stratification.
@@ -468,12 +473,12 @@ def random_split_stratified(
 
 
 def scaffold_split(
-    df: pd.DataFrame,
-    smiles_col: str = "smiles",
-    train_frac: float = 0.7,
-    val_frac: float = 0.15,
-    test_frac: float = 0.15,
-    seed: int = 42,
+        df: pd.DataFrame,
+        smiles_col: str = "smiles",
+        train_frac: float = 0.7,
+        val_frac: float = 0.15,
+        test_frac: float = 0.15,
+        seed: int = 42,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Splits a dataset into training, validation, and test sets based on scaffold structure.
@@ -515,8 +520,8 @@ def scaffold_split(
     num_test = int(test_frac * len_scaffolds)
     # split scaffolds
     scaffold_train = scaffolds[:num_train]
-    scaffold_val = scaffolds[num_train : num_train + num_val]
-    scaffold_test = scaffolds[num_train + num_val :]
+    scaffold_val = scaffolds[num_train: num_train + num_val]
+    scaffold_test = scaffolds[num_train + num_val:]
 
     # split dataframe
     train_df = df[df["scaffold"].isin(scaffold_train)]
@@ -531,16 +536,16 @@ def scaffold_split(
 
 
 def scaffold_cluster_split(
-    df: pd.DataFrame,
-    smiles_col: str = "smiles",
-    train_frac: float = 0.7,
-    val_frac: float = 0.15,
-    test_frac: float = 0.15,
-    max_k: int = 500,
-    optimal_k: Union[int, None] = None,
-    withH: bool = False,
-    export_mcs_path: Union[str, None] = None,
-    seed: int = 42,
+        df: pd.DataFrame,
+        smiles_col: str = "smiles",
+        train_frac: float = 0.7,
+        val_frac: float = 0.15,
+        test_frac: float = 0.15,
+        max_k: int = 500,
+        optimal_k: Union[int, None] = None,
+        withH: bool = False,
+        export_mcs_path: Union[str, None] = None,
+        seed: int = 42,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Splits a dataset into training, validation, and test sets using scaffold clustering.
@@ -598,8 +603,8 @@ def scaffold_cluster_split(
     num_test = int(test_frac * len_clusters)
     # split scaffolds
     clusters_train = clusters[:num_train]
-    clusters_val = clusters[num_train : num_train + num_val]
-    clusters_test = clusters[num_train + num_val :]
+    clusters_val = clusters[num_train: num_train + num_val]
+    clusters_test = clusters[num_train + num_val:]
 
     # split dataframe
     train_df = df[df["cluster"].isin(clusters_train)]
@@ -614,11 +619,11 @@ def scaffold_cluster_split(
 
 
 def time_split(
-    df: pd.DataFrame,
-    time_col: str = "year",
-    train_frac: float = 0.7,
-    val_frac: float = 0.15,
-    test_frac: float = 0.15,
+        df: pd.DataFrame,
+        time_col: str = "year",
+        train_frac: float = 0.7,
+        val_frac: float = 0.15,
+        test_frac: float = 0.15,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Splits a dataset into training, validation, and test sets based on a time column.
@@ -645,8 +650,8 @@ def time_split(
     # order df by time_col and split
     df = df.sort_values(by=time_col)
     train_df = df.iloc[: int(train_frac * len(df))]
-    val_df = df.iloc[int(train_frac * len(df)) : int((train_frac + val_frac) * len(df))]
-    test_df = df.iloc[int((train_frac + val_frac) * len(df)) :]
+    val_df = df.iloc[int(train_frac * len(df)): int((train_frac + val_frac) * len(df))]
+    test_df = df.iloc[int((train_frac + val_frac) * len(df)):]
     print(
         f"Time Split - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}"
     )
@@ -656,19 +661,19 @@ def time_split(
 
 
 def split_data(
-    df: pd.DataFrame,
-    split_type: Union[str, List[str]] = "random",
-    smiles_col: str = "smiles",
-    time_col: str = "year",
-    stratify_col: Union[str, None] = None,
-    fractions: Union[List[float], None] = None,
-    max_k_clusters: int = 500,
-    optimal_k: Union[int, None] = None,
-    export_path: Union[str, None, Path] = None,
-    return_indices: bool = False,
-    recalculate: bool = False,
-    seed: int = 42,
-    logger: Union[logging.Logger, None] = None,
+        df: pd.DataFrame,
+        split_type: Union[str, List[str]] = "random",
+        smiles_col: str = "smiles",
+        time_col: str = "year",
+        stratify_col: Union[str, None] = None,
+        fractions: Union[List[float], None] = None,
+        max_k_clusters: int = 500,
+        optimal_k: Union[int, None] = None,
+        export_path: Union[str, None, Path] = None,
+        return_indices: bool = False,
+        recalculate: bool = False,
+        seed: int = 42,
+        logger: Union[logging.Logger, None] = None,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Splits a dataset into training, validation, and test sets based on the specified split type.
@@ -842,7 +847,7 @@ def split_data(
 
 
 def stratified_distribution(
-    df: pd.DataFrame, stratified_col: str = "scaffold"
+        df: pd.DataFrame, stratified_col: str = "scaffold"
 ) -> pd.DataFrame:
     """
     Calculates the distribution of a stratified column.
@@ -864,10 +869,10 @@ def stratified_distribution(
 
 
 def get_dist_df(
-    train_df: pd.DataFrame,
-    val_df: pd.DataFrame,
-    test_df: pd.DataFrame,
-    stratified_col: str = "scaffold",
+        train_df: pd.DataFrame,
+        val_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+        stratified_col: str = "scaffold",
 ) -> pd.DataFrame:
     """
     Generates a dataframe of stratified distributions across dataset splits.
@@ -901,10 +906,10 @@ def get_dist_df(
 
 
 def plot_scaffold_distribution(
-    dist_df: pd.DataFrame,
-    stratified_col: str = "scaffold",
-    split_type: str = "random",
-    output_path: Union[str, None] = None,
+        dist_df: pd.DataFrame,
+        stratified_col: str = "scaffold",
+        split_type: str = "random",
+        output_path: Union[str, None] = None,
 ) -> None:
     """
     Plots the scaffold distribution across dataset splits.
@@ -939,7 +944,7 @@ def plot_scaffold_distribution(
 
     if output_path:
         file_path = (
-            Path(output_path) / f"{split_type}_{stratified_col}_distribution.png"
+                Path(output_path) / f"{split_type}_{stratified_col}_distribution.png"
         )
         plt.savefig(file_path)
     plt.show()
@@ -967,9 +972,9 @@ def check_distribution_js_similarity(dist_df: pd.DataFrame) -> bool:
     # Check if the JS divergences are below a threshold
     threshold = 0.1
     js_diff = (
-        train_val_js < threshold
-        and train_test_js < threshold
-        and val_test_js < threshold
+            train_val_js < threshold
+            and train_test_js < threshold
+            and val_test_js < threshold
     )
     print(f"Train vs. Val JS divergence: {train_val_js:.4f}")
     print(f"Train vs. Test JS divergence: {train_test_js:.4f}")
@@ -1010,9 +1015,9 @@ def check_distribution_similarity(dist_df: pd.DataFrame) -> Tuple[float, float, 
 
 
 def check_distribution(
-    split_dict: Dict[str, Dict[str, pd.DataFrame]],
-    stratified_col: str = "scaffold",
-    output_path: Union[str, None] = None,
+        split_dict: Dict[str, Dict[str, pd.DataFrame]],
+        stratified_col: str = "scaffold",
+        output_path: Union[str, None] = None,
 ) -> None:
     """
     Evaluates the scaffold distribution across train, validation, and test splits.
@@ -1049,13 +1054,13 @@ def check_distribution(
 
 
 def check_if_processed_file(
-    data_name: str = "papyrus",
-    activity_type: str = "xc50",
-    n_targets: int = -1,
-    split_type: str = "random",
-    desc_prot: Union[str, None] = None,
-    desc_chem: str = "ecfp1024",
-    file_ext: str = "pkl",
+        data_name: str = "papyrus",
+        activity_type: str = "xc50",
+        n_targets: int = -1,
+        split_type: str = "random",
+        desc_prot: Union[str, None] = None,
+        desc_chem: str = "ecfp1024",
+        file_ext: str = "pkl",
 ) -> Tuple[bool, Dict[str, Path]]:
     """
     Checks whether dataset files for a specific split and descriptor combination already exist.
@@ -1101,9 +1106,9 @@ def check_if_processed_file(
 
 
 def apply_label_scaling(
-    df: pd.DataFrame,
-    label_col: Union[str, List[str]],
-    label_scaling_func: Union[Callable, None] = None,
+        df: pd.DataFrame,
+        label_col: Union[str, List[str]],
+        label_scaling_func: Union[Callable, None] = None,
 ) -> pd.DataFrame:
     """
     Applies a scaling function to the label column(s) of a DataFrame.
@@ -1132,12 +1137,12 @@ def apply_label_scaling(
 
 
 def apply_median_scaling(
-    df: pd.DataFrame,
-    label_col: Union[str, List[str]],
-    train_median: Union[float, List[float]] = 6.0,
-    calc_median: bool = False,
-    median_scaling: bool = False,
-    logger: Union[logging.Logger, None] = None,
+        df: pd.DataFrame,
+        label_col: Union[str, List[str]],
+        train_median: Union[float, List[float]] = 6.0,
+        calc_median: bool = False,
+        median_scaling: bool = False,
+        logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, List[float]]:
     """
     Applies median scaling to label columns in a DataFrame.
@@ -1178,7 +1183,7 @@ def apply_median_scaling(
 
 
 def subtract_label_median(
-    df_label_series: pd.Series, median: Union[float, None] = None
+        df_label_series: pd.Series, median: Union[float, None] = None
 ) -> Tuple[pd.Series, float]:
     """
     Subtracts the median value from a label series.
@@ -1269,13 +1274,13 @@ def check_normality(series: pd.Series) -> Tuple[float, float, bool]:
 
 
 def target_filtering(
-    df: pd.DataFrame,
-    target_col: str = "target_id",
-    label_col: str = "pchembl_value_Mean",
-    min_datapoints: int = 50,
-    min_actives: int = 10,
-    activity_threshold: float = 6.5,
-    normal: bool = False,
+        df: pd.DataFrame,
+        target_col: str = "target_id",
+        label_col: str = "pchembl_value_Mean",
+        min_datapoints: int = 50,
+        min_actives: int = 10,
+        activity_threshold: float = 6.5,
+        normal: bool = False,
 ) -> pd.DataFrame:
     """
     Filters the dataset based on the number of datapoints and active compounds.
@@ -1309,12 +1314,12 @@ def target_filtering(
     active_counts = active_counts.to_frame(name="actives")
     target_counts = target_counts.join(active_counts, how="left").fillna(0)
     target_counts["fraction_actives"] = (
-        target_counts["actives"] / target_counts["datapoints"]
+            target_counts["actives"] / target_counts["datapoints"]
     )
     target_counts = target_counts[
         (target_counts["datapoints"] >= min_datapoints)
         & (target_counts["actives"] >= min_actives)
-    ]
+        ]
 
     # check normality
     if normal:
@@ -1398,7 +1403,7 @@ def get_target_data_distribution(df: pd.DataFrame, target_col: str) -> pd.DataFr
 
 
 def fig_target_data_distribution(
-    df: pd.DataFrame, target_col: str, output_path: Union[str, None] = None
+        df: pd.DataFrame, target_col: str, output_path: Union[str, None] = None
 ) -> None:
     """
     Plots the distribution of data points per target.
@@ -1432,9 +1437,9 @@ def fig_target_data_distribution(
 
 
 def fig_label_distribution(
-    df: pd.DataFrame,
-    label_col: str = "pchembl_value_Mean",
-    output_path: Union[str, None] = None,
+        df: pd.DataFrame,
+        label_col: str = "pchembl_value_Mean",
+        output_path: Union[str, None] = None,
 ) -> None:
     """
     Plots the distribution of label values.
@@ -1465,9 +1470,9 @@ def fig_label_distribution(
 
 
 def fig_label_distribution_across_splits(
-    split_dict: Dict[str, Dict[str, pd.DataFrame]],
-    label_col: str = "pchembl_value_Mean",
-    output_path: Union[str, None] = None,
+        split_dict: Dict[str, Dict[str, pd.DataFrame]],
+        label_col: str = "pchembl_value_Mean",
+        output_path: Union[str, None] = None,
 ) -> None:
     """
     Plots the label distribution across dataset splits.
@@ -1502,7 +1507,7 @@ def fig_label_distribution_across_splits(
         plt.tight_layout()
         if output_path:
             file_path = (
-                Path(output_path)
-                / f"{split_type}_split_label_distribution_across_splits.png"
+                    Path(output_path)
+                    / f"{split_type}_split_label_distribution_across_splits.png"
             )
             plt.savefig(file_path)

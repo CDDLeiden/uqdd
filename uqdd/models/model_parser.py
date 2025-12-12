@@ -1,14 +1,14 @@
 import argparse
 
-from uqdd.models.pnn import run_pnn_wrapper, run_pnn_hyperparam
-from uqdd.models.ensemble import run_ensemble_wrapper
-from uqdd.models.mcdropout import run_mcdropout_wrapper
-from uqdd.models.evidential import run_evidential_wrapper, run_evidential_hyperparam
-from uqdd.models.eoe import run_eoe_wrapper
-from uqdd.models.emc import run_emc_wrapper
-from uqdd.utils import float_or_none, parse_list
-
 import wandb
+
+from uqdd.models.emc import run_emc_wrapper
+from uqdd.models.ensemble import run_ensemble_wrapper
+from uqdd.models.eoe import run_eoe_wrapper
+from uqdd.models.evidential import run_evidential_wrapper, run_evidential_hyperparam
+from uqdd.models.mcdropout import run_mcdropout_wrapper
+from uqdd.models.pnn import run_pnn_wrapper, run_pnn_hyperparam
+from uqdd.utils import float_or_none, parse_list
 
 # Add requirement for wandb core
 wandb.sdk.require("core")
@@ -161,7 +161,7 @@ def main():
         type=parse_list,
         default=None,
         help="Chem layers sizes",
-    )  #  nargs="+",
+    )  # nargs="+",
     parser.add_argument(
         "--prot_layers", type=parse_list, default=None, help="Prot layers sizes"
     )
@@ -273,7 +273,7 @@ def main():
         if repeats > 1:
             for i in range(repeats):
                 kwargs["seed"] = seed
-                print(f"Run {i+1}/{repeats}")
+                print(f"Run {i + 1}/{repeats}")
                 query_dict[args.model](**kwargs)
                 seed += (
                     1

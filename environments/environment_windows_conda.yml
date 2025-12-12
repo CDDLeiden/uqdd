@@ -1,0 +1,47 @@
+name: uqdd-env
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.11
+  - pip
+  # Linux-specific packages removed
+  - chembl_webresource_client
+  - uncertainty-toolbox
+  - sentencepiece
+  - transformers
+  - rdkit
+  - wandb
+  - jupyterlab
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - plotly
+  - pytest
+  - tqdm
+  - numpy
+  - pandas
+  - onnx
+  - fastcluster
+  - sentence-transformers
+  - setuptools
+  - wheel
+  - openpyxl
+  - pip:
+      - torch
+      - chembl-downloader
+      - https://github.com/OlivierBeq/Papyrus-scripts/tarball/master
+      - https://github.com/bolak92/bio-transformers/tarball/main
+      - ankh
+      - scikit-posthocs
+      - scienceplots
+      - pingouin
+      - mkdocs
+      - mkdocs-material
+      - mkdocstrings
+      - mkdocs-git-revision-date-localized-plugin
+      - mkdocs-plugin-tags
+      - cmake
+      - mapie
+      - pandas-stubs

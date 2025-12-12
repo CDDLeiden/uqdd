@@ -1,16 +1,22 @@
 from typing import Tuple, Optional, Dict, Any, List
-import wandb
+
 import torch
 import torch.nn as nn
+import wandb
 
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE
+from uqdd.models.ensemble import process_results_arrs
 from uqdd.models.evidential import (
     EvidentialDNN,
     ev_predict,
     ev_nll,
 )
-from uqdd.models.ensemble import process_results_arrs
-from uqdd.utils import create_logger
+from uqdd.models.utils_models import (
+    get_model_config,
+    set_seed,
+    calculate_means,
+    stack_vars,
+)
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
@@ -19,12 +25,7 @@ from uqdd.models.utils_train import (
     get_dataloader,
     post_training_save_model,
 )
-from uqdd.models.utils_models import (
-    get_model_config,
-    set_seed,
-    calculate_means,
-    stack_vars,
-)
+from uqdd.utils import create_logger
 
 
 class EoEDNN(nn.Module):
@@ -45,10 +46,10 @@ class EoEDNN(nn.Module):
     """
 
     def __init__(
-        self,
-        config: Optional[Dict[str, Any]] = None,
-        model_list: Optional[List[nn.Module]] = None,
-        **kwargs,
+            self,
+            config: Optional[Dict[str, Any]] = None,
+            model_list: Optional[List[nn.Module]] = None,
+            **kwargs,
     ):
         super(EoEDNN, self).__init__()
         self.model_list = model_list
@@ -73,7 +74,7 @@ class EoEDNN(nn.Module):
         self.models = nn.ModuleList(models)
 
     def forward(
-        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+            self, inputs: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the ensemble of evidential neural networks.
@@ -109,7 +110,7 @@ class EoEDNN(nn.Module):
 
 
 def run_eoe(
-    config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None
 ) -> Tuple[nn.Module, Any, Dict[str, Any], Dict[str, Any]]:
     """
     Train an ensemble of Evidential Neural Networks (EoE) and perform uncertainty quantification.

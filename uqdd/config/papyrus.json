@@ -59,7 +59,7 @@
     "Year": "Int64"
   },
   "dtypes_protein": {
-    "target_id":"str",
+    "target_id": "str",
     "HGNC_symbol": "str",
     "UniProtID": "str",
     "Status": "str",
@@ -67,6 +67,6 @@
     "Classification": "str",
     "Length": "Int64",
     "Sequence": "str",
-    "TID":  "str"
+    "TID": "str"
   }
 }
