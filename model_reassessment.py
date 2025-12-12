@@ -1,5 +1,4 @@
 import argparse
-
 # # Importing models and their predict functions
 # from uqdd.models.utils_train import predict # for ensemble
 # import matplotlib.pyplot as plt
@@ -18,7 +17,6 @@ from uqdd.models.mcdropout import mc_predict
 from uqdd.models.pnn import PNN
 from uqdd.models.utils_metrics import process_preds, create_df_preds
 from uqdd.models.utils_models import load_model, get_model_config
-
 # METRICS
 from uqdd.models.utils_train import (
     predict,
@@ -48,11 +46,11 @@ from uqdd.utils import load_df, create_logger
 
 
 def nll_evidentials(
-    evidential_model,
-    test_dataloader,
-    model_type="evidential",
-    num_mc_samples=100,
-    device=DEVICE,
+        evidential_model,
+        test_dataloader,
+        model_type="evidential",
+        num_mc_samples=100,
+        device=DEVICE,
 ):
     if model_type in ["evidential", "eoe"]:
         return ev_nll(evidential_model, test_dataloader, device=device)
@@ -114,15 +112,15 @@ def convert_to_list(val):
 
 # RUNS preprocessing
 def preprocess_runs(
-    runs_path,
-    models_dir=MODELS_DIR,
-    data_name="papyrus",
-    activity_type="xc50",
-    descriptor_protein="ankh-large",
-    descriptor_chemical="ecfp2048",
-    data_specific_path="papyrus/xc50/all",
-    prot_input_dim=1536,
-    chem_input_dim=2048,
+        runs_path,
+        models_dir=MODELS_DIR,
+        data_name="papyrus",
+        activity_type="xc50",
+        descriptor_protein="ankh-large",
+        descriptor_chemical="ecfp2048",
+        data_specific_path="papyrus/xc50/all",
+        prot_input_dim=1536,
+        chem_input_dim=2048,
 ):
     # Load csv runs and model names file
     runs_df = load_df(
@@ -252,11 +250,11 @@ def csv_nll_post_processing(csv_path):
 
 
 def reassess_metrics(
-    runs_df,
-    figs_out_path,
-    csv_out_path,
-    project_out_name,
-    logger,
+        runs_df,
+        figs_out_path,
+        csv_out_path,
+        project_out_name,
+        logger,
 ):
     # Shuffle rows of the runs_df
     runs_df = runs_df.sample(frac=1).reset_index(drop=True)

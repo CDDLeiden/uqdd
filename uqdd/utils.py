@@ -1,9 +1,9 @@
 import argparse
 import ast
-import os
 import json
-import pickle
 import logging
+import os
+import pickle
 from pathlib import Path
 from typing import List, Union, Tuple, Dict, Any
 
@@ -38,7 +38,7 @@ def float_or_none(value: str) -> Union[float, None]:
 
 
 def create_logger(
-    name: str = "logger", file_level: str = "debug", stream_level: str = "info"
+        name: str = "logger", file_level: str = "debug", stream_level: str = "info"
 ) -> logging.Logger:
     """
     Initializes and returns a logger with specified log levels.
@@ -93,11 +93,11 @@ def create_logger(
 
 
 def get_config(
-    config_name: str,
-    config_dir: Union[str, Path] = CONFIG_DIR,
-    split_key: Union[str, None] = None,
-    activity_key: Union[str, None] = None,
-    **kwargs,
+        config_name: str,
+        config_dir: Union[str, Path] = CONFIG_DIR,
+        split_key: Union[str, None] = None,
+        activity_key: Union[str, None] = None,
+        **kwargs,
 ) -> Dict[str, Any]:
     """
     Loads a configuration JSON file and updates it with optional overrides.
@@ -165,10 +165,10 @@ def custom_agg(x: pd.Series) -> Union[Any, List[Any]]:
 
 
 def check_na(
-    df: pd.DataFrame,
-    cols: Union[List[str], str] = "smiles",
-    nan_dup_source: str = "",
-    logger: Union[logging.Logger, None] = None,
+        df: pd.DataFrame,
+        cols: Union[List[str], str] = "smiles",
+        nan_dup_source: str = "",
+        logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Identifies and separates rows containing NaN values in specified columns.
@@ -224,13 +224,13 @@ def check_na(
 
 
 def check_duplicates(
-    df: pd.DataFrame,
-    cols: Union[List[str], str],
-    drop: bool = True,
-    sorting_col: str = "",
-    keep: Union[bool, str] = "first",
-    nan_dup_source: str = "",
-    logger: Union[logging.Logger, None] = None,
+        df: pd.DataFrame,
+        cols: Union[List[str], str],
+        drop: bool = True,
+        sorting_col: str = "",
+        keep: Union[bool, str] = "first",
+        nan_dup_source: str = "",
+        logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Identifies and optionally removes duplicate rows based on specified columns.
@@ -312,14 +312,14 @@ def check_duplicates(
 
 
 def check_nan_duplicated(
-    df: pd.DataFrame,
-    cols_nan: Union[List[str], str] = "smiles",
-    cols_dup: Union[List[str], str] = "smiles",
-    nan_dup_source: str = "",
-    drop: bool = True,
-    sorting_col: str = "",
-    keep: Union[bool, str] = "first",
-    logger: Union[logging.Logger, None] = None,
+        df: pd.DataFrame,
+        cols_nan: Union[List[str], str] = "smiles",
+        cols_dup: Union[List[str], str] = "smiles",
+        nan_dup_source: str = "",
+        drop: bool = True,
+        sorting_col: str = "",
+        keep: Union[bool, str] = "first",
+        logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Checks for NaN and duplicated values in a DataFrame and separates them.
@@ -468,12 +468,12 @@ def load_pickle(filepath: Union[str, Path]) -> Any:
 
 
 def save_df(
-    df: pd.DataFrame,
-    file_path: Union[str, None] = None,
-    output_path: str | Path = "./",
-    filename: str = "exported_file",
-    ext: str = "csv",
-    **kwargs,
+        df: pd.DataFrame,
+        file_path: Union[str, None] = None,
+        output_path: str | Path = "./",
+        filename: str = "exported_file",
+        ext: str = "csv",
+        **kwargs,
 ) -> None:
     """
     Exports a DataFrame to a specified file format.

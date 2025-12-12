@@ -66,14 +66,14 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: ['.']
+          paths: [ '.' ]
           options:
             show_source: false
             docstring_style: numpy
             separate_signature: true
             line_length: 88
             members_order: source
-            filters: ["!^_", "!^__"]
+            filters: [ "!^_", "!^__" ]
             docstring_section_style: list
             merge_init_into_class: true
             show_root_heading: true
@@ -103,25 +103,25 @@ extra_javascript:
 nav:
   - Home: index.md
   - Getting Started:
-    - Overview: getting-started/overview.md
-    - Installation: getting-started/installation.md
-    - Quickstart: getting-started/quickstart.md
+      - Overview: getting-started/overview.md
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
   - User Guide:
-    - Data Pipeline: user-guide/data.md
-    - Models & Training: user-guide/models.md
-    - Configuration: user-guide/configuration.md
-    - Metrics & Analysis: user-guide/metrics.md
-    - Notebooks: user-guide/notebooks.md
+      - Data Pipeline: user-guide/data.md
+      - Models & Training: user-guide/models.md
+      - Configuration: user-guide/configuration.md
+      - Metrics & Analysis: user-guide/metrics.md
+      - Notebooks: user-guide/notebooks.md
   - API Reference:
-    - Package: api/uqdd.md
-    - Core Utils: api/uqdd-utils.md
-    - Data: api/uqdd-data.md
-    - Models: api/uqdd-models.md
+      - Package: api/uqdd.md
+      - Core Utils: api/uqdd-utils.md
+      - Data: api/uqdd-data.md
+      - Models: api/uqdd-models.md
   - Reference:
-    - Project Structure: reference/project-structure.md
-    - CLI & Scripts: reference/scripts.md
-    - Reproducibility: reference/reproducibility.md
-    - Paper Mind Map: reference/mind-map.md
+      - Project Structure: reference/project-structure.md
+      - CLI & Scripts: reference/scripts.md
+      - Reproducibility: reference/reproducibility.md
+      - Paper Mind Map: reference/mind-map.md
   - Tags: tags.md
   - Changelog: changelog.md
 

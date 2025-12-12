@@ -1,36 +1,33 @@
-from typing import Tuple, Optional, Any
-import wandb
+from typing import Tuple, Optional
+
 import torch
 import torch.nn as nn
+import wandb
 from torch import Tensor
 
 from uqdd import DEVICE
 from uqdd.models.evidential import (
     EvidentialDNN,
-    ev_predict,
     ev_uncertainty,
     ev_predict_params,
-    ev_nll,
 )
 from uqdd.models.loss import nig_nll
 from uqdd.models.mcdropout import enable_dropout
-from uqdd.utils import create_logger
-
+from uqdd.models.utils_models import get_model_config, calculate_means, stack_vars
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
     recalibrate_model,
     get_dataloader,
 )
-
-from uqdd.models.utils_models import get_model_config, calculate_means, stack_vars
+from uqdd.utils import create_logger
 
 
 def emc_predict_params(
-    ev_model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    num_mc_samples: int = 10,
-    device: torch.device = DEVICE,
+        ev_model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        num_mc_samples: int = 10,
+        device: torch.device = DEVICE,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
@@ -79,10 +76,10 @@ def emc_predict_params(
 
 
 def emc_predict(
-    ev_model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    num_mc_samples: int = 10,
-    device: torch.device = DEVICE,
+        ev_model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        num_mc_samples: int = 10,
+        device: torch.device = DEVICE,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """
     Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
@@ -116,10 +113,10 @@ def emc_predict(
 
 
 def emc_nll(
-    model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    num_mc_samples: int = 10,
-    device: torch.device = DEVICE,
+        model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        num_mc_samples: int = 10,
+        device: torch.device = DEVICE,
 ):
     """
     Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
@@ -311,7 +308,6 @@ def run_emc_wrapper(**kwargs):
     LOGGER = create_logger(name="emc", file_level="debug", stream_level="info")
     config = get_model_config(model_type="emc", **kwargs)
     return run_emc(config=config)
-
 
 # if __name__ == "__main__":
 #     run_emc_wrapper(

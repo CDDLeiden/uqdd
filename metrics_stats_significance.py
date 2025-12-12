@@ -85,7 +85,7 @@ def calc_regression_metrics(df, cycle_col, val_col, pred_col, thresh):
     df_in["true_class"] = df_in[val_col] > thresh
     # Make sure the thresh variable creates 2 classes
     assert (
-        len(df_in.true_class.unique()) == 2
+            len(df_in.true_class.unique()) == 2
     ), "Binary classification requires two classes"
     df_in["pred_class"] = df_in[pred_col] > thresh
 
@@ -620,22 +620,22 @@ def make_normality_diagnostic(df, metric_ls, save_dir=None, name_prefix=""):
 
 
 def mcs_plot(
-    pc,
-    effect_size,
-    means,
-    labels=True,
-    cmap=None,
-    cbar_ax_bbox=None,
-    ax=None,
-    show_diff=True,
+        pc,
+        effect_size,
+        means,
+        labels=True,
+        cmap=None,
+        cbar_ax_bbox=None,
+        ax=None,
+        show_diff=True,
         cell_text_size=10,  # smaller font for cell text
         axis_text_size=8,  # smaller font for axis labels
-    show_cbar=True,
-    reverse_cmap=False,
-    vlim=None,
+        show_cbar=True,
+        reverse_cmap=False,
+        vlim=None,
         # save_dir=None,
         # name_prefix="",
-    **kwargs,
+        **kwargs,
 ):
     """
     Create a multiple comparison of means plot using a heatmap.
@@ -730,20 +730,20 @@ def mcs_plot(
 
 
 def make_mcs_plot_grid(
-    df,
-    stats,
-    group_col,
-    alpha=0.05,
-    figsize=(20, 10),
+        df,
+        stats,
+        group_col,
+        alpha=0.05,
+        figsize=(20, 10),
         direction_dict=None,
         effect_dict=None,
-    show_diff=True,
-    cell_text_size=16,
-    axis_text_size=12,
-    title_text_size=16,
-    sort_axes=False,
-    save_dir=None,
-    name_prefix="",
+        show_diff=True,
+        cell_text_size=16,
+        axis_text_size=12,
+        title_text_size=16,
+        sort_axes=False,
+        save_dir=None,
+        name_prefix="",
         model_order=None,
 ):
     """
@@ -889,13 +889,13 @@ def make_mcs_plot_grid(
 
 
 def make_scatterplot(
-    df,
-    val_col,
-    pred_col,
-    thresh,
-    cycle_col="cv_cycle",
-    group_col="method",
-    save_dir=None,
+        df,
+        val_col,
+        pred_col,
+        thresh,
+        cycle_col="cv_cycle",
+        group_col="method",
+        save_dir=None,
 ):
     """
     Create scatter plots for each method showing the relationship between predicted and measured values.
@@ -958,11 +958,11 @@ def make_scatterplot(
 
 
 def ci_plot(
-    result_tab,
-    ax_in,
-    name,
-    # save_dir=None,
-    # name_prefix=""
+        result_tab,
+        ax_in,
+        name,
+        # save_dir=None,
+        # name_prefix=""
 ):
     """
     Create a confidence interval plot for the given result table.
@@ -1249,7 +1249,7 @@ def cliffs_delta(x, y):
 
 
 def wilcoxon_pairwise_test(
-    df, metric, model_a, model_b, task=None, split=None, seed_col=None
+        df, metric, model_a, model_b, task=None, split=None, seed_col=None
 ):
     """
     Perform Wilcoxon signed-rank test between two models for a specific metric.
@@ -1361,7 +1361,7 @@ def holm_bonferroni_correction(p_values):
 
 
 def pairwise_model_comparison(
-    df, metrics, models=None, tasks=None, splits=None, alpha=0.05
+        df, metrics, models=None, tasks=None, splits=None, alpha=0.05
 ):
     """
     Perform comprehensive pairwise model comparisons with statistical tests.
@@ -1523,7 +1523,7 @@ def calculate_critical_difference(k, n, alpha=0.05):
 
 
 def bootstrap_auc_difference(
-    auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42
+        auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42
 ):
     """
     Calculate bootstrap confidence intervals for AUC differences.
@@ -1568,7 +1568,7 @@ def bootstrap_auc_difference(
 
 
 def plot_critical_difference_diagram(
-    friedman_results, metric, save_dir=None, alpha=0.05
+        friedman_results, metric, save_dir=None, alpha=0.05
 ):
     """
     Plot Critical Difference diagram for Nemenyi test results.
@@ -1842,7 +1842,7 @@ def analyze_significance(
 
 
 def comprehensive_statistical_analysis(
-    df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
+        df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
 ):
     """
     Perform comprehensive statistical analysis including all requested tests.
@@ -1960,12 +1960,12 @@ def comprehensive_statistical_analysis(
 
 
 def generate_statistical_report(
-    results,
-    save_dir=None,
-    df_raw=None,
-    metrics=None,
-    direction_dict=None,
-    effect_dict=None,
+        results,
+        save_dir=None,
+        df_raw=None,
+        metrics=None,
+        direction_dict=None,
+        effect_dict=None,
 ):
     """
     Generate a comprehensive statistical analysis report.
@@ -2101,10 +2101,10 @@ def generate_statistical_report(
 
     # Call analyze_significance as part of the report generation if raw data and configs are provided
     if (
-        df_raw is not None
-        and metrics is not None
-        and direction_dict is not None
-        and effect_dict is not None
+            df_raw is not None
+            and metrics is not None
+            and direction_dict is not None
+            and effect_dict is not None
     ):
         analyze_significance(
             df_raw, metrics, direction_dict, effect_dict, save_dir=save_dir

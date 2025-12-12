@@ -11,10 +11,7 @@ import numpy as np
 import pandas as pd
 import scikit_posthocs as sp
 import seaborn as sns
-
-# from matplotlib import colormaps  # Use the new colormaps API
 from matplotlib.cm import ScalarMappable
-
 # Statistical analysis imports
 from scipy.stats import wilcoxon, friedmanchisquare
 from sklearn.metrics import mean_squared_error, auc
@@ -344,7 +341,7 @@ subset_cmaps = [
 
 # RESULTS AGGREGATION TO CREATE THE FINAL RESULTS TABLE
 def aggregate_results_csv(
-    df, group_cols, numeric_cols, string_cols, order_by=None, output_file_path=None
+        df, group_cols, numeric_cols, string_cols, order_by=None, output_file_path=None
 ):
     # Group the DataFrame by the specified columns
     grouped = df.groupby(group_cols)
@@ -353,10 +350,10 @@ def aggregate_results_csv(
     # Combine mean and std into the required format
     for col in numeric_cols:
         aggregated[(col, "combined")] = (
-            aggregated[(col, "mean")].round(3).astype(str)
-            + "("
-            + aggregated[(col, "std")].round(3).astype(str)
-            + ")"
+                aggregated[(col, "mean")].round(3).astype(str)
+                + "("
+                + aggregated[(col, "std")].round(3).astype(str)
+                + ")"
         )
     # Drop the separate mean and std columns, keeping only the combined column
     aggregated = aggregated[[col for col in aggregated.columns if col[1] == "combined"]]
@@ -369,16 +366,16 @@ def aggregate_results_csv(
 
     # Step 7: Create the new column combining wandb project and model name
     df["project_model"] = (
-        "papyrus"
-        + "/"
-        + df["Activity"]
-        + "/"
-        + "all"
-        + "/"
-        + df["wandb project"]
-        + "/"
-        + df["model name"]
-        + "/"
+            "papyrus"
+            + "/"
+            + df["Activity"]
+            + "/"
+            + "all"
+            + "/"
+            + df["wandb project"]
+            + "/"
+            + df["model name"]
+            + "/"
     )
     project_model_aggregated = grouped["project_model"].agg(lambda x: list(x))
 
@@ -452,13 +449,13 @@ def handle_inf_values(df):
 
 # Pair plot for visualizing relationships
 def plot_pairplot(
-    df,
-    title,
-    metrics,
-    save_dir=None,
-    cmap="viridis",
-    group_order=group_order,
-    show_legend=False,
+        df,
+        title,
+        metrics,
+        save_dir=None,
+        cmap="viridis",
+        group_order=group_order,
+        show_legend=False,
 ):
     df = handle_inf_values(df)
     sns.pairplot(
@@ -478,7 +475,7 @@ def plot_pairplot(
 
 # Function to plot line metrics
 def plot_line_metrics(
-    df, title, metrics, save_dir=None, group_order=group_order, show_legend=False
+        df, title, metrics, save_dir=None, group_order=group_order, show_legend=False
 ):
     df = handle_inf_values(df)
     plt.figure(figsize=(14, 7))
@@ -505,13 +502,13 @@ def plot_line_metrics(
 
 # Function to plot histograms for metrics
 def plot_histogram_metrics(
-    df,
-    title,
-    metrics,
-    save_dir=None,
-    group_order=group_order,
-    cmap="crest",
-    show_legend=False,
+        df,
+        title,
+        metrics,
+        save_dir=None,
+        group_order=group_order,
+        cmap="crest",
+        show_legend=False,
 ):
     df = handle_inf_values(df)
     plt.figure(figsize=(14, 7))
@@ -536,13 +533,13 @@ def plot_histogram_metrics(
 
 # Function to plot pairwise scatter plots for metrics
 def plot_pairwise_scatter_metrics(
-    df,
-    title,
-    metrics,
-    save_dir=None,
-    group_order=group_order,
-    cmap="tab10_r",
-    show_legend=False,
+        df,
+        title,
+        metrics,
+        save_dir=None,
+        group_order=group_order,
+        cmap="tab10_r",
+        show_legend=False,
 ):
     df = handle_inf_values(df)
     num_metrics = len(metrics)
@@ -588,16 +585,16 @@ def plot_pairwise_scatter_metrics(
 
 
 def plot_metrics(
-    df: pd.DataFrame,
-    metrics: List[str],
-    cmap: str = "tab10_r",
-    save_dir: Optional[str] = None,
-    hatches_dict: Optional[Dict[str, str]] = None,
-    group_order: Optional[List[str]] = None,
-    show: bool = True,
-    fig_width: Optional[float] = None,
-    fig_height: Optional[float] = None,
-    show_legend: bool = False,
+        df: pd.DataFrame,
+        metrics: List[str],
+        cmap: str = "tab10_r",
+        save_dir: Optional[str] = None,
+        hatches_dict: Optional[Dict[str, str]] = None,
+        group_order: Optional[List[str]] = None,
+        show: bool = True,
+        fig_width: Optional[float] = None,
+        fig_height: Optional[float] = None,
+        show_legend: bool = False,
 ) -> Dict[str, str]:
     """
     Plots bar charts for multiple metrics, ensuring that the plot box (axes area)
@@ -701,7 +698,7 @@ def plot_metrics(
         metric_data = metric_data.sort_values("Group").reset_index(drop=True)
         for j, (_, row) in enumerate(metric_data.iterrows()):
             position = (
-                i * (num_bars * bar_width + group_spacing) + (j % num_bars) * bar_width
+                    i * (num_bars * bar_width + group_spacing) + (j % num_bars) * bar_width
             )
             positions.append(position)
             ax.bar(
@@ -712,7 +709,7 @@ def plot_metrics(
                 width=bar_width,
             )
         center_position = (
-            i * (num_bars * bar_width + group_spacing) + (num_bars * bar_width) / 2
+                i * (num_bars * bar_width + group_spacing) + (num_bars * bar_width) / 2
         )
         tick_positions.append(center_position)
         if " " in metric:
@@ -772,7 +769,7 @@ def plot_metrics(
     if save_dir:
         metrics_names = "_".join(metrics)
         plot_name = f"barplot_{cmap}_{metrics_names}"
-        save_plot(fig, save_dir, plot_name, show_legend=show_legend)  #  tighten=True
+        save_plot(fig, save_dir, plot_name, show_legend=show_legend)  # tighten=True
 
     if show:
         plt.show()
@@ -782,7 +779,7 @@ def plot_metrics(
 
 
 def find_highly_correlated_metrics(
-    df, metrics, threshold=0.8, save_dir=None, cmap="coolwarm", show_legend=False
+        df, metrics, threshold=0.8, save_dir=None, cmap="coolwarm", show_legend=False
 ):
     # Calculate the correlation matrix
     corr_matrix = df[metrics].corr().abs()
@@ -818,15 +815,15 @@ def find_highly_correlated_metrics(
 
 
 def plot_comparison_metrics(
-    df: pd.DataFrame,
-    metrics: List[str],
-    cmap: str = "tab10_r",
-    color_dict: Optional[Dict[str, str]] = None,
-    save_dir: Optional[str] = None,
-    fig_width: Optional[float] = None,
-    fig_height: Optional[float] = None,
-    show_legend: bool = False,
-    models_order: Optional[List[str]] = None,
+        df: pd.DataFrame,
+        metrics: List[str],
+        cmap: str = "tab10_r",
+        color_dict: Optional[Dict[str, str]] = None,
+        save_dir: Optional[str] = None,
+        fig_width: Optional[float] = None,
+        fig_height: Optional[float] = None,
+        show_legend: bool = False,
+        models_order: Optional[List[str]] = None,
 ):
     """
     Plots comparison bar charts for multiple metrics, ensuring that the **plot box** has fixed
@@ -959,23 +956,23 @@ def plot_comparison_metrics(
 
             for k, model_type in enumerate(models_order):
                 for l, calibration in enumerate(
-                    ["Before Calibration", "After Calibration"]
+                        ["Before Calibration", "After Calibration"]
                 ):
                     position = (
-                        i
-                        * (
-                            split_spacing
-                            + len(split_types) * (num_bars * bar_width + group_spacing)
-                        )
-                        + j * (num_bars * bar_width + group_spacing)
-                        + k * 2 * bar_width
-                        + l * bar_width
+                            i
+                            * (
+                                    split_spacing
+                                    + len(split_types) * (num_bars * bar_width + group_spacing)
+                            )
+                            + j * (num_bars * bar_width + group_spacing)
+                            + k * 2 * bar_width
+                            + l * bar_width
                     )
                     positions.append(position)
                     height = split_data[
                         (split_data["Model type"] == model_type)
                         & (split_data["Calibration"] == calibration)
-                    ][f"{metric}_mean"].values[0]
+                        ][f"{metric}_mean"].values[0]
                     ax.bar(
                         position,
                         height=height,
@@ -985,13 +982,13 @@ def plot_comparison_metrics(
                     )
 
             center_position = (
-                i
-                * (
-                    split_spacing
-                    + len(split_types) * (num_bars * bar_width + group_spacing)
-                )
-                + j * (num_bars * bar_width + group_spacing)
-                + (num_bars * bar_width) / 2
+                    i
+                    * (
+                            split_spacing
+                            + len(split_types) * (num_bars * bar_width + group_spacing)
+                    )
+                    + j * (num_bars * bar_width + group_spacing)
+                    + (num_bars * bar_width) / 2
             )
             tick_positions.append(center_position)
             tick_labels.append(f"{metric}\n{split}")
@@ -1127,16 +1124,16 @@ def load_and_aggregate_calibration_data(base_path, paths):
 
 
 def plot_calibration_data(
-    df_aggregated: pd.DataFrame,
-    base_path: str,
-    save_dir: Optional[str] = None,
-    title: str = "Calibration Plot",
-    color_name: str = "tab10_r",
-    color_dict: Optional[Dict[str, str]] = None,
-    group_order: Optional[List[str]] = None,
-    fig_width: Optional[float] = None,
-    fig_height: Optional[float] = None,
-    show_legend: bool = False,
+        df_aggregated: pd.DataFrame,
+        base_path: str,
+        save_dir: Optional[str] = None,
+        title: str = "Calibration Plot",
+        color_name: str = "tab10_r",
+        color_dict: Optional[Dict[str, str]] = None,
+        group_order: Optional[List[str]] = None,
+        fig_width: Optional[float] = None,
+        fig_height: Optional[float] = None,
+        show_legend: bool = False,
 ):
     """
     Iterates over models in df_aggregated, loads and plots calibration data,
@@ -1308,14 +1305,14 @@ def load_predictions(model_path):
 
 
 def calculate_rmse_rejection_curve(
-    preds,
-    uncertainty_col="y_alea",
-    true_label_col="y_true",
-    pred_label_col="y_pred",
-    normalize_rmse=False,
-    random_rejection=False,
-    unc_type=None,
-    max_rejection_ratio=0.95,
+        preds,
+        uncertainty_col="y_alea",
+        true_label_col="y_true",
+        pred_label_col="y_pred",
+        normalize_rmse=False,
+        random_rejection=False,
+        unc_type=None,
+        max_rejection_ratio=0.95,
 ):
     # First we choose which type of uncertainty to use
     if unc_type == "aleatoric":
@@ -1370,12 +1367,12 @@ def calculate_rmse_rejection_curve(
 
 
 def calculate_rejection_curve(
-    df,
-    model_paths,
-    unc_col,
-    random_rejection=False,
-    normalize_rmse=False,
-    max_rejection_ratio=0.95,
+        df,
+        model_paths,
+        unc_col,
+        random_rejection=False,
+        normalize_rmse=False,
+        max_rejection_ratio=0.95,
 ):
     """
     Calculate RMSE rejection curves for given model paths.
@@ -1427,19 +1424,19 @@ def get_handles_labels(ax, group_order):
 
 
 def plot_rmse_rejection_curves(
-    df: pd.DataFrame,
-    base_dir: str,
-    cmap: str = "tab10_r",
-    color_dict: Optional[Dict[str, str]] = None,
-    save_dir_plot: Optional[str] = None,
-    add_to_title: str = "",
-    normalize_rmse: bool = False,
-    unc_type: str = "aleatoric",
-    max_rejection_ratio: float = 0.95,
-    group_order: Optional[List[str]] = None,
-    fig_width: Optional[float] = None,
-    fig_height: Optional[float] = None,
-    show_legend: bool = False,
+        df: pd.DataFrame,
+        base_dir: str,
+        cmap: str = "tab10_r",
+        color_dict: Optional[Dict[str, str]] = None,
+        save_dir_plot: Optional[str] = None,
+        add_to_title: str = "",
+        normalize_rmse: bool = False,
+        unc_type: str = "aleatoric",
+        max_rejection_ratio: float = 0.95,
+        group_order: Optional[List[str]] = None,
+        fig_width: Optional[float] = None,
+        fig_height: Optional[float] = None,
+        show_legend: bool = False,
 ) -> pd.DataFrame:
     """
     Plot RMSE rejection curves for different groups and splits, ensuring that the **inner plot box**
@@ -1643,17 +1640,17 @@ def plot_rmse_rejection_curves(
 
 
 def plot_auc_comparison(
-    stats_df: pd.DataFrame,
-    cmap: str = "tab10_r",
-    color_dict: Optional[Dict[str, str]] = None,
-    save_dir: Optional[str] = None,
-    add_to_title: str = "",
-    min_y_axis: float = 0.0,
-    hatches_dict: Optional[Dict[str, str]] = None,
-    group_order: Optional[List[str]] = None,
-    fig_width: Optional[float] = None,
-    fig_height: Optional[float] = None,
-    show_legend: bool = False,
+        stats_df: pd.DataFrame,
+        cmap: str = "tab10_r",
+        color_dict: Optional[Dict[str, str]] = None,
+        save_dir: Optional[str] = None,
+        add_to_title: str = "",
+        min_y_axis: float = 0.0,
+        hatches_dict: Optional[Dict[str, str]] = None,
+        group_order: Optional[List[str]] = None,
+        fig_width: Optional[float] = None,
+        fig_height: Optional[float] = None,
+        show_legend: bool = False,
 ):
     """
     Plots AUC-RRC comparison bar plot with colors by Model type and hatches by Split.
@@ -1765,8 +1762,8 @@ def plot_auc_comparison(
 
         for j, (_, row) in enumerate(split_data.iterrows()):
             position = (
-                i * (len(unique_model_types) * bar_width + group_spacing)
-                + j * bar_width
+                    i * (len(unique_model_types) * bar_width + group_spacing)
+                    + j * bar_width
             )
 
             # **Plot the bars**
@@ -1782,18 +1779,18 @@ def plot_auc_comparison(
 
         # **Add tick labels for each split**
         center_position = (
-            i * (len(unique_model_types) * bar_width + group_spacing)
-            + (len(unique_model_types) * bar_width) / 2
+                i * (len(unique_model_types) * bar_width + group_spacing)
+                + (len(unique_model_types) * bar_width) / 2
         )
         tick_positions.append(center_position)
         tick_labels.append(split)
 
     # **Create legend**
     def create_stats_legend(
-        color_dict: Dict[str, str],
-        hatches_dict: Dict[str, str],
-        splits: List[str],
-        model_types: Union[List[str], np.ndarray],
+            color_dict: Dict[str, str],
+            hatches_dict: Dict[str, str],
+            splits: List[str],
+            model_types: Union[List[str], np.ndarray],
     ):
         patches = []
         for split in splits:
@@ -1910,7 +1907,7 @@ def cliffs_delta(x, y):
 
 
 def wilcoxon_pairwise_test(
-    df, metric, model_a, model_b, task=None, split=None, seed_col=None
+        df, metric, model_a, model_b, task=None, split=None, seed_col=None
 ):
     """
     Perform Wilcoxon signed-rank test between two models for a specific metric.
@@ -2022,7 +2019,7 @@ def holm_bonferroni_correction(p_values):
 
 
 def pairwise_model_comparison(
-    df, metrics, models=None, tasks=None, splits=None, alpha=0.05
+        df, metrics, models=None, tasks=None, splits=None, alpha=0.05
 ):
     """
     Perform comprehensive pairwise model comparisons with statistical tests.
@@ -2184,7 +2181,7 @@ def calculate_critical_difference(k, n, alpha=0.05):
 
 
 def bootstrap_auc_difference(
-    auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42
+        auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42
 ):
     """
     Calculate bootstrap confidence intervals for AUC differences.
@@ -2229,7 +2226,7 @@ def bootstrap_auc_difference(
 
 
 def comprehensive_statistical_analysis(
-    df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
+        df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05
 ):
     """
     Perform comprehensive statistical analysis including all requested tests.
@@ -2347,7 +2344,7 @@ def comprehensive_statistical_analysis(
 
 
 def plot_critical_difference_diagram(
-    friedman_results, metric, save_dir=None, alpha=0.05
+        friedman_results, metric, save_dir=None, alpha=0.05
 ):
     """
     Plot Critical Difference diagram for Nemenyi test results.
@@ -2685,23 +2682,23 @@ if __name__ == "__main__":
     # Remove some rows where MCDP experiment was run
     df_merged = df_merged[
         ~(
-            (df_merged["Model type"] == "mcdropout")
-            & (df_merged["Split"] == "scaffold_cluster")
-            & (df_merged["dropout"] == 0.2)
+                (df_merged["Model type"] == "mcdropout")
+                & (df_merged["Split"] == "scaffold_cluster")
+                & (df_merged["dropout"] == 0.2)
         )
     ]
     df_merged = df_merged[
         ~(
-            (df_merged["Model type"] == "mcdropout")
-            & (df_merged["Split"] == "stratified")
-            & (df_merged["dropout"] == 0.1)
+                (df_merged["Model type"] == "mcdropout")
+                & (df_merged["Split"] == "stratified")
+                & (df_merged["dropout"] == 0.1)
         )
     ]
     df_merged = df_merged[
         ~(
-            (df_merged["Model type"] == "mcdropout")
-            & (df_merged["Split"] == "time")
-            & (df_merged["dropout"] == 0.1)
+                (df_merged["Model type"] == "mcdropout")
+                & (df_merged["Split"] == "time")
+                & (df_merged["dropout"] == 0.1)
         )
     ]
 
@@ -2723,7 +2720,7 @@ if __name__ == "__main__":
 
     df_after_calib = df_merged[
         df_merged["Task"] == "PCM_after_calibration_with_isotonic_regression"
-    ].copy()
+        ].copy()
 
     df_after_calib["Calibration"] = "After Calibration"
 
@@ -2733,12 +2730,12 @@ if __name__ == "__main__":
     subdf_pcm = df_merged[df_merged["Task"] == "PCM_subset100"].copy()
     subdf_before_calib = df_merged[
         df_merged["Task"] == "PCM_before_calibration_subset100"
-    ].copy()
+        ].copy()
     subdf_before_calib["Calibration"] = "Before Calibration"
 
     subdf_after_calib = df_merged[
         df_merged["Task"] == "PCM_after_calibration_with_isotonic_regression_subset100"
-    ].copy()
+        ].copy()
     subdf_after_calib["Calibration"] = "After Calibration"
 
     subdf_calib = pd.concat([subdf_before_calib, subdf_after_calib])
@@ -3115,7 +3112,7 @@ if __name__ == "__main__":
             save_stats_df(stats_df, save_dir_plot, add_to_title="all" + add_to_title)
 
             for name, df in zip(
-                ["stratified", "scaffold"], [df_pcm_stratified, df_pcm_scaffold]
+                    ["stratified", "scaffold"], [df_pcm_stratified, df_pcm_scaffold]
             ):
                 stats_df = plot_rmse_rejection_curves(
                     df,

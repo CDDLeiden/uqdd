@@ -1,13 +1,15 @@
 from typing import Tuple, Optional, Dict, Any
 
-import wandb
 import torch
+import wandb
 from torch import nn
 
 from uqdd import DEVICE
 from uqdd.models.pnn import PNN
-from uqdd.utils import create_logger
-
+from uqdd.models.utils_models import (
+    get_model_config,
+    get_sweep_config,
+)
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
@@ -15,11 +17,7 @@ from uqdd.models.utils_train import (
     get_dataloader,
     predict,
 )
-
-from uqdd.models.utils_models import (
-    get_model_config,
-    get_sweep_config,
-)
+from uqdd.utils import create_logger
 
 
 def enable_dropout(model: torch.nn.Module) -> None:
@@ -37,10 +35,10 @@ def enable_dropout(model: torch.nn.Module) -> None:
 
 
 def mc_predict(
-    model: torch.nn.Module,
-    test_loader: torch.utils.data.DataLoader,
-    num_mc_samples: int = 100,
-    device: torch.device = DEVICE,
+        model: torch.nn.Module,
+        test_loader: torch.utils.data.DataLoader,
+        num_mc_samples: int = 100,
+        device: torch.device = DEVICE,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Performs Monte Carlo (MC) Dropout prediction with multiple stochastic forward passes.
@@ -80,7 +78,7 @@ def mc_predict(
 
 
 def run_mcdropout(
-    config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None
 ) -> Tuple[nn.Module, Optional[Any], Dict[str, Any], Dict[str, Any]]:
     """
     Trains and evaluates a PNN model with Monte Carlo Dropout for uncertainty quantification.
@@ -191,7 +189,6 @@ def run_mcdropout_hyperparam(**kwargs: Any) -> None:
     )
     print(f"Running sweep with SWEEP_ID: {sweep_id}")
     wandb.agent(sweep_id, function=run_mcdropout, count=sweep_count)
-
 
 # if __name__ == "__main__":
 #     run_mcdropout_wrapper(

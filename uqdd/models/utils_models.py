@@ -1,9 +1,9 @@
+import logging
 import math
 import random
-import logging
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional, Any, List, Tuple, Union
-from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -114,7 +114,7 @@ def get_desc_len_from_dataset(dataset: torch.utils.data.Dataset) -> Tuple[int, i
 
 
 def get_desc_len(
-    *descriptors: Optional[str], logger: Optional[logging.Logger] = None
+        *descriptors: Optional[str], logger: Optional[logging.Logger] = None
 ) -> Tuple[int, ...]:
     """
     Retrieves descriptor lengths from the configuration.
@@ -221,17 +221,17 @@ def get_sweep_config(model_name: str = "pnn", **kwargs) -> Dict:
 
 
 def build_datasets(
-    data_name: str = "papyrus",
-    n_targets: int = -1,
-    activity_type: str = "xc50",
-    split_type: str = "random",
-    desc_prot: Optional[str] = None,
-    desc_chem: Optional[str] = None,
-    median_scaling: bool = False,
-    task_type: str = "regression",
-    ext: str = "pkl",
-    logger: Optional[logging.Logger] = None,
-    device: Union[str, torch.device] = DEVICE,
+        data_name: str = "papyrus",
+        n_targets: int = -1,
+        activity_type: str = "xc50",
+        split_type: str = "random",
+        desc_prot: Optional[str] = None,
+        desc_chem: Optional[str] = None,
+        median_scaling: bool = False,
+        task_type: str = "regression",
+        ext: str = "pkl",
+        logger: Optional[logging.Logger] = None,
+        device: Union[str, torch.device] = DEVICE,
 ) -> Dict[str, torch.utils.data.Dataset]:
     """
     Builds datasets for training and evaluation.
@@ -296,10 +296,10 @@ def build_datasets(
 
 
 def build_loader(
-    datasets: Dict[str, torch.utils.data.Dataset],
-    batch_size: int,
-    shuffle: bool = False,
-    wt_resampler: bool = False,
+        datasets: Dict[str, torch.utils.data.Dataset],
+        batch_size: int,
+        shuffle: bool = False,
+        wt_resampler: bool = False,
 ) -> Dict[str, DataLoader]:
     """
     Constructs data loaders for training, validation, and testing.
@@ -344,7 +344,7 @@ def build_loader(
 
 
 def get_sampler(
-    dataset: torch.utils.data.Dataset, bins: int = 50
+        dataset: torch.utils.data.Dataset, bins: int = 50
 ) -> WeightedRandomSampler:
     """
     Creates a weighted random sampler for handling imbalanced datasets.
@@ -383,7 +383,7 @@ def get_sampler(
 
 
 def build_optimizer(
-    model: nn.Module, optimizer: str, lr: float, weight_decay: float
+        model: nn.Module, optimizer: str, lr: float, weight_decay: float
 ) -> optim.Optimizer:
     """
     Initializes an optimizer for training a model.
@@ -425,11 +425,11 @@ def build_optimizer(
 
 
 def build_lr_scheduler(
-    optimizer: optim.Optimizer,
-    lr_scheduler: Optional[str],
-    patience: int = 20,
-    factor: float = 0.2,
-    **kwargs,
+        optimizer: optim.Optimizer,
+        lr_scheduler: Optional[str],
+        patience: int = 20,
+        factor: float = 0.2,
+        **kwargs,
 ) -> Optional[optim.lr_scheduler._LRScheduler]:
     """
     Constructs a learning rate scheduler.
@@ -477,14 +477,14 @@ def build_lr_scheduler(
 
 
 def save_model(
-    config: Dict[str, Any],
-    model: nn.Module,
-    model_name: str = f"{TODAY}-pnn_random_ankh-base_ecfp2048",
-    data_specific_path: Optional[str] = None,
-    desc_prot_len: int = 0,
-    desc_chem_len: int = 1024,
-    onnx: bool = True,
-    tracker: str = "wandb",
+        config: Dict[str, Any],
+        model: nn.Module,
+        model_name: str = f"{TODAY}-pnn_random_ankh-base_ecfp2048",
+        data_specific_path: Optional[str] = None,
+        desc_prot_len: int = 0,
+        desc_chem_len: int = 1024,
+        onnx: bool = True,
+        tracker: str = "wandb",
 ) -> None:
     """
     Saves a trained model in both PyTorch and ONNX formats.
@@ -576,7 +576,7 @@ def save_model(
 
 
 def add_prefix_to_state_dict_keys(
-    state_dict: Dict[str, torch.Tensor], prefix: str
+        state_dict: Dict[str, torch.Tensor], prefix: str
 ) -> Dict[str, torch.Tensor]:
     """
     Adds a prefix to all keys in a model's state dictionary.
@@ -602,10 +602,10 @@ def add_prefix_to_state_dict_keys(
 
 
 def load_model(
-    model_class: nn.Module | Any,
-    model_path: str,
-    prefix_to_state_keys: Optional[str] = None,
-    **model_kwargs,
+        model_class: nn.Module | Any,
+        model_path: str,
+        prefix_to_state_keys: Optional[str] = None,
+        **model_kwargs,
 ) -> nn.Module:
     """
     Loads a PyTorch model from a saved state dictionary.
@@ -763,7 +763,7 @@ def get_model_name(config: Dict[str, Any], run: Optional[wandb.run] = None) -> s
 
 
 def get_data_specific_path(
-    config: Dict[str, Any], logger: Optional[logging.Logger] = None
+        config: Dict[str, Any], logger: Optional[logging.Logger] = None
 ) -> Path:
     """
     Constructs a data-specific directory path for model storage.

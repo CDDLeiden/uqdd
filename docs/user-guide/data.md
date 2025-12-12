@@ -47,4 +47,5 @@ python uqdd/data/data_papyrus.py \
 ## Integration notes
 
 - Downstream training scripts (`uqdd/models/model_parser.py`) expect consistent file extensions and split naming.
-- Time-based splits better reflect prospective evaluation, while scaffold splits assess generalization across chemotypes.
+- Time-based splits better reflect prospective evaluation, while scaffold splits assess generalization across
+  chemotypes.

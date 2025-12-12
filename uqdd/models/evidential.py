@@ -1,30 +1,26 @@
 import logging
-
-import wandb
+from typing import Tuple, Optional
 
 import torch
-from torch import nn, Tensor
 import torch.nn.functional as F
+import wandb
+from torch import nn, Tensor
 from tqdm import tqdm
 
 from uqdd import DEVICE
-from uqdd.models.pnn import PNN
 from uqdd.models.loss import nig_nll
-from uqdd.utils import create_logger
-
+from uqdd.models.pnn import PNN
+from uqdd.models.utils_models import (
+    get_model_config,
+    get_sweep_config,
+)
 from uqdd.models.utils_train import (
     train_model_e2e,
     evaluate_predictions,
     recalibrate_model,
     get_dataloader,
 )
-
-from uqdd.models.utils_models import (
-    get_model_config,
-    get_sweep_config,
-)
-
-from typing import Tuple, Optional
+from uqdd.utils import create_logger
 
 
 def ev_uncertainty(v: Tensor, alpha: Tensor, beta: Tensor) -> Tuple[Tensor, Tensor]:
@@ -52,10 +48,10 @@ def ev_uncertainty(v: Tensor, alpha: Tensor, beta: Tensor) -> Tuple[Tensor, Tens
 
 
 def ev_predict_params(
-    model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    device: torch.device = DEVICE,
-    set_on_eval: bool = True,
+        model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        device: torch.device = DEVICE,
+        set_on_eval: bool = True,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
     Performs evidential prediction using the provided model and dataloader.
@@ -87,7 +83,7 @@ def ev_predict_params(
 
     with torch.no_grad():
         for inputs, targets in tqdm(
-            dataloader, total=len(dataloader), desc="Evidential prediction"
+                dataloader, total=len(dataloader), desc="Evidential prediction"
         ):
             inputs = tuple(x.to(device) for x in inputs)
             outputs = model(inputs)
@@ -111,10 +107,10 @@ def ev_predict_params(
 
 
 def ev_predict(
-    model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    device: torch.device = DEVICE,
-    set_on_eval: bool = True,
+        model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        device: torch.device = DEVICE,
+        set_on_eval: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Performs evidential prediction using the provided model and dataloader.
@@ -142,9 +138,9 @@ def ev_predict(
 
 
 def ev_nll(
-    model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    device: torch.device = DEVICE,
+        model: nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        device: torch.device = DEVICE,
 ) -> float:
     """
     Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
@@ -409,7 +405,7 @@ class NormalInvGamma(nn.Module):
         return F.softplus(x) + eps
 
     def forward(
-        self, x: torch.Tensor
+            self, x: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass of the Normal Inverse Gamma layer.
@@ -501,10 +497,10 @@ class EvidentialDNN(PNN):
     """
 
     def __init__(
-        self,
-        config: Optional[dict] = None,
-        logger: Optional[logging.Logger] = None,
-        **kwargs,
+            self,
+            config: Optional[dict] = None,
+            logger: Optional[logging.Logger] = None,
+            **kwargs,
     ) -> None:
         super(EvidentialDNN, self).__init__(
             config,
@@ -527,7 +523,7 @@ class EvidentialDNN(PNN):
         self.apply(self.init_wt)
 
     def forward(
-        self, inputs: Tuple[torch.Tensor, torch.Tensor]
+            self, inputs: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, ...]:
         """
         Forward pass of the EvidentialDNN model.
@@ -557,7 +553,7 @@ class EvidentialDNN(PNN):
 
 
 def run_evidential(
-    config: Optional[dict] = None,
+        config: Optional[dict] = None,
 ) -> Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]:
     """
     Trains and evaluates an Evidential Deep Neural Network.
@@ -674,7 +670,6 @@ def run_evidential_hyperparam(**kwargs):
     print(f"Running sweep with SWEEP_ID: {sweep_id}")
 
     wandb.agent(sweep_id, function=run_evidential, count=sweep_count)
-
 
 # if __name__ == "__main__":
 #     run_evidential_wrapper(

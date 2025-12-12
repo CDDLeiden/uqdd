@@ -13,14 +13,13 @@ from typing import (
 )
 
 import numpy as np
-import wandb
 import torch
+import wandb
 from numpy import ndarray, dtype
-
 from tqdm import tqdm
+
 from uqdd import DEVICE, WANDB_DIR, WANDB_MODE, TODAY, FIGS_DIR
 from uqdd.data.utils_data import get_tasks
-
 from uqdd.models.loss import build_loss
 from uqdd.models.utils_metrics import (
     calc_regr_metrics,
@@ -50,7 +49,7 @@ from uqdd.utils import create_logger
 
 
 def evidential_processing(
-    outputs: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        outputs: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Processes the outputs of an evidential regression model to compute aleatoric and epistemic uncertainty.
@@ -72,10 +71,10 @@ def evidential_processing(
 
 
 def model_forward(
-    model: torch.nn.Module,
-    inputs: Tuple[torch.Tensor, ...],
-    targets: torch.Tensor,
-    lossfname: str = "evidential_regression",
+        model: torch.nn.Module,
+        inputs: Tuple[torch.Tensor, ...],
+        targets: torch.Tensor,
+        lossfname: str = "evidential_regression",
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Tuple]:
     """
     Performs a forward pass through the model and processes outputs for different loss functions.
@@ -112,16 +111,16 @@ def model_forward(
 
 
 def train(
-    model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    loss_fn: Callable,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device = DEVICE,
-    epoch: int = 0,
-    max_norm: Optional[float] = None,
-    lossfname: str = "evidential_regression",
-    tracker: str = "wandb",
-    subset: str = "train",
+        model: torch.nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        loss_fn: Callable,
+        optimizer: torch.optim.Optimizer,
+        device: torch.device = DEVICE,
+        epoch: int = 0,
+        max_norm: Optional[float] = None,
+        lossfname: str = "evidential_regression",
+        tracker: str = "wandb",
+        subset: str = "train",
 ) -> ndarray[Any, dtype[Any]] | float | Any:
     """
     Trains the model for one epoch.
@@ -248,15 +247,15 @@ def train(
 
 
 def evaluate(
-    model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    loss_fn: Callable,
-    device: torch.device = DEVICE,
-    metrics_per_task: bool = False,
-    subset: str = "val",
-    epoch: Optional[int] = 0,
-    lossfname: str = "evidential_regression",
-    tracker: str = "wandb",
+        model: torch.nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        loss_fn: Callable,
+        device: torch.device = DEVICE,
+        metrics_per_task: bool = False,
+        subset: str = "val",
+        epoch: Optional[int] = 0,
+        lossfname: str = "evidential_regression",
+        tracker: str = "wandb",
 ) -> ndarray[Any, dtype[np.generic | Any]] | ndarray[Any, dtype[Any]] | float | Any:
     """
     Evaluates the model on the validation or test dataset.
@@ -400,10 +399,10 @@ def evaluate(
 
 
 def predict(
-    model: torch.nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    device: Union[torch.device, str] = DEVICE,
-    set_on_eval: bool = True,
+        model: torch.nn.Module,
+        dataloader: torch.utils.data.DataLoader,
+        device: Union[torch.device, str] = DEVICE,
+        set_on_eval: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Performs predictions using the trained model.
@@ -432,7 +431,7 @@ def predict(
 
     with torch.no_grad():
         for inputs, targets in tqdm(
-            dataloader, total=len(dataloader), desc="Predicting"
+                dataloader, total=len(dataloader), desc="Predicting"
         ):
             inputs = tuple(x.to(device) for x in inputs)
             targets = targets.to(device)
@@ -449,21 +448,21 @@ def predict(
 
 
 def evaluate_predictions(
-    config: Dict[str, Any],
-    preds: torch.Tensor,
-    labels: torch.Tensor,
-    alea_vars: torch.Tensor,
-    model_type: str = "ensemble",
-    logger: Optional[logging.Logger] = None,
-    epi_vars: Optional[torch.Tensor] = None,
-    wandb_push: bool = False,
-    run_name: Optional[str] = None,
-    project_name: Optional[str] = None,
-    figpath: Optional[LiteralString | str | bytes | Path] = None,
-    export_preds: bool = True,
-    verbose: bool = True,
-    csv_path: Optional[str] = None,
-    nll: Optional[float] = None,
+        config: Dict[str, Any],
+        preds: torch.Tensor,
+        labels: torch.Tensor,
+        alea_vars: torch.Tensor,
+        model_type: str = "ensemble",
+        logger: Optional[logging.Logger] = None,
+        epi_vars: Optional[torch.Tensor] = None,
+        wandb_push: bool = False,
+        run_name: Optional[str] = None,
+        project_name: Optional[str] = None,
+        figpath: Optional[LiteralString | str | bytes | Path] = None,
+        export_preds: bool = True,
+        verbose: bool = True,
+        csv_path: Optional[str] = None,
+        nll: Optional[float] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
     """
     Evaluates predictions, computes uncertainty metrics, and optionally logs results.
@@ -615,14 +614,14 @@ def evaluate_predictions(
 
 
 def initial_evaluation(
-    model: torch.nn.Module,
-    train_loader: torch.utils.data.DataLoader,
-    val_loader: torch.utils.data.DataLoader,
-    loss_fn: Callable,
-    device: torch.device = DEVICE,
-    epoch: int = 0,
-    lossfname: str = "",
-    tracker: str = "wandb",
+        model: torch.nn.Module,
+        train_loader: torch.utils.data.DataLoader,
+        val_loader: torch.utils.data.DataLoader,
+        loss_fn: Callable,
+        device: torch.device = DEVICE,
+        epoch: int = 0,
+        lossfname: str = "",
+        tracker: str = "wandb",
 ) -> Tuple[float, float]:
     """
     Performs an initial evaluation of the model on training and validation sets.
@@ -677,17 +676,17 @@ def initial_evaluation(
 
 
 def run_one_epoch(
-    model: torch.nn.Module,
-    train_loader: torch.utils.data.DataLoader,
-    val_loader: torch.utils.data.DataLoader,
-    loss_fn: Callable,
-    optimizer: torch.optim.Optimizer,
-    lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
-    epoch: int = 0,
-    device: torch.device = DEVICE,
-    max_norm: Optional[float] = None,
-    lossfname: str = "",
-    tracker: str = "wandb",
+        model: torch.nn.Module,
+        train_loader: torch.utils.data.DataLoader,
+        val_loader: torch.utils.data.DataLoader,
+        loss_fn: Callable,
+        optimizer: torch.optim.Optimizer,
+        lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
+        epoch: int = 0,
+        device: torch.device = DEVICE,
+        max_norm: Optional[float] = None,
+        lossfname: str = "",
+        tracker: str = "wandb",
 ) -> Tuple[int, float, float]:
     """
     Executes one training epoch including evaluation and learning rate scheduling.
@@ -764,16 +763,16 @@ def run_one_epoch(
 
 
 def train_model(
-    model: torch.nn.Module,
-    config: Dict[str, Any],
-    train_loader: torch.utils.data.DataLoader,
-    val_loader: torch.utils.data.DataLoader,
-    n_targets: int = -1,
-    seed: int = 42,
-    device: torch.device = DEVICE,
-    logger: Optional[logging.Logger] = None,
-    max_norm: Optional[float] = None,
-    tracker: str = "wandb",
+        model: torch.nn.Module,
+        config: Dict[str, Any],
+        train_loader: torch.utils.data.DataLoader,
+        val_loader: torch.utils.data.DataLoader,
+        n_targets: int = -1,
+        seed: int = 42,
+        device: torch.device = DEVICE,
+        logger: Optional[logging.Logger] = None,
+        max_norm: Optional[float] = None,
+        tracker: str = "wandb",
 ) -> Tuple[torch.nn.Module, Callable, np.ndarray]:
     """
     Trains the model with the specified configuration.
@@ -900,13 +899,13 @@ def train_model(
 
 
 def run_model(
-    config: Dict[str, Any],
-    model: torch.nn.Module,
-    dataloaders: Dict[str, torch.utils.data.DataLoader],
-    device: torch.device = DEVICE,
-    logger: Optional[logging.Logger] = None,
-    max_norm: Optional[float] = None,
-    tracker: str = "wandb",
+        config: Dict[str, Any],
+        model: torch.nn.Module,
+        dataloaders: Dict[str, torch.utils.data.DataLoader],
+        device: torch.device = DEVICE,
+        logger: Optional[logging.Logger] = None,
+        max_norm: Optional[float] = None,
+        tracker: str = "wandb",
 ) -> Tuple[torch.nn.Module, float, np.ndarray]:
     """
     Runs the full training and evaluation cycle.
@@ -1012,9 +1011,9 @@ def assign_wandb_tags(run: Any, config: Dict[str, Any]) -> Any:
 
 
 def get_dataloader(
-    config: Dict[str, Any],
-    device: Union[torch.device, str] = DEVICE,
-    logger: Optional[logging.Logger] = None,
+        config: Dict[str, Any],
+        device: Union[torch.device, str] = DEVICE,
+        logger: Optional[logging.Logger] = None,
 ) -> Dict[str, torch.utils.data.DataLoader]:
     """
     Creates dataloaders for training, validation, and testing.
@@ -1067,14 +1066,14 @@ def get_dataloader(
 
 
 def post_training_save_model(
-    model: torch.nn.Module,
-    config: Dict[str, Any],
-    model_type: str = "pnn",
-    onnx: bool = True,
-    tracker: str = "wandb",
-    run: Optional[Any] = None,
-    logger: Optional[logging.Logger] = None,
-    write_model: bool = True,
+        model: torch.nn.Module,
+        config: Dict[str, Any],
+        model_type: str = "pnn",
+        onnx: bool = True,
+        tracker: str = "wandb",
+        run: Optional[Any] = None,
+        logger: Optional[logging.Logger] = None,
+        write_model: bool = True,
 ) -> str:
     """
     Saves the trained model and its configuration.
@@ -1129,7 +1128,7 @@ def post_training_save_model(
 
 
 def get_tracker(
-    config: Optional[Dict[str, Any]], tracker: str = "wandb"
+        config: Optional[Dict[str, Any]], tracker: str = "wandb"
 ) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
     """
     Initializes and retrieves a tracking instance.
@@ -1167,15 +1166,15 @@ def get_tracker(
 
 
 def train_model_e2e(
-    config: Dict[str, Any],
-    model: Type[torch.nn.Module],
-    model_type: str = "pnn",
-    model_kwargs: Optional[Dict[str, Any]] = None,
-    logger: Optional[logging.Logger] = None,
-    seed: int = 42,
-    device: torch.device = DEVICE,
-    tracker: str = "wandb",
-    write_model: bool = True,
+        config: Dict[str, Any],
+        model: Type[torch.nn.Module],
+        model_type: str = "pnn",
+        model_kwargs: Optional[Dict[str, Any]] = None,
+        logger: Optional[logging.Logger] = None,
+        seed: int = 42,
+        device: torch.device = DEVICE,
+        tracker: str = "wandb",
+        write_model: bool = True,
 ) -> Tuple[torch.nn.Module, Dict[str, Any], np.ndarray, float]:
     """
     Trains a model end-to-end, including dataset preparation, training, and evaluation.
@@ -1271,18 +1270,18 @@ def train_model_e2e(
 
 
 def recalibrate_model(
-    preds_val: Union[np.ndarray, torch.Tensor, List[float]],
-    labels_val: Union[np.ndarray, torch.Tensor, List[float]],
-    alea_vars_val: Union[np.ndarray, torch.Tensor, List[float]],
-    preds_test: Union[np.ndarray, torch.Tensor, List[float]],
-    labels_test: Union[np.ndarray, torch.Tensor, List[float]],
-    alea_vars_test: Union[np.ndarray, torch.Tensor, List[float]],
-    config: Dict[str, Any],
-    epi_val: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
-    epi_test: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
-    uct_logger: Optional[Any] = None,
-    figpath: Optional[str | Path | bytes | LiteralString] = None,
-    nll: Optional[float] = None,
+        preds_val: Union[np.ndarray, torch.Tensor, List[float]],
+        labels_val: Union[np.ndarray, torch.Tensor, List[float]],
+        alea_vars_val: Union[np.ndarray, torch.Tensor, List[float]],
+        preds_test: Union[np.ndarray, torch.Tensor, List[float]],
+        labels_test: Union[np.ndarray, torch.Tensor, List[float]],
+        alea_vars_test: Union[np.ndarray, torch.Tensor, List[float]],
+        config: Dict[str, Any],
+        epi_val: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
+        epi_test: Optional[Union[np.ndarray, torch.Tensor, List[float]]] = None,
+        uct_logger: Optional[Any] = None,
+        figpath: Optional[str | Path | bytes | LiteralString] = None,
+        nll: Optional[float] = None,
 ) -> Any:
     """
     Recalibrates uncertainty estimates using validation and test predictions.

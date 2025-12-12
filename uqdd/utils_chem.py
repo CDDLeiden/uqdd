@@ -1,22 +1,34 @@
 import copy
 import logging
+import math
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+from itertools import combinations, islice
 from multiprocessing import shared_memory
-from typing import Union, List, Tuple, Any, Optional, Dict, Generator
 from pathlib import Path
-from PIL import Image
+from typing import Union, List, Tuple, Any, Optional, Dict, Generator
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
-from concurrent.futures import ProcessPoolExecutor
-import multiprocessing as mp
-
+import seaborn as sns
+from PIL import Image
+from fastcluster import linkage
+from papyrus_scripts.preprocess import consume_chunks
+from papyrus_scripts.reader import read_molecular_descriptors
 from rdkit import Chem, RDLogger
 from rdkit.Chem import Draw, AllChem, rdFMCS
 from rdkit.Chem import MolToSmiles, MolFromSmiles, MolFromSmarts, SanitizeMol
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
-from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 from rdkit.Chem.rdchem import Mol as RdkitMol
+from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
+# scipy hierarchy clustering
+from scipy.cluster.hierarchy import cophenet, cut_tree
+from scipy.spatial.distance import pdist
+# SKlearn metrics
+from sklearn.metrics import silhouette_score
+from tqdm.auto import tqdm
 
 from uqdd import DATA_DIR
 from uqdd.utils import (
@@ -27,23 +39,6 @@ from uqdd.utils import (
     save_pickle,
     load_pickle,
 )
-
-from papyrus_scripts.reader import read_molecular_descriptors
-from papyrus_scripts.preprocess import consume_chunks
-
-# scipy hierarchy clustering
-from scipy.cluster.hierarchy import cophenet, cut_tree
-from scipy.spatial.distance import pdist
-from fastcluster import linkage
-
-# SKlearn metrics
-from sklearn.metrics import silhouette_score
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-from itertools import combinations, islice
-import math
 
 # Disable RDKit warnings
 RDLogger.DisableLog("rdApp.info")
@@ -266,7 +261,7 @@ descriptors = [
 
 
 def rdkit_standardize(
-    smi: str, logger: logging.Logger = None, suppress_exception: bool = False
+        smi: str, logger: logging.Logger = None, suppress_exception: bool = False
 ):
     """
     Applies a standardization workflow to a SMILES string.
@@ -322,7 +317,7 @@ def rdkit_standardize(
         SanitizeMol(
             mol,
             sanitizeOps=(
-                Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES
+                    Chem.SANITIZE_ALL ^ Chem.SANITIZE_CLEANUP ^ Chem.SANITIZE_PROPERTIES
             ),
         )
         mol = rdMolStandardize.Normalize(mol)
@@ -343,7 +338,7 @@ def rdkit_standardize(
 
 
 def remove_stereo_rdkit_molecule(
-    mol: RdkitMol,
+        mol: RdkitMol,
 ) -> Optional[RdkitMol]:
     """
     Removes stereochemistry information from an RDKit molecule.
@@ -369,7 +364,7 @@ def remove_stereo_rdkit_molecule(
 
 
 def neutralize_rdkit_molecule(
-    mol: RdkitMol,
+        mol: RdkitMol,
 ) -> Optional[RdkitMol]:
     """
     Neutralizes charges in an RDKit molecule.
@@ -407,7 +402,7 @@ def neutralize_rdkit_molecule(
 
 
 def remove_isotopes_rdkit_molecule(
-    mol: RdkitMol,
+        mol: RdkitMol,
 ) -> Optional[RdkitMol]:
     """
     Removes isotopic labels from an RDKit molecule.
@@ -436,10 +431,10 @@ def remove_isotopes_rdkit_molecule(
 
 
 def standardize(
-    smiles: Optional[str],
-    logger: Optional[logging.Logger] = None,
-    suppress_exception: bool = True,
-    remove_stereo: bool = False,
+        smiles: Optional[str],
+        logger: Optional[logging.Logger] = None,
+        suppress_exception: bool = True,
+        remove_stereo: bool = False,
 ) -> Optional[str]:
     """
     Standardizes a given SMILES string using RDKit.
@@ -510,11 +505,11 @@ def rdkit_standardize_wrapper(args):
 
 
 def parallel_standardize(
-    df: pd.DataFrame,
-    smiles_col: str = "SMILES",
-    logger: Optional[logging.Logger] = None,
-    suppress_exception: bool = True,
-    rd_standardize: bool = False,
+        df: pd.DataFrame,
+        smiles_col: str = "SMILES",
+        logger: Optional[logging.Logger] = None,
+        suppress_exception: bool = True,
+        rd_standardize: bool = False,
 ) -> pd.DataFrame:
     """
     Standardizes SMILES representations in a DataFrame in parallel.
@@ -559,14 +554,14 @@ def parallel_standardize(
 
 
 def standardize_df(
-    df: pd.DataFrame,
-    smiles_col: str = "SMILES",
-    other_dup_col: Union[List[str], str, None] = None,
-    sorting_col: str = "",
-    drop: bool = True,
-    keep: Union[bool, str] = "last",
-    logger: Optional[logging.Logger] = None,
-    suppress_exception: bool = True,
+        df: pd.DataFrame,
+        smiles_col: str = "SMILES",
+        other_dup_col: Union[List[str], str, None] = None,
+        sorting_col: str = "",
+        drop: bool = True,
+        keep: Union[bool, str] = "last",
+        logger: Optional[logging.Logger] = None,
+        suppress_exception: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Standardizes SMILES representations in a DataFrame and checks for duplicates and NaNs.
@@ -672,11 +667,11 @@ def standardize_df(
 
 # define function that transforms SMILES strings into ECFPs
 def ecfp_from_smiles(
-    smiles: str,
-    radius: int = 2,
-    length: int = 1024,
-    use_features: bool = False,
-    use_chirality: bool = False,
+        smiles: str,
+        radius: int = 2,
+        length: int = 1024,
+        use_features: bool = False,
+        use_chirality: bool = False,
 ) -> np.ndarray:
     """
     Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
@@ -737,11 +732,11 @@ def wrapper_ecfp_from_smiles(args: Tuple[str, int, int, bool, bool]) -> np.ndarr
 
 
 def generate_ecfp(
-    smiles: List[str],
-    radius: int = 2,
-    length: int = 1024,
-    use_features: bool = False,
-    use_chirality: bool = False,
+        smiles: List[str],
+        radius: int = 2,
+        length: int = 1024,
+        use_features: bool = False,
+        use_chirality: bool = False,
 ) -> Dict[str, np.ndarray]:
     """
     Generates ECFP fingerprints for a list of SMILES strings.
@@ -790,7 +785,7 @@ def generate_ecfp(
 
 
 def get_mol_descriptors(
-    smiles: str, chosen_descriptors: Optional[List[str]] = None
+        smiles: str, chosen_descriptors: Optional[List[str]] = None
 ) -> np.ndarray:
     """
     Computes molecular descriptors for a given SMILES string.
@@ -849,7 +844,7 @@ def wrapper_get_mol_descriptors(args: Tuple[str, Optional[List[str]]]) -> np.nda
 
 
 def generate_mol_descriptors(
-    smiles: List[str], chosen_descriptors: Optional[List[str]] = None
+        smiles: List[str], chosen_descriptors: Optional[List[str]] = None
 ) -> Dict[str, np.ndarray]:
     """
     Computes molecular descriptors for a list of SMILES strings.
@@ -884,9 +879,9 @@ def generate_mol_descriptors(
 
 
 def get_papyrus_descriptors(
-    connectivity_ids: Optional[List[str]] = None,
-    desc_type: str = "cddd",
-    logger: Optional[logging.Logger] = None,
+        connectivity_ids: Optional[List[str]] = None,
+        desc_type: str = "cddd",
+        logger: Optional[logging.Logger] = None,
 ) -> Dict[str, np.ndarray]:
     """
     Retrieves molecular descriptors from the Papyrus dataset.
@@ -935,11 +930,11 @@ def get_papyrus_descriptors(
 
 
 def get_chem_desc(
-    df: pd.DataFrame,
-    desc_type: str = "ecfp1024",
-    query_col: str = "SMILES",
-    logger: Optional[logging.Logger] = None,
-    **kwargs,
+        df: pd.DataFrame,
+        desc_type: str = "ecfp1024",
+        query_col: str = "SMILES",
+        logger: Optional[logging.Logger] = None,
+        **kwargs,
 ) -> pd.DataFrame:
     """
     Computes and attaches molecular descriptors to a DataFrame.
@@ -1217,7 +1212,7 @@ def tanimoto_mcs_wrapper(index_pair: Tuple[int, int], cid_list: List[str]) -> fl
 
 
 def tanimoto_mcs_withH_wrapper(
-    index_pair: Tuple[int, int], cid_list: List[str]
+        index_pair: Tuple[int, int], cid_list: List[str]
 ) -> float:
     """
     Wrapper function for computing Tanimoto similarity using MCS with hydrogen included.
@@ -1284,10 +1279,10 @@ def calculate_total_chunks(n_compounds: int, batch_size: int) -> int:
 
 
 def process_chunk(
-    chunk: List[Tuple[int, int]],
-    similarity_matrix: np.ndarray,
-    cid_list: List[str],
-    tanimoto_mcs_func: callable,
+        chunk: List[Tuple[int, int]],
+        similarity_matrix: np.ndarray,
+        cid_list: List[str],
+        tanimoto_mcs_func: callable,
 ) -> None:
     """
     Processes a chunk of index pairs and updates the similarity matrix.
@@ -1319,7 +1314,7 @@ def process_chunk(
 
 
 def save_similarity_matrix(
-    matrix: np.ndarray, filename: str = "similarity_matrix.npy"
+        matrix: np.ndarray, filename: str = "similarity_matrix.npy"
 ) -> None:
     """
     Saves the similarity matrix to a file.
@@ -1340,11 +1335,11 @@ def save_similarity_matrix(
 
 
 def hierarchical_clustering(
-    df: pd.DataFrame,
-    smiles_col: str = "SMILES",
-    batch_size: int = 10000,
-    withH: bool = False,
-    save_path: Optional[str] = None,
+        df: pd.DataFrame,
+        smiles_col: str = "SMILES",
+        batch_size: int = 10000,
+        withH: bool = False,
+        save_path: Optional[str] = None,
 ) -> np.ndarray:
     """
     Performs hierarchical clustering based on Maximum Common Substructure (MCS) similarity.
@@ -1390,10 +1385,10 @@ def hierarchical_clustering(
     tanimoto_mcs_func = tanimoto_mcs_withH_wrapper if withH else tanimoto_mcs_wrapper
     # Process the pairs in chunks
     for chunk in tqdm(
-        chunked_iterable(n_compounds, batch_size),
-        desc="Calculating similarities in chunks",
-        unit="chunk",
-        total=total_chunks,
+            chunked_iterable(n_compounds, batch_size),
+            desc="Calculating similarities in chunks",
+            unit="chunk",
+            total=total_chunks,
     ):
         process_chunk(chunk, similarity_matrix, cid_list, tanimoto_mcs_func)
 
@@ -1409,9 +1404,9 @@ def hierarchical_clustering(
 
 
 def form_linkage(
-    X: np.ndarray,
-    save_path: Optional[str] = None,
-    calculate_cophenetic_coeff: bool = True,
+        X: np.ndarray,
+        save_path: Optional[str] = None,
+        calculate_cophenetic_coeff: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Computes hierarchical clustering linkage matrix using Ward's method.
@@ -1456,7 +1451,7 @@ def form_linkage(
 
 
 def calculate_cophenet(
-    X: np.ndarray, Z: np.ndarray, save_path: Optional[str] = None
+        X: np.ndarray, Z: np.ndarray, save_path: Optional[str] = None
 ) -> float:
     """
     Computes the cophenetic correlation coefficient for a given linkage matrix.
@@ -1499,7 +1494,7 @@ def calculate_cophenet(
 
 
 def calculate_silhouette(
-    k: int, shm_name: str, shape: Tuple[int, int], Z: np.ndarray
+        k: int, shm_name: str, shape: Tuple[int, int], Z: np.ndarray
 ) -> Tuple[int, float]:
     """
     Computes the silhouette score for a given number of clusters.
@@ -1532,7 +1527,7 @@ def calculate_silhouette(
 
 
 def calculate_silhouette_helper(
-    args: Tuple[int, str, Tuple[int, int], np.ndarray]
+        args: Tuple[int, str, Tuple[int, int], np.ndarray]
 ) -> Tuple[int, float]:
     """
     Wrapper function for parallel silhouette score computation.
@@ -1552,7 +1547,7 @@ def calculate_silhouette_helper(
 
 
 def sil_K(
-    X: np.ndarray, Z: np.ndarray, max_k: int = 500
+        X: np.ndarray, Z: np.ndarray, max_k: int = 500
 ) -> Tuple[List[int], List[float], int]:
     """
     Determines the optimal number of clusters based on silhouette scores.
@@ -1584,9 +1579,9 @@ def sil_K(
         # Initialize the tqdm progress bar
         results = []
         for result in tqdm(
-            pool.imap_unordered(calculate_silhouette_helper, args_list),
-            total=max_k - 2,
-            desc="Calculating silhouette scores",
+                pool.imap_unordered(calculate_silhouette_helper, args_list),
+                total=max_k - 2,
+                desc="Calculating silhouette scores",
         ):
             results.append(result)
 
@@ -1602,9 +1597,9 @@ def sil_K(
 
 
 def plot_silhouette_analysis(
-    cluster_counts: List[int],
-    silhouette_scores: List[float],
-    output_path: Optional[Union[str, Path]] = None,
+        cluster_counts: List[int],
+        silhouette_scores: List[float],
+        output_path: Optional[Union[str, Path]] = None,
 ) -> None:
     """
     Plots the silhouette analysis for determining the optimal number of clusters.
@@ -1647,7 +1642,7 @@ def plot_silhouette_analysis(
 
 
 def plot_cluster_heatmap(
-    data_matrix: np.ndarray, output_path: Optional[Union[str, Path]] = None
+        data_matrix: np.ndarray, output_path: Optional[Union[str, Path]] = None
 ) -> None:
     """
     Generates a heatmap for hierarchical clustering results.
@@ -1699,12 +1694,12 @@ def plot_cluster_heatmap(
 
 
 def clustering(
-    df: pd.DataFrame,
-    smiles_col: str = "scaffold",
-    max_k: int = 500,
-    optimal_k: Optional[int] = None,
-    withH: bool = False,
-    export_mcs_path: Optional[Union[str, Path]] = None,
+        df: pd.DataFrame,
+        smiles_col: str = "scaffold",
+        max_k: int = 500,
+        optimal_k: Optional[int] = None,
+        withH: bool = False,
+        export_mcs_path: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
     """
     Performs hierarchical clustering based on molecular similarity.
