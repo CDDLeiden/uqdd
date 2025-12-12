@@ -22,7 +22,7 @@ from scipy.stats import spearmanr
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_squared_error, explained_variance_score
-from tdc import Evaluator
+
 from uncertainty_toolbox import viz as uct_viz
 from uncertainty_toolbox.metrics import get_all_metrics, METRIC_NAMES
 from wandb import Image
@@ -1071,46 +1071,6 @@ def calculate_uct_metrics(
         obs_props=obs_props,
     )
     return metrics, plots
-
-
-def calculate_tdc_classification_metrics(
-        y_pred: np.ndarray, y_true: np.ndarray
-) -> Dict[str, float]:
-    """
-    Computes classification metrics using TDC (Therapeutics Data Commons) evaluation.
-
-    Parameters:
-    -----------
-    y_pred : np.ndarray
-        Predicted class probabilities or labels.
-    y_true : np.ndarray
-        True labels.
-
-    Returns:
-    --------
-    Dict[str, float]
-        Dictionary containing classification metrics.
-    """
-    metrics = [
-        "PR-AUC",
-        "range_logAUC",
-        "Accuracy",
-        "Precision",
-        "Recall",
-        "F1",
-        "PR@K",
-        "RP@K",
-    ]
-
-    # thresholds = {"Accuracy":0.5, "Precision":0.5, "Recall":0.5, "F1":0.5, "PR@K":0.9, "RP@K":0.9}
-    # thresholds = {"PR@K":0.9, "RP@K":0.9}
-    results = {}
-    for m in metrics:
-        threshold = 0.9 if m in ["PR@K", "RP@K"] else 0.5
-        evaluator = Evaluator(name=m)
-        results[m] = evaluator(y_true, y_pred, threshold=threshold)
-
-    return results
 
 
 def make_uq_plots(
@@ -2174,12 +2134,8 @@ class MetricsTable:
             plots = {**uctplots, **uqplots}
 
         else:
-            metrics = calculate_tdc_classification_metrics(
-                y_pred=y_pred,
-                y_true=y_true,
-                task_name=task_name,
-                data_specific_path=data_specific_path,
-            )
+            # There is no UQ metrics for classification implemented yet
+            metrics = {}
             plots = {}
 
         if y_eps is None:
