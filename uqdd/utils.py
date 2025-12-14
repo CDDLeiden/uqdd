@@ -1,3 +1,10 @@
+"""
+General utilities for configuration, logging, serialization, and DataFrame I/O.
+
+This module provides helpers to parse inputs, create loggers, load/update configs,
+read/write arrays and pickles, and perform common DataFrame hygiene tasks.
+"""
+
 import argparse
 import ast
 import json
@@ -17,17 +24,22 @@ string_types = (type(b""), type(""))
 
 def float_or_none(value: str) -> Union[float, None]:
     """
-    Converts a string input to a float or None if 'none' is provided.
+    Convert a string to a float, returning None if the value is 'none'.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     value : str
-        The string value to be converted.
+        String value to be converted.
 
-    Returns:
-    --------
+    Returns
+    -------
     float or None
-        The converted float value or None.
+        Converted float value, or None if input equals 'none' (case-insensitive).
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If the input cannot be converted to a float.
     """
     if value.lower() == "none":
         return None
@@ -41,19 +53,19 @@ def create_logger(
         name: str = "logger", file_level: str = "debug", stream_level: str = "info"
 ) -> logging.Logger:
     """
-    Initializes and returns a logger with specified log levels.
+    Initialize and return a configured Python logger.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     name : str, optional
-        The name of the logger (default: "logger").
+        Logger name. Default is "logger".
     file_level : str, optional
-        The log level for file output (default: "debug").
+        Log level for file handler ("debug", "info", "warning", "error", "critical"). Default is "debug".
     stream_level : str, optional
-        The log level for stream output (default: "info").
+        Log level for stream handler ("debug", "info", "warning", "error", "critical"). Default is "info".
 
-    Returns:
-    --------
+    Returns
+    -------
     logging.Logger
         Configured logger instance.
     """
@@ -100,25 +112,30 @@ def get_config(
         **kwargs,
 ) -> Dict[str, Any]:
     """
-    Loads a configuration JSON file and updates it with optional overrides.
+    Load a JSON configuration and optionally select nested keys and apply overrides.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     config_name : str
-        The name of the configuration file (without extension).
+        Name of the configuration file (without extension).
     config_dir : str or Path, optional
-        The directory containing the config files (default: CONFIG_DIR).
+        Directory containing config files. Default is CONFIG_DIR.
     split_key : str or None, optional
-        The specific split key to extract from the config (default: None).
+        Nested key to select a specific split from the config. Default is None.
     activity_key : str or None, optional
-        The specific activity key to extract from the config (default: None).
-    kwargs : dict
-        Additional key-value pairs to update the configuration.
+        Nested key to select a specific activity from the config. Default is None.
+    **kwargs
+        Additional key-value overrides applied to the loaded config.
 
-    Returns:
-    --------
+    Returns
+    -------
     Dict[str, Any]
-        The loaded and updated configuration.
+        Loaded configuration dictionary, possibly nested selection and updated with overrides.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the requested configuration file does not exist.
     """
     config_path = Path(config_dir) / f"{config_name}.json"
     if not config_path.exists():
@@ -142,17 +159,17 @@ def get_config(
 # Define a custom function to aggregate the columns
 def custom_agg(x: pd.Series) -> Union[Any, List[Any]]:
     """
-    Custom aggregation function that returns a unique value or a list of unique values.
+    Aggregate a Series to either a single unique value or a list of unique values.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     x : pd.Series
-        A Pandas Series to aggregate.
+        Pandas Series to aggregate.
 
-    Returns:
-    --------
+    Returns
+    -------
     Any or List[Any]
-        A single unique value if only one exists, otherwise a list of unique values.
+        Single unique value if only one exists; otherwise a list of unique non-null values.
     """
     if len(x) > 1:
         unique = x.nunique()
@@ -171,28 +188,28 @@ def check_na(
         logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Identifies and separates rows containing NaN values in specified columns.
+    Identify rows containing NaN in specified columns and separate them.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The DataFrame to check for NaN values.
-    cols : Union[List[str], str], optional
-        Columns to check for NaNs (default: "smiles").
+        Input DataFrame.
+    cols : list of str or str, optional
+        Column(s) to check for NaNs. Default is "smiles".
     nan_dup_source : str, optional
-        Source label for NaN values (default: "").
+        Source label to annotate NaN rows. Default is empty string.
     logger : logging.Logger or None, optional
-        Logger instance for logging (default: None).
+        Logger for info/error messages. Default is None.
 
-    Returns:
-    --------
-    Tuple[pd.DataFrame, pd.DataFrame]
-        DataFrame without NaNs and DataFrame containing NaNs.
-
-    Raises:
+    Returns
     -------
-    AssertionError :
-        If any column from `cols` is not present in the DataFrame.
+    (pd.DataFrame, pd.DataFrame)
+        Tuple of (filtered DataFrame without NaNs, DataFrame of NaN rows).
+
+    Raises
+    ------
+    AssertionError
+        If any requested column is missing from the DataFrame.
     """
     if not isinstance(cols, list):
         cols = [cols]
@@ -233,36 +250,34 @@ def check_duplicates(
         logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Identifies and optionally removes duplicate rows based on specified columns.
+    Identify duplicate rows by columns, optionally sort and drop, and annotate.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The DataFrame to check for duplicates.
-    cols : Union[List[str], str]
-        Columns to consider for duplicate checking.
+        Input DataFrame.
+    cols : list of str or str
+        Column(s) to consider for duplicate checking.
     drop : bool, optional
-        Whether to drop duplicate rows (default: True).
+        Whether to drop duplicate rows from the input DataFrame. Default is True.
     sorting_col : str, optional
-        Column to sort duplicates by (default: "").
-    keep : Union[bool, str], optional
-        Determines which duplicate entries to keep ('first', 'last', or False for all) (default: 'first').
+        Column used to sort duplicates before dropping. Default is empty string.
+    keep : bool or {"first", "last"}, optional
+        Which duplicate to keep when dropping. Default is "first".
     nan_dup_source : str, optional
-        Source label for duplicate values (default: "").
+        Source label to annotate duplicates. Default is empty string.
     logger : logging.Logger or None, optional
-        Logger instance for logging (default: None).
+        Logger for info/error messages. Default is None.
 
-    Returns:
-    --------
-    Tuple[pd.DataFrame, pd.DataFrame]
-        DataFrame without duplicates and DataFrame containing duplicates.
-
-    Raises:
+    Returns
     -------
-    AssertionError :
-        If any column from `cols` is not present in the DataFrame.
-        If sorting_col is not present in the DataFrame.
-        If keep is not one of 'first', 'last', or False.
+    (pd.DataFrame, pd.DataFrame)
+        Tuple of (DataFrame without dropped duplicates, DataFrame containing duplicates).
+
+    Raises
+    ------
+    AssertionError
+        If requested columns or sorting_col are missing, or keep is invalid.
     """
     if not isinstance(cols, list):
         cols = [cols]
@@ -322,31 +337,31 @@ def check_nan_duplicated(
         logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Checks for NaN and duplicated values in a DataFrame and separates them.
+    Check both NaN and duplicates and split the DataFrame into clean, NaN, and duplicate subsets.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The DataFrame to check.
-    cols_nan : Union[List[str], str], optional
-        Columns to check for NaNs (default: "smiles").
-    cols_dup : Union[List[str], str], optional
-        Columns to check for duplicates (default: "smiles").
+        Input DataFrame.
+    cols_nan : list of str or str, optional
+        Column(s) to check for NaNs. Default is "smiles".
+    cols_dup : list of str or str, optional
+        Column(s) to check for duplicates. Default is "smiles".
     nan_dup_source : str, optional
-        Source label for NaN or duplicated values (default: "").
+        Source label to annotate NaN/duplicate rows. Default is empty string.
     drop : bool, optional
-        Whether to drop duplicate values (default: True).
+        Whether to drop duplicate rows. Default is True.
     sorting_col : str, optional
-        Column to sort duplicates by (default: "").
-    keep : Union[bool, str], optional
-        Determines which duplicate entries to keep ('first', 'last', or False for all) (default: 'first').
+        Column to sort duplicates by. Default is empty string.
+    keep : bool or {"first", "last"}, optional
+        Which duplicate to keep when dropping. Default is "first".
     logger : logging.Logger or None, optional
-        Logger instance for logging (default: None).
+        Logger for info/error messages. Default is None.
 
-    Returns:
-    --------
-    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
-        Filtered DataFrame without NaN or duplicated values, DataFrame with NaNs, and DataFrame with duplicates.
+    Returns
+    -------
+    (pd.DataFrame, pd.DataFrame, pd.DataFrame)
+        Tuple of (filtered DataFrame, NaN rows, duplicate rows).
     """
     # NaN Check
     df_filtered, df_nan = check_na(df, cols_nan, nan_dup_source, logger)
@@ -366,17 +381,22 @@ def check_nan_duplicated(
 
 def parse_list(argument: str) -> List[int]:
     """
-    Parses a string representation of a list into an actual list of integers.
+    Parse a string representation of a list into a list of integers.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     argument : str
-        The string representation of a list.
+        String representation of a list, e.g. "[1, 2, 3]".
 
-    Returns:
-    --------
-    List[int]
-        The parsed list of integers.
+    Returns
+    -------
+    list of int
+        Parsed list of integers.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If the argument is not a list of integers.
     """
     try:
         val = ast.literal_eval(argument)
@@ -389,17 +409,17 @@ def parse_list(argument: str) -> List[int]:
 
 def save_npy_file(array_data: np.ndarray, filepath: str) -> None:
     """
-    Saves a numpy array to a file with a .npy extension.
+    Save a numpy array to a .npy file.
 
-    Parameters:
-    -----------
-    array_data : np.ndarray
-        The numpy array to save.
+    Parameters
+    ----------
+    array_data : numpy.ndarray
+        Array to save.
     filepath : str
-        The path where the file will be saved.
+        Output file path.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     # Save the array to the specified filepath
@@ -408,17 +428,17 @@ def save_npy_file(array_data: np.ndarray, filepath: str) -> None:
 
 def load_npy_file(filepath: Union[str, Path]) -> np.ndarray:
     """
-    Loads a .npy file into a numpy array.
+    Load a .npy file into a numpy array.
 
-    Parameters:
-    -----------
-    filepath : str
-        The path to the file to load.
+    Parameters
+    ----------
+    filepath : str or Path
+        File path to load.
 
-    Returns:
-    --------
-    np.ndarray
-        The loaded numpy array.
+    Returns
+    -------
+    numpy.ndarray
+        Loaded array.
     """
     # Load the file as a numpy array
     return np.load(filepath)
@@ -426,17 +446,17 @@ def load_npy_file(filepath: Union[str, Path]) -> np.ndarray:
 
 def save_pickle(data: Any, file_path: Union[str, Path]) -> None:
     """
-    Saves data to a pickle file.
+    Save Python data to a pickle file.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     data : Any
-        The data to be saved.
-    file_path : str
-        The file path where the pickle file will be stored.
+        Data object to serialize.
+    file_path : str or Path
+        Destination file path.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -446,17 +466,24 @@ def save_pickle(data: Any, file_path: Union[str, Path]) -> None:
 
 def load_pickle(filepath: Union[str, Path]) -> Any:
     """
-    Loads data from a pickle file.
+    Load data from a pickle file.
 
-    Parameters:
-    -----------
-    filepath : str
-        The path to the pickle file.
+    Parameters
+    ----------
+    filepath : str or Path
+        Pickle file path.
 
-    Returns:
-    --------
+    Returns
+    -------
     Any
-        The data loaded from the pickle file.
+        Deserialized Python object.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file is not found.
+    Exception
+        If any other error occurs during loading.
     """
     try:
         with open(filepath, "rb") as file:
@@ -476,25 +503,25 @@ def save_df(
         **kwargs,
 ) -> None:
     """
-    Exports a DataFrame to a specified file format.
+    Export a DataFrame to a file in a chosen format.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The DataFrame to be exported.
+        DataFrame to export.
     file_path : str or None, optional
-        Full file path for export (default: None).
-    output_path : str, optional
-        The directory path for exporting files (default: "./").
+        Full file path for export; if provided, overrides output_path/filename/ext. Default is None.
+    output_path : str or Path, optional
+        Directory path for exporting files. Default is "./".
     filename : str, optional
-        The filename to use if file_path is not specified (default: "exported_file").
+        Filename to use when file_path is not provided. Default is "exported_file".
     ext : str, optional
-        The file extension to use for saving (default: "csv").
-    kwargs : dict
-        Additional arguments for file export.
+        Output file extension: one of {"csv", "parquet", "feather", "pkl", "xlsx"}. Default is "csv".
+    **kwargs
+        Additional keyword arguments passed through to the underlying pandas writer.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     if df.empty:
@@ -532,19 +559,24 @@ def save_df(
 
 def load_df(input_path: Union[str, Path], **kwargs) -> pd.DataFrame:
     """
-    Loads a DataFrame from a specified file format.
+    Load a DataFrame from CSV, Parquet, or Pickle.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     input_path : str or Path
-        The file path to load.
-    kwargs : dict
-        Additional arguments for file loading.
+        Path to the input file.
+    **kwargs
+        Additional keyword arguments forwarded to pandas readers.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
-        The loaded DataFrame.
+        Loaded DataFrame.
+
+    Raises
+    ------
+    ValueError
+        If the file extension is not one of supported {csv, parquet, pkl}.
     """
     # we want to get the extension from the Path object
     if isinstance(input_path, string_types):
@@ -562,19 +594,24 @@ def load_df(input_path: Union[str, Path], **kwargs) -> pd.DataFrame:
 
 def split_list_by_sizes(input_list: List[Any], sizes: List[int]) -> List[List[Any]]:
     """
-    Splits a list into multiple sublists based on specified sizes.
+    Split a list into multiple sublists based on specified sizes.
 
-    Parameters:
-    -----------
-    input_list : List[Any]
-        The list to be split.
-    sizes : List[int]
-        The sizes of the sublists.
+    Parameters
+    ----------
+    input_list : list of Any
+        Input list to be split.
+    sizes : list of int
+        Sizes of the sublists; must sum to the length of input_list.
 
-    Returns:
-    --------
-    List[List[Any]]
-        A list of sublists split according to the given sizes.
+    Returns
+    -------
+    list of list of Any
+        List of sublists split according to the given sizes.
+
+    Raises
+    ------
+    ValueError
+        If the sum of sizes does not equal the length of input_list.
     """
     # Verify that the input list and sizes list are valid
     if len(input_list) != sum(sizes):

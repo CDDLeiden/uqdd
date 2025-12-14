@@ -1,3 +1,11 @@
+"""
+Statistical utilities for metrics analysis and significance testing.
+
+This module includes helpers to compute descriptive statistics, confidence intervals,
+bootstrap aggregates, correlation and significance tests, and summary tables to
+support model evaluation and reporting.
+"""
+
 import os
 import warnings
 import math
@@ -33,6 +41,27 @@ INTERACTIVE_MODE = False
 
 
 def calc_regression_metrics(df, cycle_col, val_col, pred_col, thresh):
+    """
+    Compute regression and thresholded classification metrics per cycle/method/split.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing true and predicted values.
+    cycle_col : str
+        Column name identifying cross-validation cycles.
+    val_col : str
+        Column with true target values.
+    pred_col : str
+        Column with predicted target values.
+    thresh : float
+        Threshold to derive binary classes for precision/recall.
+
+    Returns
+    -------
+    pd.DataFrame
+        Metrics per (cv_cycle, method, split) with columns ['mae', 'mse', 'r2', 'rho', 'prec', 'recall'].
+    """
     df_in = df.copy()
     metric_ls = ["mae", "mse", "r2", "rho", "prec", "recall"]
     metric_list = []
@@ -54,6 +83,27 @@ def calc_regression_metrics(df, cycle_col, val_col, pred_col, thresh):
 
 
 def bootstrap_ci(data, func=np.mean, n_bootstrap=1000, ci=95, random_state=42):
+    """
+    Compute bootstrap confidence interval for a statistic.
+
+    Parameters
+    ----------
+    data : array-like
+        Sequence of numeric values.
+    func : callable, optional
+        Statistic function applied to bootstrap samples (e.g., numpy.mean). Default is numpy.mean.
+    n_bootstrap : int, optional
+        Number of bootstrap resamples. Default is 1000.
+    ci : int or float, optional
+        Confidence level percentage (e.g., 95). Default is 95.
+    random_state : int, optional
+        Seed for reproducibility. Default is 42.
+
+    Returns
+    -------
+    tuple[float, float]
+        Lower and upper bounds for the confidence interval.
+    """
     np.random.seed(random_state)
     bootstrap_samples = []
     for _ in range(n_bootstrap):
@@ -66,6 +116,33 @@ def bootstrap_ci(data, func=np.mean, n_bootstrap=1000, ci=95, random_state=42):
 
 
 def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=None):
+    """
+    Repeated-measures Tukey HSD approximation using RM-ANOVA and studentized range.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Long-form DataFrame with columns including the metric, group, and 'cv_cycle' subject.
+    metric : str
+        Metric column to compare.
+    group_col : str
+        Column indicating groups (e.g., method/model type).
+    alpha : float, optional
+        Family-wise error rate for intervals. Default is 0.05.
+    sort : bool, optional
+        If True, sort groups by mean value of the metric. Default is False.
+    direction_dict : dict or None, optional
+        Mapping of metric -> 'maximize'|'minimize' to set sort ascending/descending.
+
+    Returns
+    -------
+    tuple
+        (result_tab, df_means, df_means_diff, p_values_matrix) where:
+        - result_tab: DataFrame of pairwise comparisons with mean differences and CIs.
+        - df_means: mean per group.
+        - df_means_diff: matrix of mean differences.
+        - pc: matrix of adjusted p-values.
+    """
     if sort and direction_dict and metric in direction_dict:
         ascending = direction_dict[metric] != "maximize"
         df_means = df.groupby(group_col).mean(numeric_only=True).sort_values(metric, ascending=ascending)
@@ -119,6 +196,26 @@ def rm_tukey_hsd(df, metric, group_col, alpha=0.05, sort=False, direction_dict=N
 
 
 def make_boxplots(df, metric_ls, save_dir=None, name_prefix="", model_order=None):
+    """
+    Plot boxplots for each metric grouped by method.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metric_ls : list of str
+        Metrics to visualize.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Prefix for the output filename. Default is empty.
+    model_order : list of str or None, optional
+        Explicit order of methods on the x-axis. Default derives from data.
+
+    Returns
+    -------
+    None
+    """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     sns.set_theme(context="paper", font_scale=1.5)
@@ -142,6 +239,26 @@ def make_boxplots(df, metric_ls, save_dir=None, name_prefix="", model_order=None
 
 
 def make_boxplots_parametric(df, metric_ls, save_dir=None, name_prefix="", model_order=None):
+    """
+    Plot boxplots with RM-ANOVA p-values annotated per metric.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metric_ls : list of str
+        Metrics to visualize.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Prefix for the output filename. Default is empty.
+    model_order : list of str or None, optional
+        Explicit order of methods on the x-axis. Default derives from data.
+
+    Returns
+    -------
+    None
+    """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     sns.set_theme(context="paper", font_scale=1.5)
@@ -168,6 +285,26 @@ def make_boxplots_parametric(df, metric_ls, save_dir=None, name_prefix="", model
 
 
 def make_boxplots_nonparametric(df, metric_ls, save_dir=None, name_prefix="", model_order=None):
+    """
+    Plot boxplots with Friedman p-values annotated per metric.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metric_ls : list of str
+        Metrics to visualize.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Prefix for the output filename. Default is empty.
+    model_order : list of str or None, optional
+        Explicit order of methods on the x-axis. Default derives from data.
+
+    Returns
+    -------
+    None
+    """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     n_metrics = len(metric_ls)
@@ -194,6 +331,26 @@ def make_boxplots_nonparametric(df, metric_ls, save_dir=None, name_prefix="", mo
 
 
 def make_sign_plots_nonparametric(df, metric_ls, save_dir=None, name_prefix="", model_order=None):
+    """
+    Plot significance heatmaps (Conover post-hoc) for nonparametric comparisons.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metric_ls : list of str
+        Metrics to analyze.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Prefix for the output filename. Default is empty.
+    model_order : list of str or None, optional
+        Explicit order of methods on axes. Default derives from data.
+
+    Returns
+    -------
+    None
+    """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     heatmap_args = {"linewidths": 0.25, "linecolor": "0.5", "clip_on": True, "square": True, "cbar_kws": {"pad": 0.05, "location": "right"}}
@@ -218,6 +375,26 @@ def make_sign_plots_nonparametric(df, metric_ls, save_dir=None, name_prefix="", 
 
 
 def make_critical_difference_diagrams(df, metric_ls, save_dir=None, name_prefix="", model_order=None):
+    """
+    Plot critical difference diagrams per metric using average ranks and post-hoc p-values.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metric_ls : list of str
+        Metrics to analyze.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Prefix for the output filename. Default is empty.
+    model_order : list of str or None, optional
+        Explicit order of models on diagrams. Default derives from data.
+
+    Returns
+    -------
+    None
+    """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     n_metrics = len(metric_ls)
@@ -238,6 +415,24 @@ def make_critical_difference_diagrams(df, metric_ls, save_dir=None, name_prefix=
 
 
 def make_normality_diagnostic(df, metric_ls, save_dir=None, name_prefix=""):
+    """
+    Plot normality diagnostics (histogram/KDE and Q-Q) for residualized metrics.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metric_ls : list of str
+        Metrics to diagnose.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Prefix for the output filename. Default is empty.
+
+    Returns
+    -------
+    None
+    """
     df_norm = df.copy()
     df_norm.replace([np.inf, -np.inf], np.nan, inplace=True)
     for metric in metric_ls:
@@ -275,6 +470,43 @@ def make_normality_diagnostic(df, metric_ls, save_dir=None, name_prefix=""):
 
 
 def mcs_plot(pc, effect_size, means, labels=True, cmap=None, cbar_ax_bbox=None, ax=None, show_diff=True, cell_text_size=10, axis_text_size=8, show_cbar=True, reverse_cmap=False, vlim=None, **kwargs):
+    """
+    Render a multiple-comparisons significance heatmap annotated with effect sizes and stars.
+
+    Parameters
+    ----------
+    pc : pd.DataFrame
+        Matrix of adjusted p-values.
+    effect_size : pd.DataFrame
+        Matrix of mean differences (effect sizes) aligned with `pc`.
+    means : pd.Series
+        Mean values per group for labeling.
+    labels : bool, optional
+        If True, add x/y tick labels from `means.index`. Default is True.
+    cmap : str or None, optional
+        Colormap name for effect sizes. Default is 'YlGnBu'.
+    cbar_ax_bbox : tuple or None, optional
+        Custom colorbar axes bbox; unused here but kept for API compatibility.
+    ax : matplotlib.axes.Axes or None, optional
+        Axes to draw into; if None, a new axes is created.
+    show_diff : bool, optional
+        If True, annotate cells with rounded effect sizes plus significance. Default is True.
+    cell_text_size : int, optional
+        Font size for annotations. Default is 10.
+    axis_text_size : int, optional
+        Font size for axis tick labels. Default is 8.
+    show_cbar : bool, optional
+        If True, show colorbar. Default is True.
+    reverse_cmap : bool, optional
+        If True, use reversed colormap. Default is False.
+    vlim : float or None, optional
+        Symmetric limit for color scaling around 0. Default is None.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        Axes containing the rendered heatmap.
+    """
     for key in ["cbar", "vmin", "vmax", "center"]:
         if key in kwargs:
             del kwargs[key]
@@ -305,6 +537,46 @@ def mcs_plot(pc, effect_size, means, labels=True, cmap=None, cbar_ax_bbox=None, 
 
 
 def make_mcs_plot_grid(df, stats_list, group_col, alpha=0.05, figsize=(20, 10), direction_dict=None, effect_dict=None, show_diff=True, cell_text_size=16, axis_text_size=12, title_text_size=16, sort_axes=False, save_dir=None, name_prefix="", model_order=None):
+    """
+    Generate a grid of MCS plots for multiple metrics.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    stats_list : list of str
+        Metrics to include.
+    group_col : str
+        Column indicating groups (e.g., method).
+    alpha : float, optional
+        Significance level. Default is 0.05.
+    figsize : tuple, optional
+        Figure size. Default is (20, 10).
+    direction_dict : dict or None, optional
+        Mapping metric -> 'maximize'|'minimize' for colormap orientation.
+    effect_dict : dict or None, optional
+        Mapping metric -> effect size limit for color scaling.
+    show_diff : bool, optional
+        If True, annotate mean differences; else annotate significance only.
+    cell_text_size : int, optional
+        Annotation font size.
+    axis_text_size : int, optional
+        Axis label font size.
+    title_text_size : int, optional
+        Title font size.
+    sort_axes : bool, optional
+        If True, sort groups by mean values per metric.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Filename prefix. Default is empty.
+    model_order : list of str or None, optional
+        Explicit model order for rows/cols.
+
+    Returns
+    -------
+    None
+    """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     nrow = math.ceil(len(stats_list) / 3)
@@ -349,6 +621,30 @@ def make_mcs_plot_grid(df, stats_list, group_col, alpha=0.05, figsize=(20, 10), 
 
 
 def make_scatterplot(df, val_col, pred_col, thresh, cycle_col="cv_cycle", group_col="method", save_dir=None):
+    """
+    Scatter plots of predicted vs true values per method, with threshold lines and summary stats.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    val_col : str
+        True value column.
+    pred_col : str
+        Predicted value column.
+    thresh : float
+        Threshold for classification overlays.
+    cycle_col : str, optional
+        Cross-validation cycle column. Default is 'cv_cycle'.
+    group_col : str, optional
+        Method/model type column. Default is 'method'.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+
+    Returns
+    -------
+    None
+    """
     df = df.copy()
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df_split_metrics = calc_regression_metrics(df, cycle_col=cycle_col, val_col=val_col, pred_col=pred_col, thresh=thresh)
@@ -378,6 +674,22 @@ def make_scatterplot(df, val_col, pred_col, thresh, cycle_col="cv_cycle", group_
 
 
 def ci_plot(result_tab, ax_in, name):
+    """
+    Plot mean differences with confidence intervals for pairwise comparisons.
+
+    Parameters
+    ----------
+    result_tab : pd.DataFrame
+        Output of rm_tukey_hsd with columns ['meandiff', 'lower', 'upper'].
+    ax_in : matplotlib.axes.Axes
+        Axes to plot into.
+    name : str
+        Title for the plot.
+
+    Returns
+    -------
+    None
+    """
     result_err = np.array([result_tab["meandiff"] - result_tab["lower"], result_tab["upper"] - result_tab["meandiff"]])
     sns.set_theme(context="paper")
     sns.set_style("whitegrid")
@@ -391,6 +703,28 @@ def ci_plot(result_tab, ax_in, name):
 
 
 def make_ci_plot_grid(df_in, metric_list, group_col="method", save_dir=None, name_prefix="", model_order=None):
+    """
+    Plot a grid of confidence-interval charts for multiple metrics.
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Input DataFrame.
+    metric_list : list of str
+        Metrics to render.
+    group_col : str, optional
+        Group column (e.g., 'method'). Default is 'method'.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    name_prefix : str, optional
+        Filename prefix. Default is empty.
+    model_order : list of str or None, optional
+        Explicit row order for the CI plots.
+
+    Returns
+    -------
+    None
+    """
     df_in = df_in.copy()
     df_in.replace([np.inf, -np.inf], np.nan, inplace=True)
     figure, axes = plt.subplots(len(metric_list), 1, figsize=(8, 2 * len(metric_list)), sharex=False)
@@ -410,6 +744,30 @@ def make_ci_plot_grid(df_in, metric_list, group_col="method", save_dir=None, nam
 
 
 def recall_at_precision(y_true, y_score, precision_threshold=0.5, direction="greater"):
+    """
+    Find recall and threshold achieving at least a target precision.
+
+    Parameters
+    ----------
+    y_true : array-like
+        Binary ground-truth labels.
+    y_score : array-like
+        Continuous scores or probabilities.
+    precision_threshold : float, optional
+        Minimum precision to achieve. Default is 0.5.
+    direction : {"greater", "lesser"}, optional
+        If 'greater', thresholding uses >=; if 'lesser', uses <=. Default is 'greater'.
+
+    Returns
+    -------
+    tuple[float, float or None]
+        (recall, threshold) if achievable; otherwise (nan, None).
+
+    Raises
+    ------
+    ValueError
+        If `direction` is invalid.
+    """
     if direction not in ["greater", "lesser"]:
         raise ValueError("Invalid direction. Expected one of: ['greater', 'lesser']")
     y_true = np.array(y_true)
@@ -428,6 +786,27 @@ def recall_at_precision(y_true, y_score, precision_threshold=0.5, direction="gre
 
 
 def calc_classification_metrics(df_in, cycle_col, val_col, prob_col, pred_col):
+    """
+    Compute classification metrics per cycle/method/split, including ROC-AUC, PR-AUC, MCC, recall, and TNR.
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Input DataFrame.
+    cycle_col : str
+        Column name for cross-validation cycles.
+    val_col : str
+        True binary label column.
+    prob_col : str
+        Predicted probability/score column.
+    pred_col : str
+        Predicted binary label column.
+
+    Returns
+    -------
+    pd.DataFrame
+        Metrics per (cv_cycle, method, split) with columns ['roc_auc', 'pr_auc', 'mcc', 'recall', 'tnr'].
+    """
     metric_list = []
     for k, v in df_in.groupby([cycle_col, "method", "split"]):
         cycle, method, split = k
@@ -442,6 +821,18 @@ def calc_classification_metrics(df_in, cycle_col, val_col, prob_col, pred_col):
 
 
 def make_curve_plots(df):
+    """
+    Plot ROC and PR curves for split/method selections with threshold markers.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing 'cv_cycle', 'split', and method columns plus true/probability fields.
+
+    Returns
+    -------
+    None
+    """
     df_plot = df.query("cv_cycle == 0 and split == 'scaffold'").copy()
     color_map = plt.get_cmap("tab10")
     le = LabelEncoder()
@@ -479,6 +870,19 @@ def make_curve_plots(df):
 
 
 def harmonize_columns(df):
+    """
+    Normalize common column names to ['method', 'split', 'cv_cycle'].
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with possibly varied column naming.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with standardized column names and assertion that required columns exist.
+    """
     df = df.copy()
     rename_map = {
         "Model type": "method",
@@ -491,6 +895,21 @@ def harmonize_columns(df):
 
 
 def cliffs_delta(x, y):
+    """
+    Compute Cliff's delta effect size and qualitative interpretation.
+
+    Parameters
+    ----------
+    x : array-like
+        First sample of numeric values.
+    y : array-like
+        Second sample of numeric values.
+
+    Returns
+    -------
+    tuple[float, str]
+        (delta, interpretation) where interpretation is one of {'negligible','small','medium','large'}.
+    """
     x, y = np.array(x), np.array(y)
     m, n = len(x), len(y)
     comparisons = 0
@@ -514,6 +933,31 @@ def cliffs_delta(x, y):
 
 
 def wilcoxon_pairwise_test(df, metric, model_a, model_b, task=None, split=None, seed_col=None):
+    """
+    Perform paired Wilcoxon signed-rank test between two models on a metric.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metric : str
+        Metric column to compare.
+    model_a : str
+        First model type name.
+    model_b : str
+        Second model type name.
+    task : str or None, optional
+        Task filter. Default is None.
+    split : str or None, optional
+        Split filter. Default is None.
+    seed_col : str or None, optional
+        Optional seed column identifier (unused here).
+
+    Returns
+    -------
+    dict or None
+        Test summary including statistic, p-value, Cliff's delta, CI on differences; None if insufficient data.
+    """
     data = df.copy()
     if task is not None:
         data = data[data["Task"] == task]
@@ -556,6 +1000,19 @@ def wilcoxon_pairwise_test(df, metric, model_a, model_b, task=None, split=None, 
 
 
 def holm_bonferroni_correction(p_values):
+    """
+    Apply Holm–Bonferroni correction to an array of p-values.
+
+    Parameters
+    ----------
+    p_values : array-like
+        Raw p-values.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, numpy.ndarray]
+        (corrected_p_values, rejected_mask) where rejected indicates significance after correction.
+    """
     p_values = np.array(p_values)
     n = len(p_values)
     sorted_indices = np.argsort(p_values)
@@ -573,6 +1030,29 @@ def holm_bonferroni_correction(p_values):
 
 
 def pairwise_model_comparison(df, metrics, models=None, tasks=None, splits=None, alpha=0.05):
+    """
+    Run pairwise Wilcoxon tests across models/tasks/splits for multiple metrics and adjust p-values.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metrics : list of str
+        Metrics to compare.
+    models : list of str or None, optional
+        Models to include; default derives from data.
+    tasks : list of str or None, optional
+        Tasks to include; default derives from data.
+    splits : list of str or None, optional
+        Splits to include; default derives from data.
+    alpha : float, optional
+        Significance level. Default is 0.05.
+
+    Returns
+    -------
+    pd.DataFrame
+        Results table with corrected p-values and significance flags.
+    """
     if models is None:
         models = df["Model type"].unique()
     if tasks is None:
@@ -600,6 +1080,25 @@ def pairwise_model_comparison(df, metrics, models=None, tasks=None, splits=None,
 
 
 def friedman_nemenyi_test(df, metrics, models=None, alpha=0.05):
+    """
+    Run Friedman test across models with Nemenyi post-hoc where significant, per metric.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metrics : list of str
+        Metrics to test.
+    models : list of str or None, optional
+        Models to include; default derives from data.
+    alpha : float, optional
+        Significance level. Default is 0.05.
+
+    Returns
+    -------
+    dict
+        Mapping metric -> result dict containing stats, p-values, mean ranks, and optional post-hoc outputs.
+    """
     if models is None:
         models = df["Model type"].unique()
     results = {}
@@ -638,6 +1137,23 @@ def friedman_nemenyi_test(df, metrics, models=None, alpha=0.05):
 
 
 def calculate_critical_difference(k, n, alpha=0.05):
+    """
+    Compute the critical difference for average ranks in Nemenyi post-hoc tests.
+
+    Parameters
+    ----------
+    k : int
+        Number of models.
+    n : int
+        Number of datasets/blocks.
+    alpha : float, optional
+        Significance level. Default is 0.05.
+
+    Returns
+    -------
+    float
+        Critical difference value.
+    """
     from scipy.stats import studentized_range
     q_alpha = studentized_range.ppf(1 - alpha, k, np.inf) / np.sqrt(2)
     cd = q_alpha * np.sqrt(k * (k + 1) / (6 * n))
@@ -645,6 +1161,27 @@ def calculate_critical_difference(k, n, alpha=0.05):
 
 
 def bootstrap_auc_difference(auc_values_a, auc_values_b, n_bootstrap=1000, ci=95, random_state=42):
+    """
+    Bootstrap confidence interval for difference of mean AUCs between two models.
+
+    Parameters
+    ----------
+    auc_values_a : array-like
+        AUC values for model A.
+    auc_values_b : array-like
+        AUC values for model B.
+    n_bootstrap : int, optional
+        Number of bootstrap resamples. Default is 1000.
+    ci : int or float, optional
+        Confidence level in percent. Default is 95.
+    random_state : int, optional
+        Seed for reproducibility. Default is 42.
+
+    Returns
+    -------
+    dict
+        {'mean_difference', 'ci_lower', 'ci_upper', 'bootstrap_differences'}
+    """
     np.random.seed(random_state)
     differences = []
     for _ in range(n_bootstrap):
@@ -661,6 +1198,24 @@ def bootstrap_auc_difference(auc_values_a, auc_values_b, n_bootstrap=1000, ci=95
 
 
 def plot_critical_difference_diagram(friedman_results, metric, save_dir=None, alpha=0.05):
+    """
+    Plot a simple critical difference diagram using mean ranks and CD value.
+
+    Parameters
+    ----------
+    friedman_results : dict
+        Output dictionary from friedman_nemenyi_test.
+    metric : str
+        Metric to plot.
+    save_dir : str or None, optional
+        Directory to save the plot. Default is None.
+    alpha : float, optional
+        Significance level used to compute CD. Default is 0.05.
+
+    Returns
+    -------
+    None
+    """
     if metric not in friedman_results:
         print(f"Metric {metric} not found in Friedman results")
         return
@@ -717,6 +1272,30 @@ def plot_critical_difference_diagram(friedman_results, metric, save_dir=None, al
 
 
 def analyze_significance(df_raw, metrics, direction_dict, effect_dict, save_dir=None, model_order=None, activity=None):
+    """
+    End-to-end significance analysis and plotting across splits for multiple metrics.
+
+    Parameters
+    ----------
+    df_raw : pd.DataFrame
+        Raw results DataFrame.
+    metrics : list of str
+        Metric names to analyze.
+    direction_dict : dict
+        Mapping metric -> 'maximize'|'minimize'.
+    effect_dict : dict
+        Mapping metric -> effect size threshold for visualization.
+    save_dir : str or None, optional
+        Directory to save plots and outputs. Default is None.
+    model_order : list of str or None, optional
+        Explicit ordering of models. Default derives from data.
+    activity : str or None, optional
+        Activity name for prefixes. Default is None.
+
+    Returns
+    -------
+    None
+    """
     df = harmonize_columns(df_raw)
     for metric in metrics:
         df[metric] = pd.to_numeric(df[metric], errors="coerce")
@@ -750,6 +1329,31 @@ def analyze_significance(df_raw, metrics, direction_dict, effect_dict, save_dir=
 
 
 def comprehensive_statistical_analysis(df, metrics, models=None, tasks=None, splits=None, save_dir=None, alpha=0.05):
+    """
+    Run a comprehensive suite of statistical tests and export results.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+    metrics : list of str
+        Metrics to analyze.
+    models : list of str or None, optional
+        Models to include. Default derives from data.
+    tasks : list of str or None, optional
+        Tasks to include. Default derives from data.
+    splits : list of str or None, optional
+        Splits to include. Default derives from data.
+    save_dir : str or None, optional
+        Directory to save tables and JSON outputs. Default is None.
+    alpha : float, optional
+        Significance level. Default is 0.05.
+
+    Returns
+    -------
+    dict
+        Results dict including pairwise tests, Friedman/Nemenyi outputs, and optional AUC bootstrap comparisons.
+    """
     print("Performing comprehensive statistical analysis...")
     results = {}
     print("1. Running pairwise Wilcoxon signed-rank tests...")
@@ -803,6 +1407,29 @@ def comprehensive_statistical_analysis(df, metrics, models=None, tasks=None, spl
 
 
 def generate_statistical_report(results, save_dir=None, df_raw=None, metrics=None, direction_dict=None, effect_dict=None):
+    """
+    Generate a human-readable text report from comprehensive statistical results and optionally run plots.
+
+    Parameters
+    ----------
+    results : dict
+        Output of comprehensive_statistical_analysis.
+    save_dir : str or None, optional
+        Directory to save the report text file. Default is None.
+    df_raw : pd.DataFrame or None, optional
+        Raw DataFrame to run plotting-based significance analysis. Default is None.
+    metrics : list of str or None, optional
+        Metrics to plot (when df_raw provided).
+    direction_dict : dict or None, optional
+        Direction mapping for metrics (required when df_raw provided).
+    effect_dict : dict or None, optional
+        Effect threshold mapping (required when df_raw provided).
+
+    Returns
+    -------
+    str
+        Report text.
+    """
     report = []
     report.append("=" * 80)
     report.append("COMPREHENSIVE STATISTICAL ANALYSIS REPORT")

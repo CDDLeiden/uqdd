@@ -1,3 +1,11 @@
+"""
+Chemical utilities for SMILES handling, descriptor computation, and RDKit helpers.
+
+This module provides functions to validate and canonicalize SMILES, compute
+fingerprints/descriptors, manage RDKit Molecule conversions, and various
+chemoinformatics helpers.
+"""
+
 import copy
 import logging
 import math
@@ -6,7 +14,7 @@ from concurrent.futures import ProcessPoolExecutor
 from itertools import combinations, islice
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import Union, List, Tuple, Any, Optional, Dict, Generator
+from typing import Union, List, Tuple, Any, Optional, Dict, Generator, Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,7 +49,11 @@ from uqdd.utils import (
 )
 
 # Disable RDKit warnings
-RDLogger.DisableLog("rdApp.info")
+try:
+    RDLogger.DisableLog("rdApp.info")
+except Exception:
+    # Some analyzers may not resolve DisableLog; ignore at runtime.
+    pass
 # print(f"rdkit {rdkit.__version__}")
 
 N_WORKERS = 20
@@ -266,8 +278,8 @@ def rdkit_standardize(
     """
     Applies a standardization workflow to a SMILES string.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smi : str
         The input SMILES string to standardize.
 
@@ -279,8 +291,8 @@ def rdkit_standardize(
         occurs during standardization. If False, an exception is raised or logged, depending on the value of logger.
         Default is True.
 
-    Returns:
-    --------
+    Returns
+    -------
     str
         The standardized SMILES string.
 
@@ -292,8 +304,8 @@ def rdkit_standardize(
         If an unexpected error occurs during standardization and suppress_exception is False.
         The error message is logged or raised, depending on the value of logger.
 
-    Notes:
-    ------
+    Notes
+    -----
     This function applies the following standardization steps to the input SMILES string:
 
     1. Functional Groups Normalization: The input SMILES string is converted to a molecule object,
@@ -343,13 +355,13 @@ def remove_stereo_rdkit_molecule(
     """
     Removes stereochemistry information from an RDKit molecule.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     mol : RdkitMol
         The RDKit molecule from which stereochemistry should be removed.
 
-    Returns:
-    --------
+    Returns
+    -------
     Optional[RdkitMol]
         The modified molecule with stereochemistry removed, or None if an error occurs.
     """
@@ -369,13 +381,13 @@ def neutralize_rdkit_molecule(
     """
     Neutralizes charges in an RDKit molecule.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     mol : RdkitMol
         The RDKit molecule to be neutralized.
 
-    Returns:
-    --------
+    Returns
+    -------
     Optional[RdkitMol]
         The neutralized molecule, or None if an error occurs.
     """
@@ -407,13 +419,13 @@ def remove_isotopes_rdkit_molecule(
     """
     Removes isotopic labels from an RDKit molecule.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     mol : RdkitMol
         The RDKit molecule from which isotopic labels should be removed.
 
-    Returns:
-    --------
+    Returns
+    -------
     Optional[RdkitMol]
         The modified molecule with isotopes removed, or None if an error occurs.
     """
@@ -457,6 +469,11 @@ def standardize(
     str or None
         The standardized SMILES string or None, depending on the value of suppress_exception and whether an exception
         occurs. If an exception occurs and suppress_exception is True, the original SMILES string is returned.
+
+    Raises
+    ------
+    ValueError
+        If RDKit fails to create or sanitize a molecule when suppress_exception is False.
     """
     if smiles is None:
         return None
@@ -490,16 +507,36 @@ def standardize(
             return None
 
 
-def standardize_wrapper(args):
+def standardize_wrapper(args: tuple[str | None, Optional[logging.Logger], bool, bool]) -> Optional[str]:
     """
-    Wrapper function for the standardize function to be used with the concurrent.futures.ProcessPoolExecutor.
+    Wrapper for `standardize` suitable for ProcessPoolExecutor.
+
+    Parameters
+    ----------
+    args : tuple
+        (smiles, logger, suppress_exception, remove_stereo).
+
+    Returns
+    -------
+    str or None
+        Standardized SMILES or None per `standardize` behavior.
     """
     return standardize(*args)
 
 
-def rdkit_standardize_wrapper(args):
+def rdkit_standardize_wrapper(args: tuple[str, Optional[logging.Logger], bool]) -> Optional[str]:
     """
-    Wrapper function for the rdkit_standardize function to be used with the concurrent.futures.ProcessPoolExecutor.
+    Wrapper for `rdkit_standardize` suitable for ProcessPoolExecutor.
+
+    Parameters
+    ----------
+    args : tuple
+        (smiles, logger, suppress_exception).
+
+    Returns
+    -------
+    str or None
+        Standardized SMILES or None per `rdkit_standardize` behavior.
     """
     return rdkit_standardize(*args)
 
@@ -512,25 +549,37 @@ def parallel_standardize(
         rd_standardize: bool = False,
 ) -> pd.DataFrame:
     """
-    Standardizes SMILES representations in a DataFrame in parallel.
+    Standardize SMILES values in a DataFrame in parallel and rewrite the column.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The input DataFrame containing SMILES strings.
+        Input DataFrame containing SMILES strings.
     smiles_col : str, optional
-        Column containing SMILES strings (default: "SMILES").
-    logger : logging.Logger, optional
-        Logger instance for logging messages (default: None).
+        Column name containing SMILES strings. Default is "SMILES".
+    logger : logging.Logger or None, optional
+        Logger for progress and error messages. Default is None.
     suppress_exception : bool, optional
-        If True, suppresses exceptions during standardization (default: True).
+        If True, failed standardizations return the best intermediate or original value; if False,
+        failures yield None. Default is True.
     rd_standardize : bool, optional
-        Whether to use RDKit's standardization method (default: False).
+        If True, use RDKit's `rdkit_standardize`; otherwise use `standardize`. Default is False.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
-        The standardized DataFrame.
+        The same DataFrame with the `smiles_col` replaced by standardized SMILES.
+
+    Notes
+    -----
+    - Unique SMILES are standardized once and mapped back to the DataFrame to avoid redundant work.
+    - Parallelism uses ProcessPoolExecutor with up to N_WORKERS processes.
+    - This function mutates the `smiles_col` in-place.
+
+    Raises
+    ------
+    KeyError
+        If `smiles_col` is not present in `df`.
     """
     # standardizing the SMILES in parallel
     standardizer = rdkit_standardize_wrapper if rd_standardize else standardize_wrapper
@@ -564,37 +613,49 @@ def standardize_df(
         suppress_exception: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Standardizes SMILES representations in a DataFrame and checks for duplicates and NaNs.
+    End-to-end SMILES hygiene: standardize, and split NaNs/duplicates.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The input DataFrame.
+        Input DataFrame.
     smiles_col : str, optional
-        Column containing SMILES strings (default: "SMILES").
-    other_dup_col : str or list of str, optional
-        Additional columns to consider when checking for duplicates (default: None).
+        Column with SMILES strings. Default is "SMILES".
+    other_dup_col : list of str or str or None, optional
+        Additional columns to consider when determining duplicates. Default is None.
     sorting_col : str, optional
-        Column to sort by before standardization (default: "").
+        Column used to sort duplicates before keeping/dropping. Default is empty string.
     drop : bool, optional
-        Whether to drop NaN SMILES before standardization (default: True).
-    keep : bool or str, optional
-        Determines which duplicate SMILES to keep ('first', 'last', or 'aggregate') (default: "last").
-    logger : logging.Logger, optional
-        Logger instance for logging messages (default: None).
+        If True, drop duplicate rows in the filtered DataFrame according to `keep`. Default is True.
+    keep : {"first", "last", "aggregate"} or bool, optional
+        Which duplicate to keep. If "aggregate", duplicates are grouped and aggregated via `custom_agg`.
+        Default is "last".
+    logger : logging.Logger or None, optional
+        Logger for info and error messages. Default is None.
     suppress_exception : bool, optional
-        If True, suppresses exceptions during standardization (default: True).
+        Passed to standardization functions; see `parallel_standardize`. Default is True.
 
-    Returns:
-    --------
-    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
-        Standardized DataFrame, DataFrame with NaNs, DataFrame with duplicates.
+    Returns
+    -------
+    (pd.DataFrame, pd.DataFrame, pd.DataFrame)
+        Tuple of (filtered standardized DataFrame, NaN rows, duplicate rows).
+        - filtered DataFrame: input columns with standardized `smiles_col`, duplicates optionally dropped.
+        - NaN rows: rows with missing `smiles_col` before or after standardization, labeled by `nan_dup_source`.
+        - duplicate rows: rows that are duplicates by `smiles_col` (and `other_dup_col` if provided),
+          labeled by `nan_dup_source`.
 
-    Notes:
+    Notes
+    -----
+    - Duplicates/NaNs are checked both before and after standardization.
+    - When `keep == "aggregate"`, duplicates are collapsed using `custom_agg` on all columns.
+    - This function does not modify the input `df` directly; it returns a filtered copy and separate NaN/dup DataFrames.
+
+    Raises
     ------
-    This function applies the `standardize` function to each SMILES string in the 'smiles' column
-    of the input dataframe,
-    and replaces the column with the standardized versions.
+    AssertionError
+        If requested `smiles_col`, `sorting_col`, or any `other_dup_col` are not present in the DataFrame.
+    ValueError
+        If `keep` is not one of {"first", "last"} or False (excluding the special "aggregate" case handled internally).
     """
     if keep == "aggregate":
         keep = False
@@ -676,8 +737,8 @@ def ecfp_from_smiles(
     """
     Generates an ECFP (Extended Connectivity Fingerprint) from a SMILES string.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smiles : str
         The input SMILES string.
     radius : int, optional
@@ -689,13 +750,13 @@ def ecfp_from_smiles(
     use_chirality : bool, optional
         Whether to include chirality information (default: False).
 
-    Returns:
-    --------
+    Returns
+    -------
     np.ndarray
         The ECFP fingerprint as a binary numpy array.
 
-    Notes:
-    ------
+    Notes
+    -----
     This function uses the RDKit library for generating ECFP fingerprints.
     source:
     https://www.blopig.com/blog/2022/11/how-to-turn-a-smiles-string-into-an-extended-connectivity-fingerprint-using-rdkit/
@@ -718,13 +779,13 @@ def wrapper_ecfp_from_smiles(args: Tuple[str, int, int, bool, bool]) -> np.ndarr
     """
     Wrapper function for generating ECFP fingerprints from a SMILES string.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     args : Tuple[str, int, int, bool, bool]
         A tuple containing the SMILES string, radius, fingerprint length, feature flag, and chirality flag.
 
-    Returns:
-    --------
+    Returns
+    -------
     np.ndarray
         The ECFP fingerprint as a binary numpy array.
     """
@@ -741,8 +802,8 @@ def generate_ecfp(
     """
     Generates ECFP fingerprints for a list of SMILES strings.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smiles : List[str]
         List of SMILES strings to generate fingerprints for.
     radius : int, optional
@@ -754,13 +815,13 @@ def generate_ecfp(
     use_chirality : bool, optional
         Whether to include chirality information (default: False).
 
-    Returns:
-    --------
+    Returns
+    -------
     Dict[str, np.ndarray]
         A dictionary mapping each SMILES string to its generated ECFP fingerprint.
 
-    Notes:
-    ------
+    Notes
+    -----
     This function applies the `ECFP_from_smiles` function to each
     SMILES string in the 'smiles' column of the input dataframe,
     and generates ECFP fingerprints with the specified radius, length,
@@ -790,15 +851,15 @@ def get_mol_descriptors(
     """
     Computes molecular descriptors for a given SMILES string.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smiles : str
         The input SMILES string.
     chosen_descriptors : List[str], optional
         List of descriptors to compute (default: all available descriptors).
 
-    Returns:
-    --------
+    Returns
+    -------
     np.ndarray
         Array of computed molecular descriptor values.
 
@@ -830,13 +891,13 @@ def wrapper_get_mol_descriptors(args: Tuple[str, Optional[List[str]]]) -> np.nda
     """
     Wrapper function for computing molecular descriptors for a SMILES string.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     args : Tuple[str, Optional[List[str]]]
         A tuple containing the SMILES string and optionally a list of descriptors.
 
-    Returns:
-    --------
+    Returns
+    -------
     np.ndarray
         Computed molecular descriptor values.
     """
@@ -849,15 +910,15 @@ def generate_mol_descriptors(
     """
     Computes molecular descriptors for a list of SMILES strings.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smiles : List[str]
         List of SMILES strings to compute descriptors for.
     chosen_descriptors : List[str], optional
         List of descriptors to compute (default: all available descriptors).
 
-    Returns:
-    --------
+    Returns
+    -------
     Dict[str, np.ndarray]
         A dictionary mapping each SMILES string to its computed molecular descriptors.
     """
@@ -886,8 +947,8 @@ def get_papyrus_descriptors(
     """
     Retrieves molecular descriptors from the Papyrus dataset.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     connectivity_ids : List[str], optional
         List of connectivity IDs for which descriptors should be retrieved (default: None).
     desc_type : str, optional
@@ -895,8 +956,8 @@ def get_papyrus_descriptors(
     logger : logging.Logger, optional
         Logger instance for logging (default: None).
 
-    Returns:
-    --------
+    Returns
+    -------
     Dict[str, np.ndarray]
         A dictionary mapping connectivity IDs to their molecular descriptors.
     """
@@ -937,25 +998,47 @@ def get_chem_desc(
         **kwargs,
 ) -> pd.DataFrame:
     """
-    Computes and attaches molecular descriptors to a DataFrame.
+    Compute and attach chemical descriptors to a DataFrame column.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The input DataFrame.
+        Input DataFrame containing a column with molecular identifiers (e.g., SMILES or connectivity IDs).
     desc_type : str, optional
-        Type of descriptor to compute (default: "ecfp1024").
+        Descriptor type to compute or load. Supported values include:
+        - "ecfp{N}": Morgan/ECFP fingerprints with bit length N, e.g. "ecfp1024", "ecfp2048".
+        - "mordred", "mold2", "cddd", "fingerprint": loaded from Papyrus via `get_papyrus_descriptors`.
+        - "moldesc": computed descriptor vectors via `generate_mol_descriptors`.
+        Default is "ecfp1024".
     query_col : str, optional
-        Column containing the input SMILES (default: "SMILES").
-    logger : logging.Logger, optional
-        Logger instance for logging (default: None).
-    kwargs : dict
-        Additional arguments for descriptor computation.
+        Column name in `df` providing the query key (SMILES or connectivity). Default is "SMILES".
+    logger : logging.Logger or None, optional
+        Logger for progress messages. Default is None.
+    **kwargs
+        Extra keyword arguments forwarded to the underlying generator/loader (e.g., radius for ECFP).
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
-        The input DataFrame with an additional column containing molecular descriptors.
+        Copy of `df` with a new column named `{desc_type}` containing descriptors:
+        - For ECFP: numpy.ndarray of shape (N,) dtype uint8.
+        - For Papyrus types (mordred/mold2/cddd/fingerprint): numpy.ndarray of shape (d,), dtype float or int depending on source.
+        - For moldesc: numpy.ndarray of shape (d,), dtype float.
+
+    Notes
+    -----
+    - The function computes descriptors for unique values in `query_col` and maps them back to `df`.
+    - `desc_type` is case-insensitive and normalized via `.lower()`.
+    - When `desc_type` starts with "ecfp", the bit length N is parsed from the suffix (e.g., 1024).
+
+    Raises
+    ------
+    KeyError
+        If `query_col` is not present in `df`.
+    ValueError
+        If `desc_type` is not one of the supported identifiers.
+    NotImplementedError
+        If `desc_type` equals "graph2d" (not implemented).
     """
     desc_type = desc_type.lower()
     unique_entries = df[query_col].unique().tolist()
@@ -983,23 +1066,31 @@ def get_chem_desc(
 
 def mol_to_pil_image(molecule: RdkitMol, width: int = 300, height: int = 300) -> Image:
     """
-    Converts an RDKit molecule to a PIL image.
+    Render an RDKit molecule as a PIL image.
 
     Parameters
     ----------
-    molecule : RdkitMol (rdkit.Chem.rdchem.Mol)
-        The RDKit molecule to convert.
+    molecule : rdkit.Chem.rdchem.Mol
+        RDKit molecule to depict.
     width : int, optional
-        The width of the image in pixels. Default is 300.
+        Image width in pixels. Default is 300.
     height : int, optional
-        The height of the image in pixels. Default is 300.
+        Image height in pixels. Default is 300.
 
     Returns
     -------
-    PIL.Image
-        The PIL image.
+    PIL.Image.Image
+        RGB image of the molecule sized (width, height).
 
-    source: https://www.rdkit.org/docs/Cookbook.html
+    Notes
+    -----
+    - 2D coordinates are computed and depiction is matched prior to rendering.
+    - The depiction uses RDKit's default styling.
+
+    Raises
+    ------
+    ValueError
+        If the molecule cannot be processed for depiction.
     """
     Chem.AllChem.Compute2DCoords(molecule)
     Chem.AllChem.GenerateDepictionMatching2DStructure(molecule, molecule)
@@ -1009,23 +1100,26 @@ def mol_to_pil_image(molecule: RdkitMol, width: int = 300, height: int = 300) ->
 
 def smi_to_pil_image(smiles: str, width: int = 300, height: int = 300) -> Image:
     """
-    Converts an RDKit molecule to a PIL image.
+    Render a SMILES string as a PIL image via RDKit.
 
     Parameters
     ----------
     smiles : str
-        The SMILES string to convert.
+        SMILES string to convert and depict.
     width : int, optional
-        The width of the image in pixels. Default is 300.
+        Image width in pixels. Default is 300.
     height : int, optional
-        The height of the image in pixels. Default is 300.
+        Image height in pixels. Default is 300.
 
     Returns
     -------
-    PIL.Image
-        The PIL image.
+    PIL.Image.Image
+        RGB image of the molecule sized (width, height).
 
-    source: https://www.rdkit.org/docs/Cookbook.html
+    Raises
+    ------
+    ValueError
+        If the SMILES string cannot be parsed into a molecule.
     """
     molecule = Chem.MolFromSmiles(smiles)
     Chem.AllChem.Compute2DCoords(molecule)
@@ -1036,19 +1130,24 @@ def smi_to_pil_image(smiles: str, width: int = 300, height: int = 300) -> Image:
 
 def generate_scaffold(smiles: str, include_chirality: bool = False) -> str:
     """
-    Computes the Bemis-Murcko scaffold for a given SMILES string.
+    Compute the Bemis–Murcko scaffold from a SMILES string.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smiles : str
-        The input SMILES string.
+        Input SMILES string.
     include_chirality : bool, optional
-        Whether to retain chirality in the scaffold (default: False).
+        If True, retain chirality in the scaffold; otherwise chirality is discarded. Default is False.
 
-    Returns:
-    --------
+    Returns
+    -------
     str
-        The computed scaffold SMILES string.
+        Scaffold SMILES. Falls back to the input SMILES if scaffold extraction fails or is empty.
+
+    Raises
+    ------
+    ValueError
+        If RDKit raises an error during scaffold generation.
     """
     try:
         scaffold = MurckoScaffold.MurckoScaffoldSmiles(
@@ -1067,19 +1166,29 @@ def generate_scaffold(smiles: str, include_chirality: bool = False) -> str:
 
 def merge_scaffolds(df: pd.DataFrame, smiles_col: str = "SMILES") -> pd.DataFrame:
     """
-    Computes and merges scaffold information into a DataFrame.
+    Add a 'scaffold' column to a DataFrame by computing Bemis–Murcko scaffolds.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        The input DataFrame.
+        Input DataFrame containing SMILES.
     smiles_col : str, optional
-        Column containing SMILES strings (default: "SMILES").
+        Column name with SMILES strings. Default is "SMILES".
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
-        The input DataFrame with an additional 'scaffold' column.
+        DataFrame with an additional 'scaffold' column containing scaffold SMILES.
+
+    Notes
+    -----
+    - Scaffolds are computed for unique SMILES in parallel and mapped back to the DataFrame.
+    - The 'scaffold' column is then standardized in-place via `parallel_standardize`.
+
+    Raises
+    ------
+    KeyError
+        If `smiles_col` is not present in `df`.
     """
     # calculate scaffolds for each smiles string # concurrent.futures.ProcessPoolExecutor
     unique_smiles = df[smiles_col].unique().tolist()
@@ -1105,19 +1214,24 @@ def merge_scaffolds(df: pd.DataFrame, smiles_col: str = "SMILES") -> pd.DataFram
 # adopted from https://github.com/nina23bom/NPS-Pharmacological-profile-fingerprint-prediction-using-ML/blob/main/001.%20NPS%20unique%20compounds%20MCS%20Hierarchical%20clustering%20-%20Class%20Label.ipynb
 def tanimoto_mcs(smi1: str, smi2: str) -> float:
     """
-    Computes the Tanimoto similarity based on the Maximum Common Substructure (MCS) between two molecules.
+    Compute Tanimoto similarity from the Maximum Common Substructure (MCS) between two molecules.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smi1 : str
-        SMILES string of the first molecule.
+        SMILES for the first molecule.
     smi2 : str
-        SMILES string of the second molecule.
+        SMILES for the second molecule.
 
-    Returns:
-    --------
+    Returns
+    -------
     float
-        Tanimoto similarity score based on MCS.
+        Tanimoto similarity based on heavy-atom MCS (range [0, 1]).
+
+    Raises
+    ------
+    ValueError
+        If either SMILES cannot be parsed or MCS computation fails.
     """
     # reading smiles of two molecules and create molecule
     m1 = Chem.MolFromSmiles(smi1)
@@ -1148,19 +1262,24 @@ def tanimoto_mcs(smi1: str, smi2: str) -> float:
 
 def tanimoto_mcs_withH(smi1: str, smi2: str) -> float:
     """
-    Computes the Tanimoto similarity based on the Maximum Common Substructure (MCS) between two hydrogen-included molecules.
+    Compute Tanimoto similarity from the MCS with explicit hydrogens.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     smi1 : str
-        SMILES string of the first molecule.
+        SMILES for the first molecule.
     smi2 : str
-        SMILES string of the second molecule.
+        SMILES for the second molecule.
 
-    Returns:
-    --------
+    Returns
+    -------
     float
-        Tanimoto similarity score based on MCS with hydrogen included.
+        Tanimoto similarity based on MCS with explicit hydrogens (range [0, 1]).
+
+    Raises
+    ------
+    ValueError
+        If either SMILES cannot be parsed or MCS computation fails.
     """
     # reading smiles of two molecules and create molecule
     m1 = Chem.MolFromSmiles(smi1)
@@ -1193,19 +1312,19 @@ def tanimoto_mcs_withH(smi1: str, smi2: str) -> float:
 
 def tanimoto_mcs_wrapper(index_pair: Tuple[int, int], cid_list: List[str]) -> float:
     """
-    Wrapper function for computing Tanimoto similarity using MCS.
+    Wrapper for `tanimoto_mcs` using index pairs.
 
-    Parameters:
-    -----------
-    index_pair : Tuple[int, int]
-        Index pair representing two molecules in a list.
-    cid_list : List[str]
-        List of SMILES strings corresponding to compound IDs.
+    Parameters
+    ----------
+    index_pair : tuple of int
+        Pair of indices referencing two molecules.
+    cid_list : list of str
+        SMILES list aligned with indices.
 
-    Returns:
-    --------
+    Returns
+    -------
     float
-        Computed Tanimoto similarity score.
+        Tanimoto similarity score.
     """
     cid1, cid2 = index_pair
     return tanimoto_mcs(cid_list[cid1], cid_list[cid2])
@@ -1215,19 +1334,19 @@ def tanimoto_mcs_withH_wrapper(
         index_pair: Tuple[int, int], cid_list: List[str]
 ) -> float:
     """
-    Wrapper function for computing Tanimoto similarity using MCS with hydrogen included.
+    Wrapper for `tanimoto_mcs_withH` using index pairs.
 
-    Parameters:
-    -----------
-    index_pair : Tuple[int, int]
-        Index pair representing two molecules in a list.
-    cid_list : List[str]
-        List of SMILES strings corresponding to compound IDs.
+    Parameters
+    ----------
+    index_pair : tuple of int
+        Pair of indices referencing two molecules.
+    cid_list : list of str
+        SMILES list aligned with indices.
 
-    Returns:
-    --------
+    Returns
+    -------
     float
-        Computed Tanimoto similarity score with hydrogen included.
+        Tanimoto similarity score with explicit hydrogens.
     """
     cid1, cid2 = index_pair
     return tanimoto_mcs_withH(cid_list[cid1], cid_list[cid2])
@@ -1237,15 +1356,15 @@ def chunked_iterable(n: int, size: int) -> Generator[list[tuple[int, int]], Any,
     """
     Generates chunks of index pairs for all unique molecule comparisons.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     n : int
         Total number of compounds.
     size : int
         Chunk size for processing pairs.
 
-    Yields:
-    --------
+    Yields
+    ------
     List[Tuple[int, int]]
         List of index pairs in chunks.
     """
@@ -1261,15 +1380,15 @@ def calculate_total_chunks(n_compounds: int, batch_size: int) -> int:
     """
     Calculates the total number of chunks required for pairwise similarity calculations.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     n_compounds : int
         Total number of compounds.
     batch_size : int
         Batch size for chunked processing.
 
-    Returns:
-    --------
+    Returns
+    -------
     int
         Total number of chunks needed.
     """
@@ -1282,13 +1401,13 @@ def process_chunk(
         chunk: List[Tuple[int, int]],
         similarity_matrix: np.ndarray,
         cid_list: List[str],
-        tanimoto_mcs_func: callable,
+        tanimoto_mcs_func: Callable[[Tuple[int, int], List[str]], float],
 ) -> None:
     """
     Processes a chunk of index pairs and updates the similarity matrix.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     chunk : List[Tuple[int, int]]
         List of index pairs for similarity computation.
     similarity_matrix : np.ndarray
@@ -1298,8 +1417,8 @@ def process_chunk(
     tanimoto_mcs_func : callable
         Function to compute Tanimoto similarity.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     with ProcessPoolExecutor(max_workers=N_WORKERS) as executor:
@@ -1319,15 +1438,15 @@ def save_similarity_matrix(
     """
     Saves the similarity matrix to a file.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     matrix : np.ndarray
         The similarity matrix to be saved.
     filename : str, optional
         Name of the file to save the matrix (default: "similarity_matrix.npy").
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     np.save(filename, matrix)
@@ -1344,8 +1463,8 @@ def hierarchical_clustering(
     """
     Performs hierarchical clustering based on Maximum Common Substructure (MCS) similarity.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         Input DataFrame containing SMILES strings.
     smiles_col : str, optional
@@ -1357,10 +1476,18 @@ def hierarchical_clustering(
     save_path : str, optional
         Path to save the similarity matrix (default: None).
 
-    Returns:
-    --------
+    Returns
+    -------
     np.ndarray
         The computed similarity matrix.
+
+    Notes
+    -----
+    - The similarity matrix is computed for all unique pairs of molecules in the input DataFrame.
+    - Hierarchical clustering is performed using Ward's method on the computed similarity matrix.
+    - The resulting linkage matrix can be used for visualizing the clustering dendrogram or cutting
+      the tree to obtain clusters.
+
     """
     if save_path is not None:
         Path(save_path).mkdir(parents=True, exist_ok=True)
@@ -1396,7 +1523,8 @@ def hierarchical_clustering(
 
     # Save the similarity matrix to the specified path
     if save_path is not None:
-        save_npy_file(similarity_matrix, filepath)
+        assert filepath is not None
+        save_npy_file(similarity_matrix, str(filepath))
         # file_path = Path(save_path) / "mcs.npy"
         # save_similarity_matrix(similarity_matrix, save_path)
 
@@ -1409,21 +1537,32 @@ def form_linkage(
         calculate_cophenetic_coeff: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Computes hierarchical clustering linkage matrix using Ward's method.
+    Compute Ward-linkage from a pairwise similarity matrix.
 
-    Parameters:
-    -----------
-    X : np.ndarray
-        Pairwise similarity matrix.
-    save_path : str, optional
-        Path to save the linkage matrix (default: None).
+    Parameters
+    ----------
+    X : numpy.ndarray
+        Symmetric similarity matrix of shape (n, n) with values in [0, 1].
+    save_path : str or None, optional
+        Directory to save the linkage matrix ("mcs_linkage.pkl.npy"). Default is None.
     calculate_cophenetic_coeff : bool, optional
-        Whether to calculate the cophenetic coefficient (default: True).
+        If True, compute and persist the cophenetic coefficient via `calculate_cophenet`. Default is True.
 
-    Returns:
-    --------
-    Tuple[np.ndarray, np.ndarray]
-        Processed similarity matrix and linkage matrix.
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        Tuple of (X_ distance matrix of shape (n, n), linkage Z of shape (m, 4)).
+
+    Notes
+    -----
+    - Distances are derived as 1 - similarity.
+    - Linkage is computed on the condensed upper triangle using fastcluster.linkage with method="ward".
+    - When `save_path` exists and contains a linkage file, it is loaded to avoid recomputation.
+
+    Raises
+    ------
+    ValueError
+        If `X` is not a square matrix or contains invalid values.
     """
     # start = time.time()
     n_rows, n_cols = X.shape
@@ -1444,7 +1583,7 @@ def form_linkage(
 
     # Z = linkage(X, method="ward") # TODO : save and load if existing
     if save_path is not None:
-        save_npy_file(Z, filepath)
+        save_npy_file(Z, str(filepath))
     if calculate_cophenetic_coeff:
         calculate_cophenet(X_, Z, save_path=save_path)
     return X_, Z
@@ -1454,21 +1593,31 @@ def calculate_cophenet(
         X: np.ndarray, Z: np.ndarray, save_path: Optional[str] = None
 ) -> float:
     """
-    Computes the cophenetic correlation coefficient for a given linkage matrix.
+    Compute the cophenetic correlation coefficient for a given linkage.
 
-    Parameters:
-    -----------
-    X : np.ndarray
-        Pairwise similarity matrix.
-    Z : np.ndarray
-        Linkage matrix from hierarchical clustering.
-    save_path : str, optional
-        Path to save cophenetic coefficient data (default: None).
+    Parameters
+    ----------
+    X : numpy.ndarray
+        Distance matrix of shape (n, n).
+    Z : numpy.ndarray
+        Linkage matrix of shape (m, 4).
+    save_path : str or None, optional
+        Directory to save intermediate arrays and the coefficient ("mcs_c.pkl"). Default is None.
 
-    Returns:
-    --------
+    Returns
+    -------
     float
-        Cophenetic correlation coefficient.
+        Cophenetic correlation coefficient in [0, 1].
+
+    Notes
+    -----
+    - Uses scipy's `cophenet` with condensed pairwise distances from `X`.
+    - Saves pdist and cophenetic distances when `save_path` is provided.
+
+    Raises
+    ------
+    ValueError
+        If inputs have incompatible shapes or linkage is invalid.
     """
 
     if save_path is not None:
@@ -1487,8 +1636,8 @@ def calculate_cophenet(
     c, coph_dists = cophenet(Z, Pdist)
     print("Cophenetic coefficient calculated: %0.4f" % c)
     if save_path is not None:
-        save_npy_file(Pdist, Pdist_path)
-        save_npy_file(coph_dists, Coph_dists_path)
+        save_npy_file(Pdist, str(Pdist_path))
+        save_npy_file(coph_dists, str(Coph_dists_path))
         save_pickle(c, C_path)
     return c
 
@@ -1497,23 +1646,32 @@ def calculate_silhouette(
         k: int, shm_name: str, shape: Tuple[int, int], Z: np.ndarray
 ) -> Tuple[int, float]:
     """
-    Computes the silhouette score for a given number of clusters.
+    Compute the average silhouette score for a dendrogram cut at k clusters.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     k : int
         Number of clusters.
     shm_name : str
-        Shared memory name for accessing precomputed similarity matrix.
-    shape : Tuple[int, int]
-        Shape of the similarity matrix.
-    Z : np.ndarray
-        Linkage matrix for hierarchical clustering.
+        Shared memory identifier for the distance matrix.
+    shape : tuple of int
+        Shape of the distance matrix (n, n).
+    Z : numpy.ndarray
+        Linkage matrix of shape (m, 4).
 
-    Returns:
-    --------
-    Tuple[int, float]
-        Number of clusters and corresponding silhouette score.
+    Returns
+    -------
+    (int, float)
+        Pair of (k, average silhouette score).
+
+    Notes
+    -----
+    - Expects a precomputed distance matrix in shared memory; metric="precomputed" is used.
+
+    Raises
+    ------
+    ValueError
+        If k < 2 or shared memory cannot be accessed.
     """
     # Access the shared memory block
     existing_shm = shared_memory.SharedMemory(name=shm_name)
@@ -1530,17 +1688,17 @@ def calculate_silhouette_helper(
         args: Tuple[int, str, Tuple[int, int], np.ndarray]
 ) -> Tuple[int, float]:
     """
-    Wrapper function for parallel silhouette score computation.
+    Helper wrapper for `calculate_silhouette`.
 
-    Parameters:
-    -----------
-    args : Tuple[int, str, Tuple[int, int], np.ndarray]
-        Arguments including cluster count, shared memory name, similarity matrix shape, and linkage matrix.
+    Parameters
+    ----------
+    args : tuple
+        (k, shm_name, shape, Z) as described in `calculate_silhouette`.
 
-    Returns:
-    --------
-    Tuple[int, float]
-        Number of clusters and corresponding silhouette score.
+    Returns
+    -------
+    (int, float)
+        Pair of (k, average silhouette score).
     """
     k, shm_name, shape, Z = args
     return calculate_silhouette(k, shm_name, shape, Z)
@@ -1550,21 +1708,31 @@ def sil_K(
         X: np.ndarray, Z: np.ndarray, max_k: int = 500
 ) -> Tuple[List[int], List[float], int]:
     """
-    Determines the optimal number of clusters based on silhouette scores.
+    Evaluate silhouette scores across cluster counts and pick the best k.
 
-    Parameters:
-    -----------
-    X : np.ndarray
-        Pairwise similarity matrix.
-    Z : np.ndarray
-        Linkage matrix from hierarchical clustering.
+    Parameters
+    ----------
+    X : numpy.ndarray
+        Distance matrix of shape (n, n) with non-negative values.
+    Z : numpy.ndarray
+        Linkage matrix of shape (m, 4).
     max_k : int, optional
-        Maximum number of clusters to evaluate (default: 500).
+        Maximum number of clusters to test (exclusive upper bound). Default is 500.
 
-    Returns:
-    --------
-    Tuple[List[int], List[float], int]
-        List of cluster sizes, corresponding silhouette scores, and optimal cluster count.
+    Returns
+    -------
+    (list of int, list of float, int)
+        Tuple of (tested k values, silhouette scores, optimal k).
+
+    Notes
+    -----
+    - Uses shared memory to distribute the distance matrix across worker processes.
+    - Silhouette is computed with metric="precomputed" on the distance matrix.
+
+    Raises
+    ------
+    ValueError
+        If `max_k` < 2 or if the input matrices are inconsistent.
     """
     # Create shared memory block for X
     X = np.array(X, dtype=np.float32)
@@ -1589,7 +1757,8 @@ def sil_K(
     shm.close()
     shm.unlink()
     results.sort(key=lambda x: x[0])  # Ensure the results are sorted by k
-    n_clu, sil = zip(*results)
+    n_clu = [r[0] for r in results]
+    sil = [r[1] for r in results]
     optimal_clu = n_clu[sil.index(max(sil))]
     print("Optimal number of clusters: ", optimal_clu)
 
@@ -1602,20 +1771,25 @@ def plot_silhouette_analysis(
         output_path: Optional[Union[str, Path]] = None,
 ) -> None:
     """
-    Plots the silhouette analysis for determining the optimal number of clusters.
+    Plot silhouette scores versus number of clusters.
 
-    Parameters:
-    -----------
-    cluster_counts : List[int]
-        List of cluster sizes.
-    silhouette_scores : List[float]
-        List of silhouette scores corresponding to each cluster size.
-    output_path : str, optional
-        Path to save the plot (default: None).
+    Parameters
+    ----------
+    cluster_counts : list of int
+        Tested cluster counts.
+    silhouette_scores : list of float
+        Average silhouette scores corresponding to each cluster count.
+    output_path : str or Path or None, optional
+        Directory to save the plot image "Silhouette_analysis_for_determining_optimal_clusters_K.png". Default is None.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
+
+    Notes
+    -----
+    - Creates a high-resolution PNG suitable for reports.
+    - Does not display the plot; it is saved if `output_path` is provided.
     """
     # Initialize the plot
     fig = plt.figure(figsize=(12, 5), dpi=600)
@@ -1645,18 +1819,23 @@ def plot_cluster_heatmap(
         data_matrix: np.ndarray, output_path: Optional[Union[str, Path]] = None
 ) -> None:
     """
-    Generates a heatmap for hierarchical clustering results.
+    Plot a hierarchical clustering heatmap.
 
-    Parameters:
-    -----------
-    data_matrix : np.ndarray
-        Clustering similarity matrix.
-    output_path : str, optional
-        Path to save the heatmap image (default: None).
+    Parameters
+    ----------
+    data_matrix : numpy.ndarray
+        Similarity or distance matrix of shape (n, n).
+    output_path : str or Path or None, optional
+        Directory to save the heatmap image "Heatmap_of_the_clustering.png". Default is None.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
+
+    Notes
+    -----
+    - Uses seaborn.clustermap with Ward linkage and a diverging colormap.
+    - Y-axis tick labels are derived from the DataFrame index when available.
     """
     if hasattr(data_matrix, "index"):
         yticklabels = data_matrix.index
@@ -1689,9 +1868,6 @@ def plot_cluster_heatmap(
             bbox_inches="tight",
         )
 
-    # Show the plot
-    # plt.show()
-
 
 def clustering(
         df: pd.DataFrame,
@@ -1702,27 +1878,43 @@ def clustering(
         export_mcs_path: Optional[Union[str, Path]] = None,
 ) -> pd.DataFrame:
     """
-    Performs hierarchical clustering based on molecular similarity.
+    Cluster molecules hierarchically based on MCS-derived similarity and label each entry.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
-        Input DataFrame containing molecular data.
+        Input DataFrame with a column of molecular representations (SMILES or scaffolds).
     smiles_col : str, optional
-        Column containing molecular representations (default: "scaffold").
+        Column name used for computing similarities (e.g., "SMILES" or "scaffold"). Default is "scaffold".
     max_k : int, optional
-        Maximum number of clusters to evaluate (default: 500).
-    optimal_k : int, optional
-        Predefined optimal number of clusters (default: None).
+        Upper bound on number of clusters to evaluate when searching for optimal k. Default is 500.
+    optimal_k : int or None, optional
+        If provided, use this number of clusters directly; otherwise determine it via silhouette analysis. Default is None.
     withH : bool, optional
-        Whether to consider hydrogen atoms in similarity calculations (default: False).
-    export_mcs_path : str, optional
-        Path to save processed clustering data (default: None).
+        If True, compute MCS similarity with explicit hydrogens; otherwise heavy atoms only. Default is False.
+    export_mcs_path : str or Path or None, optional
+        Directory to cache intermediate artifacts (similarity matrix, linkage, figures, and final clustered DataFrame).
+        Default is None.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
-        Clustered DataFrame with assigned cluster labels.
+        DataFrame containing the original columns plus a nullable integer column 'cluster' with cluster labels.
+        Rows whose `smiles_col` is missing or not included in unique similarity evaluation may have NA cluster labels.
+
+    Notes
+    -----
+    - Workflow: compute pairwise MCS similarity (optionally cached), derive Ward linkage, determine optimal k (unless
+      provided), cut the dendrogram, and map cluster labels back to the original DataFrame.
+    - When `export_mcs_path` is set and cached artifacts exist, they are reused to avoid recomputation.
+    - The clustered DataFrame is saved to "clustered_df.pkl" in `export_mcs_path` when provided.
+
+    Raises
+    ------
+    KeyError
+        If `smiles_col` is not present in `df`.
+    ValueError
+        If `max_k` < 2 or if the similarity/linkage computation fails.
     """
     clustered_df_path = None
     if export_mcs_path:
@@ -1732,7 +1924,7 @@ def clustering(
             return load_pickle(clustered_df_path)
     # pre cleaning
     df_clean = df.copy()[[smiles_col]]
-    # dropp duplicates to avoid self comparison and reset index
+    # drop duplicates to avoid self comparison and reset index
     df_clean.drop_duplicates(subset=smiles_col, keep="first", inplace=True)
 
     df_clean.dropna(subset=[smiles_col], inplace=True)
@@ -1747,18 +1939,11 @@ def clustering(
         withH=withH,
         save_path=export_mcs_path,
     )
-    # Just for debugging
-    # df_clean = df_clean[:1000]
-    # mcs_np = mcs_np[:1000, :1000]
-    # if export_mcs_path:
-    #     Path(export_mcs_path).mkdir(parents=True, exist_ok=True)
-    #     df_mcs.to_csv(Path(export_mcs_path) / "mcs_matrix.csv", index=True)
-    # df_pair.to_csv(Path(export_mcs_path) / "scaffold_sim_pair.csv", index=True)
+
     mcs_x, mcs_z = form_linkage(
         mcs_np, save_path=export_mcs_path, calculate_cophenetic_coeff=True
     )
     max_k = min(max_k, df_clean[smiles_col].nunique())
-    # max_k = df_clean[smiles_col].nunique ()
     print(f"Max number of clusters: {max_k}")
     if optimal_k is None:
         mcs_k, mcs_sil, optimal_k = sil_K(mcs_x, mcs_z, max_k=max_k)  # , max_k=max_k
@@ -1774,9 +1959,6 @@ def clustering(
             sil_scores_path = Path(export_mcs_path) / f"mcs_sil_scores.pkl"
             save_pickle(zip(mcs_k, mcs_sil), sil_scores_path)
 
-        # plot_cluster_heatmap(mcs_np, output_path=fig_output_path) # TAKES SO MUCH TIME
-    # optimal_clu = 11974
-    # df_clean["cluster"] = fcluster(mcs_z, optimal_clu, criterion="maxclust")
     print(f"Optimal number of clusters: {optimal_k}")
     df_clean["cluster"] = cut_tree(mcs_z, n_clusters=optimal_k).flatten()
 

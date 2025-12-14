@@ -1,3 +1,10 @@
+"""
+Probabilistic Neural Network (PNN) models.
+
+This module defines the base PNN for regression/classification, including
+feature extractors, output layers, and training/evaluation helpers.
+"""
+
 import logging
 from typing import Optional, Tuple, List
 
@@ -15,47 +22,17 @@ from uqdd.utils import create_logger
 
 class PNN(nn.Module):
     """
-    A Probabilistic neural network (PNN) for regression or classification tasks using
-    chemical and (optionally) protein descriptors as input.
+    Probabilistic Neural Network base class.
 
     Parameters
     ----------
-    config : dict, optional
-        Configuration dictionary containing model hyperparameters.
-    logger : logging.Logger, optional
-        Logger instance for debugging and info logging.
+    config : dict or None, optional
+        Configuration dictionary.
+    logger : logging.Logger or None, optional
+        Logger instance.
     aleavar_layer_included : bool, optional
-        Whether to include an aleatoric uncertainty estimation layer (default: True).
-    **kwargs : dict
-        Additional keyword arguments for model configuration.
-
-    Attributes
-    ----------
-    config : dict
-        Stores model hyperparameters.
-    task_type : str
-        Type of task ('regression' or 'classification').
-    output_dim : int
-        Dimension of the model's output layer.
-    aleatoric : bool
-        Whether aleatoric uncertainty estimation is enabled.
-    chem_feature_extractor : nn.Sequential
-        MLP feature extractor for chemical descriptors.
-    prot_feature_extractor : Optional[nn.Sequential]
-        MLP feature extractor for protein descriptors (only for single-task learning).
-    regressor_or_classifier : nn.Sequential
-        MLP layers for regression or classification.
-    aleavar_layer : Optional[nn.Sequential]
-        Layer to estimate aleatoric uncertainty (if enabled).
-    output_layer : nn.Linear
-        Final layer mapping to output predictions.
-
-    Methods
-    -------
-    forward(inputs: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        Performs forward pass through the model.
+        Whether to include aleatoric variance layer. Default is True.
     """
-
     def __init__(
             self,
             config: Optional[dict] = None,
@@ -119,21 +96,19 @@ class PNN(nn.Module):
 
     def forward(
             self, inputs: Tuple[torch.Tensor, torch.Tensor]
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass of the model.
+        Forward pass of the PNN.
 
         Parameters
         ----------
         inputs : tuple of torch.Tensor
-            Tuple containing protein and chemical descriptors as tensors.
+            (protein_input, chemical_input).
 
         Returns
         -------
-        output : torch.Tensor
-            Model predictions (e.g., activity scores or class logits).
-        var_ : torch.Tensor or None
-            Aleatoric uncertainty estimates (if enabled), otherwise None.
+        Tuple[torch.Tensor, torch.Tensor]
+            Predicted outputs and aleatoric variance.
         """
         prot_input, chem_input = inputs
         chem_features = self.chem_feature_extractor(chem_input)
@@ -251,19 +226,21 @@ class PNN(nn.Module):
             )
 
 
-def run_pnn(config: Optional[dict] = None) -> nn.Module:  # uq: bool = False
+def run_pnn(
+        config: Optional[dict] = None,
+) -> Tuple[nn.Module, Optional[nn.Module], dict, dict]:
     """
-    Runs training for the PNN model and returns the trained model.
+    Train and evaluate a PNN model.
 
     Parameters
     ----------
-    config : Optional[dict], optional
-        Configuration dictionary for model training, by default None.
+    config : dict or None, optional
+        Training configuration.
 
     Returns
     -------
-    nn.Module
-        Trained PNN model.
+    Tuple[nn.Module, Optional[nn.Module], dict, dict]
+        (model, recalibration_model, metrics, plots).
     """
     best_model, config, _, _ = train_model_e2e(
         config,
@@ -272,22 +249,17 @@ def run_pnn(config: Optional[dict] = None) -> nn.Module:  # uq: bool = False
         logger=LOGGER,
     )
 
-    return best_model
+    return best_model, None, {}, {}
 
 
-def run_pnn_wrapper(**kwargs) -> nn.Module:
+def run_pnn_wrapper(**kwargs):
     """
-    Wrapper function for running the pnn model with logging.
+    Wrapper to build config and run PNN training/evaluation.
 
     Parameters
     ----------
-    **kwargs : dict
-        Keyword arguments for model configuration.
-
-    Returns
-    -------
-    nn.Module
-        Trained pnn model.
+    **kwargs
+        Additional configuration.
     """
     global LOGGER
     LOGGER = create_logger("pnn", file_level="debug", stream_level="info")
@@ -296,20 +268,14 @@ def run_pnn_wrapper(**kwargs) -> nn.Module:
     return run_pnn(config=config)
 
 
-def run_pnn_hyperparam(**kwargs) -> None:
+def run_pnn_hyperparam(**kwargs):
     """
-    Runs a hyperparameter sweep for the pnn model using Weights & Biases.
+    Run wandb hyperparameter sweep for PNN.
 
     Parameters
     ----------
-    **kwargs : dict
-        Keyword arguments including:
-        - `sweep_count` (int): Number of sweep runs.
-        - `wandb_project_name` (str): Name of the Weights & Biases project.
-
-    Returns
-    -------
-    None
+    **kwargs
+        Sweep configuration options.
     """
     global LOGGER
     LOGGER = create_logger(name="pnn-sweep", file_level="debug", stream_level="info")

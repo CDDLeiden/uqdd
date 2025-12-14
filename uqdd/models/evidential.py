@@ -1,3 +1,10 @@
+"""
+Evidential learning utilities and models.
+
+This module implements evidential regression/classification layers, prediction
+helpers, and end-to-end training/evaluation with recalibration.
+"""
+
 import logging
 from typing import Tuple, Optional
 
@@ -25,7 +32,7 @@ from uqdd.utils import create_logger
 
 def ev_uncertainty(v: Tensor, alpha: Tensor, beta: Tensor) -> Tuple[Tensor, Tensor]:
     """
-    Computes the aleatoric and epistemic uncertainties from the Normal Inverse Gamma (NIG) distribution.
+    Compute aleatoric and epistemic uncertainties from the Normal Inverse Gamma (NIG) distribution.
 
     Parameters
     ----------
@@ -39,7 +46,7 @@ def ev_uncertainty(v: Tensor, alpha: Tensor, beta: Tensor) -> Tuple[Tensor, Tens
     Returns
     -------
     Tuple[Tensor, Tensor]
-        Aleatoric and epistemic uncertainties.
+        Aleatoric uncertainty and epistemic uncertainty.
     """
     alea_vars = beta / (alpha - 1)  # aleatoric
     epist_var = torch.sqrt(beta / (v * (alpha - 1)))  # epistemic
@@ -54,27 +61,23 @@ def ev_predict_params(
         set_on_eval: bool = True,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Performs evidential prediction using the provided model and dataloader.
+    Perform evidential prediction and return NIG parameters and targets.
 
     Parameters
     ----------
     model : nn.Module
-        The trained evidential deep learning model.
+        Trained evidential model.
     dataloader : torch.utils.data.DataLoader
-        The dataloader containing the test dataset.
+        DataLoader for the dataset.
     device : torch.device, optional
-        The device to run inference on, by default the available CUDA device or CPU.
+        Device for inference. Default is DEVICE.
     set_on_eval : bool, optional
-        Whether to set the model in evaluation mode, by default True.
+        Whether to set model.eval() before inference. Default is True.
 
     Returns
     -------
-        Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
-        - mu
-        - v
-        - alpha
-        - beta
-        - Targets
+    tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+        (mu, v, alpha, beta, targets).
     """
     if set_on_eval:
         model.eval()
@@ -113,22 +116,23 @@ def ev_predict(
         set_on_eval: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Performs evidential prediction using the provided model and dataloader.
+    Perform evidential prediction and return outputs, targets, and uncertainties.
 
     Parameters
     ----------
     model : nn.Module
-        The trained evidential deep learning model.
+        Trained evidential model.
     dataloader : torch.utils.data.DataLoader
-        The dataloader containing the test dataset.
+        DataLoader for the dataset.
     device : torch.device, optional
-    set_on_eval: bool, optional
-        Whether to set the model in evaluation mode, by default True.
+        Device for inference. Default is DEVICE.
+    set_on_eval : bool, optional
+        Whether to set model.eval() before inference. Default is True.
 
     Returns
     -------
     Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-        Model outputs, targets, aleatoric uncertainties, and epistemic uncertainties.
+        (outputs, targets, aleatoric_vars, epistemic_vars).
     """
     mus, vs, alphas, betas, targets_all = ev_predict_params(
         model, dataloader, device, set_on_eval
@@ -143,21 +147,21 @@ def ev_nll(
         device: torch.device = DEVICE,
 ) -> float:
     """
-    Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
+    Calculate the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : nn.Module
-        The trained evidential deep learning model.
-    dataloader: torch.utils.data.DataLoader
-        The dataloader containing the test dataset.
-    device: torch.device, optional
-        The device to run inference on, by default DEVICE.
+        Trained evidential model.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader containing the dataset.
+    device : torch.device, optional
+        Device for inference. Default is DEVICE.
 
-    Returns:
+    Returns
     -------
     float
-        The negative log-likelihood (NLL) of the NIG distribution
+        Negative log-likelihood (NLL).
     """
     mus, vs, alphas, betas, targets_all = ev_predict_params(model, dataloader, device)
     nll = nig_nll(mus, vs, alphas, betas, targets_all).item()
@@ -388,19 +392,19 @@ class NormalInvGamma(nn.Module):
     @staticmethod
     def evidence(x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
         """
-        Computes evidence using softplus activation.
+        Compute evidence via softplus activation.
 
         Parameters
         ----------
         x : torch.Tensor
             Input tensor.
         eps : float, optional
-            Small epsilon to ensure numerical stability, by default 1e-2.
+            Small epsilon for numerical stability. Default is 1e-2.
 
         Returns
         -------
         torch.Tensor
-            Transformed evidence.
+            Transformed evidence tensor.
         """
         return F.softplus(x) + eps
 
@@ -449,19 +453,19 @@ class Dirichlet(nn.Module):
     @staticmethod
     def evidence(x: torch.Tensor, eps: float = 1e-2) -> torch.Tensor:
         """
-        Computes evidence using softplus activation.
+        Compute evidence via softplus activation.
 
         Parameters
         ----------
         x : torch.Tensor
             Input tensor.
         eps : float, optional
-            Small epsilon to ensure numerical stability, by default 1e-2.
+            Small epsilon for numerical stability. Default is 1e-2.
 
         Returns
         -------
         torch.Tensor
-            Transformed evidence.
+            Transformed evidence tensor.
         """
         return F.softplus(x) + eps
 
@@ -486,13 +490,13 @@ class Dirichlet(nn.Module):
 
 class EvidentialDNN(PNN):
     """
-    Evidential Deep Neural Network (DNN) for regression and classification.
+    Evidential Deep Neural Network (DNN) for regression or classification.
 
     Parameters
     ----------
-    config : dict, optional
+    config : dict or None, optional
         Configuration dictionary.
-    logger : logging.Logger, optional
+    logger : logging.Logger or None, optional
         Logger instance.
     """
 
@@ -511,11 +515,11 @@ class EvidentialDNN(PNN):
 
         if self.task_type == "regression":
             self.output_layer = NormalInvGamma(
-                self.config["regressor_layers"][-1], self.output_dim
+                int(self.config["regressor_layers"][-1]), int(self.output_dim)
             )
         elif self.task_type == "classification":
             self.output_layer = Dirichlet(
-                self.config["regressor_layers"][-1], self.output_dim
+                int(self.config["regressor_layers"][-1]), int(self.output_dim)
             )
         else:
             raise ValueError(f"Unknown task_type: {self.task_type}")
@@ -530,13 +534,13 @@ class EvidentialDNN(PNN):
 
         Parameters
         ----------
-        inputs : Tuple[torch.Tensor, torch.Tensor]
-            Tuple containing protein and chemical input tensors.
+        inputs : tuple of torch.Tensor
+            (protein_input, chemical_input).
 
         Returns
         -------
         Tuple[torch.Tensor, ...]
-            Model output containing either Normal Inverse Gamma or Dirichlet parameters.
+            Model output containing NIG or Dirichlet parameters depending on task.
         """
         prot_input, chem_input = inputs
         chem_features = self.chem_feature_extractor(chem_input)
@@ -556,17 +560,17 @@ def run_evidential(
         config: Optional[dict] = None,
 ) -> Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]:
     """
-    Trains and evaluates an Evidential Deep Neural Network.
+    Train and evaluate an Evidential DNN.
 
     Parameters
     ----------
-    config : dict, optional
-        Configuration dictionary, by default None.
+    config : dict or None, optional
+        Training configuration. Default is None.
 
     Returns
     -------
     Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]
-        The trained model, recalibration model, evaluation metrics, and plots.
+        (model, recalibration_model, metrics, plots).
     """
     device = DEVICE
     best_model, config, _, _ = train_model_e2e(
@@ -627,17 +631,17 @@ def run_evidential(
 
 def run_evidential_wrapper(**kwargs):
     """
-    Wrapper function for running Evidential Deep Learning.
+    Wrapper for running Evidential Deep Learning.
 
     Parameters
     ----------
-    kwargs : dict
+    **kwargs
         Additional configuration parameters.
 
     Returns
     -------
     Tuple[nn.Module, Optional[nn.Module], Optional[dict], Optional[dict]]
-        The trained model, recalibration model, evaluation metrics, and plots.
+        (model, recalibration_model, metrics, plots).
     """
     global LOGGER
     LOGGER = create_logger(name="evidential", file_level="debug", stream_level="info")
@@ -647,11 +651,11 @@ def run_evidential_wrapper(**kwargs):
 
 def run_evidential_hyperparam(**kwargs):
     """
-    Runs hyperparameter optimization for Evidential Deep Learning using Weights & Biases sweeps.
+    Run Weights & Biases hyperparameter sweeps for Evidential Deep Learning.
 
     Parameters
     ----------
-    kwargs: dict
+    **kwargs
         Hyperparameter configuration options.
     """
     global LOGGER
