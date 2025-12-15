@@ -16,6 +16,8 @@ uqdd/logs/
 old_code/
 uqdd/config/old/
 .idea/
+.idea.bak/
+backup/
 
 # User-specific stuff
 .idea/**/workspace.xml
