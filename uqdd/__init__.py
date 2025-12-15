@@ -1,8 +1,39 @@
-"""UQDD package initialization.
+"""
+UQDD: Uncertainty Quantification Drug Discovery
 
-Provides global constants, paths, and configuration defaults used across the
-library. Importing this package should be lightweight and avoid heavy side
-effects. Logging is used instead of printing.
+The UQDD package provides tools for building, training, and assessing hybrid
+models in drug discovery with a focus on uncertainty quantification. It
+organizes functionality into clear modules that cover data ingestion and
+preprocessing, model definition and training utilities, metrics and statistical
+analysis, and core utilities shared across the codebase.
+
+Overview
+--------
+- Data Processing (``uqdd.data``)
+  Tools for dataset preparation (e.g., Papyrus), splitting, and reproducible
+  data pipelines, including helper scripts for preparing examples.
+
+- Models (``uqdd.models``)
+  Implementations of model architectures (e.g., evidential, MC Dropout,
+  ensembles, PNN) and training utilities, plus loss functions and parsers.
+
+- Metrics (``uqdd.metrics``)
+  Modules for metrics computation, statistical significance testing, and model
+  reassessment to evaluate predictive performance and uncertainty behavior.
+
+- Core Utilities (``uqdd.utils``)
+  Shared helpers for chemistry/protein processing and general utilities used
+  across the package.
+
+Configuration and Logging
+-------------------------
+- Configuration files (``uqdd/config``) store experiment and model settings.
+- Logging to ``uqdd/logs`` is used instead of printing for traceability.
+- The global device (CPU/CUDA) is determined on import to support downstream
+  computations.
+
+This module also defines common paths, dates, and global constants used across
+UQDD. See the API reference for per-module documentation and examples.
 """
 
 import os
@@ -11,7 +42,7 @@ from pathlib import Path
 import logging
 
 import torch
-import wandb
+# import wandb  # Uncomment if/when wandb is used directly in this module
 
 # Avoid hard side effects when importing; keep env var as it affects CUDA debugging
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"

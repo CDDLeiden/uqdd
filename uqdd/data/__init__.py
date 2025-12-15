@@ -1,11 +1,29 @@
-"""Data subpackage for UQDD.
+"""Data subpackage for UQDD
 
-This package contains dataset loaders, preparation scripts, and helper utilities
-for working with Papyrus and related data sources.
+The ``uqdd.data`` subpackage provides dataset loaders, preparation scripts,
+and helper utilities for reproducible data workflows with Papyrus and related
+sources. It centralizes data I/O, preprocessing, and dataset management.
 
-Public API:
-- data_papyrus: Dataset handling for Papyrus
-- utils_data: Common helpers for data I/O and preprocessing
+Modules
+-------
+- ``data_papyrus``: Dataset handling utilities tailored to the Papyrus dataset
+    (loading, filtering, and standardization), plus example preparation scripts.
+- ``utils_data``: Common helpers for data I/O, preprocessing, splitting, and
+    misc utilities used by datasets and training.
+
+Public API
+----------
+The most commonly used entry points are re-exported for convenience:
+- ``data_papyrus``
+- ``utils_data``
+
+Usage Notes
+-----------
+- Configuration: Refer to ``uqdd/config`` for dataset-specific settings.
+- Reproducibility: Prefer functions that take seeds and emit logs under
+    ``uqdd/logs`` to ensure traceability of data preparation.
+- Paths: Use the global paths defined in ``uqdd.__init__`` (e.g., DATA_DIR,
+    DATASET_DIR) to keep file operations consistent across the project.
 """
 
 # Re-export commonly used modules/functions for convenience
@@ -16,4 +34,3 @@ __all__ = [
     "data_papyrus",
     "utils_data",
 ]
-
