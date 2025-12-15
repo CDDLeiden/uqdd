@@ -77,7 +77,6 @@ plugins:
             members: true
             inherited_members: true
             members_order: source
-            show_variables: false
             # Signatures
             separate_signature: true
             show_signature: true
