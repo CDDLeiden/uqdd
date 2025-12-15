@@ -1,3 +1,10 @@
+"""
+Training utilities for models.
+
+This module provides functions for training, evaluating, and predicting with neural network models,
+including support for evidential regression and uncertainty quantification.
+"""
+
 import logging
 from pathlib import Path
 from typing import (
@@ -52,17 +59,17 @@ def evidential_processing(
         outputs: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Processes the outputs of an evidential regression model to compute aleatoric and epistemic uncertainty.
+    Process outputs of an evidential regression model to compute aleatoric and epistemic uncertainty.
 
-    Parameters:
-    -----------
-    outputs : Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-        Model outputs consisting of mu (mean), v (precision), alpha, and beta parameters.
+    Parameters
+    ----------
+    outputs : tuple of torch.Tensor
+        Model outputs consisting of ``(mu, v, alpha, beta)``.
 
-    Returns:
-    --------
-    Tuple[torch.Tensor, torch.Tensor]
-        Aleatoric and epistemic uncertainty estimates.
+    Returns
+    -------
+    (torch.Tensor, torch.Tensor)
+        Aleatoric (beta/(alpha-1)) and epistemic (sqrt(beta/(v*(alpha-1)))) uncertainty.
     """
     mu, v, alpha, beta = outputs
     alea_vars = beta / (alpha - 1)  # aleatoric
@@ -77,23 +84,23 @@ def model_forward(
         lossfname: str = "evidential_regression",
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Tuple]:
     """
-    Performs a forward pass through the model and processes outputs for different loss functions.
+    Perform a forward pass and prepare arguments for the specified loss function.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The neural network model.
-    inputs : Tuple[torch.Tensor, ...]
-        Input data as a tuple of tensors.
+        Neural network model.
+    inputs : tuple of torch.Tensor
+        Input tensors (single or multi-input).
     targets : torch.Tensor
-        Target values.
+        Target values tensor.
     lossfname : str, optional
-        The loss function name ("evidential_regression", "gaussnll", etc.), by default "evidential_regression".
+        Loss function name ("evidential_regression", "gaussnll", etc.). Default is ``"evidential_regression"``.
 
-    Returns:
-    --------
-    Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Tuple]
-        Model outputs, aleatoric uncertainty, epistemic uncertainty, and loss function arguments.
+    Returns
+    -------
+    tuple
+        ``(outputs, alea_vars or None, epi_vars or None, loss_args)`` ready for loss computation.
     """
     if lossfname.lower() == "evidential_regression":
         outputs = model(inputs)
@@ -123,35 +130,35 @@ def train(
         subset: str = "train",
 ) -> ndarray[Any, dtype[Any]] | float | Any:
     """
-    Trains the model for one epoch.
+    Train the model for one epoch.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The neural network model.
+        Neural network model.
     dataloader : torch.utils.data.DataLoader
-        DataLoader providing batches of training data.
-    loss_fn : Callable
-        The loss function.
+        DataLoader for training data.
+    loss_fn : callable
+        Loss function.
     optimizer : torch.optim.Optimizer
-        The optimizer for updating model parameters.
+        Optimizer for updating model parameters.
     device : torch.device, optional
-        The device on which to train the model, by default DEVICE.
+        Device for training. Default is ``DEVICE``.
     epoch : int, optional
-        The current training epoch, by default 0.
-    max_norm : Optional[float], optional
-        Gradient clipping norm, by default None.
+        Current training epoch. Default is ``0``.
+    max_norm : float or None, optional
+        Gradient clipping norm. Default is ``None``.
     lossfname : str, optional
-        Loss function name, by default "evidential_regression".
+        Loss function name. Default is ``"evidential_regression"``.
     tracker : str, optional
-        Tracking tool for logging, e.g., "wandb" or "tensor", by default "wandb".
+        Tracking tool for logging ("wandb" or "tensor"). Default is ``"wandb"``.
     subset : str, optional
-        Subset name (e.g., "train"), by default "train".
+        Subset name (e.g., "train"). Default is ``"train"``.
 
-    Returns:
-    --------
-    float
-        Average loss for the epoch.
+    Returns
+    -------
+    float or numpy.ndarray
+        Average epoch loss (float). If tracker is "tensor", returns a numpy array of tracked values.
     """
     model.train()
     total_loss = 0.0
@@ -159,7 +166,6 @@ def train(
     outputs_all = []
     vars_all = []
     epis_all = []
-    # size = len(dataloader.dataset)
     num_batches = len(dataloader)
 
     for inputs, targets in dataloader:
@@ -190,7 +196,6 @@ def train(
     targets_all = torch.cat(targets_all, dim=0)
     outputs_all = torch.cat(outputs_all, dim=0)
 
-    # Calculate metrics
     train_rmse, train_r2, train_evs = calc_regr_metrics(targets_all, outputs_all)
     pnorm = compute_pnorm(model)
     gnorm = compute_gnorm(model)
@@ -237,10 +242,7 @@ def train(
             epis_mean, epis_var = calc_alea_epi_mean_var_notnan(epis_all, targets_all)
             vals.extend([epis_mean.item(), epis_var.item()])
 
-        tracked_vals = np.array(
-            vals,
-            dtype=np.float32,
-        )  # pnorm, gnorm
+        tracked_vals = np.array(vals, dtype=np.float32)
         return tracked_vals
 
     return total_loss
@@ -258,33 +260,33 @@ def evaluate(
         tracker: str = "wandb",
 ) -> ndarray[Any, dtype[np.generic | Any]] | ndarray[Any, dtype[Any]] | float | Any:
     """
-    Evaluates the model on the validation or test dataset.
+    Evaluate the model on validation or test data.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The neural network model.
+        Neural network model.
     dataloader : torch.utils.data.DataLoader
-        DataLoader providing validation/test data.
-    loss_fn : Callable
-        The loss function.
+        DataLoader for evaluation data.
+    loss_fn : callable
+        Loss function.
     device : torch.device, optional
-        The device on which to evaluate the model, by default DEVICE.
+        Device for evaluation. Default is ``DEVICE``.
     metrics_per_task : bool, optional
-        Whether to compute metrics per task (for multitask learning), by default False.
+        Compute metrics per task in multitask mode. Default is ``False``.
     subset : str, optional
-        Subset name (e.g., "val" or "test"), by default "val".
-    epoch : Optional[int], optional
-        The current evaluation epoch, by default 0.
+        Subset name ("val" or "test"). Default is ``"val"``.
+    epoch : int, optional
+        Current evaluation epoch. Default is ``0``.
     lossfname : str, optional
-        Loss function name, by default "evidential_regression".
+        Loss function name. Default is ``"evidential_regression"``.
     tracker : str, optional
-        Tracking tool for logging, e.g., "wandb" or "tensor", by default "wandb".
+        Tracking tool ("wandb" or "tensor"). Default is ``"wandb"``.
 
-    Returns:
-    --------
-    float
-        Average loss for the evaluation.
+    Returns
+    -------
+    float or numpy.ndarray
+        Average evaluation loss (float). If tracker is "tensor", returns a numpy array of tracked values.
     """
     model.eval()
     total_loss = 0.0
@@ -307,22 +309,20 @@ def evaluate(
             vars_all.append(alea_vars.detach())
             epis_all.append(epi_vars.detach()) if epi_vars is not None else None
 
-            total_loss += loss.item()  # * outputs.size(0)
+            total_loss += loss.item()
 
             outputs = (
                 outputs[0] if lossfname.lower() == "evidential_regression" else outputs
-            )  # Because it gets 4 outputs
+            )
             outputs_all.append(outputs)
             targets_all.append(targets)
 
-        total_loss /= num_batches  # len(dataloader.dataset)
+        total_loss /= num_batches
         targets_all = torch.cat(targets_all, dim=0)
         outputs_all = torch.cat(outputs_all, dim=0)
 
-        # Calculate metrics
         rmse, r2, evs = calc_regr_metrics(targets_all, outputs_all)
 
-        # Aleatoric Uncertainty
         vars_all = torch.cat(vars_all, dim=0)
         vars_mean, vars_var = calc_alea_epi_mean_var_notnan(vars_all, targets_all)
 
@@ -344,10 +344,7 @@ def evaluate(
                 data[f"{subset}/epis_mean"] = epis_mean.item()
                 data[f"{subset}/epis_var"] = epis_var.item()
 
-            wandb.log(
-                data=data,
-                step=epoch,
-            )
+            wandb.log(data=data, step=epoch)
 
         elif tracker.lower() == "tensor":
             vals = [epoch, total_loss, rmse, r2, evs, vars_mean.item(), vars_var.item()]
@@ -363,12 +360,8 @@ def evaluate(
                     epis_all, targets_all
                 )
                 vals.extend([epis_mean.item(), epis_var.item()])
-            tracked_vals = np.array(
-                vals,
-                dtype=np.float32,
-            )
+            tracked_vals = np.array(vals, dtype=np.float32)
 
-        # Calculate metrics
         if metrics_per_task:
             tasks_rmse, tasks_r2, tasks_evs = calc_regr_metrics(
                 targets_all, outputs_all, metrics_per_task
@@ -389,10 +382,7 @@ def evaluate(
                         [tasks_rmse[task_idx], tasks_r2[task_idx], tasks_evs[task_idx]],
                     )
     if tracker.lower() == "tensor":
-        tracked_vals = np.array(
-            tracked_vals,
-            dtype=np.float32,
-        )
+        tracked_vals = np.array(tracked_vals, dtype=np.float32)
         return tracked_vals
 
     return total_loss
@@ -405,22 +395,22 @@ def predict(
         set_on_eval: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Performs predictions using the trained model.
+    Perform predictions using a trained model.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The trained model.
+        Trained model.
     dataloader : torch.utils.data.DataLoader
-        DataLoader providing test data.
-    device : torch.device, optional
-        The device on which to perform inference, by default DEVICE.
+        DataLoader for inference data.
+    device : torch.device or str, optional
+        Device for inference. Default is ``DEVICE``.
     set_on_eval : bool, optional
-        Whether to set the model to evaluation mode, by default True.
+        Whether to set the model to evaluation mode. Default is ``True``.
 
-    Returns:
-    --------
-    Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    Returns
+    -------
+    (torch.Tensor, torch.Tensor, torch.Tensor)
         Predicted values, ground truth labels, and estimated uncertainties.
     """
     if set_on_eval:
@@ -430,9 +420,7 @@ def predict(
     vars_all = []
 
     with torch.no_grad():
-        for inputs, targets in tqdm(
-                dataloader, total=len(dataloader), desc="Predicting"
-        ):
+        for inputs, targets in tqdm(dataloader, total=len(dataloader), desc="Predicting"):
             inputs = tuple(x.to(device) for x in inputs)
             targets = targets.to(device)
 
@@ -465,11 +453,11 @@ def evaluate_predictions(
         nll: Optional[float] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
     """
-    Evaluates predictions, computes uncertainty metrics, and optionally logs results.
+    Evaluate predictions, compute UQ metrics, and optionally log results.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing model and dataset settings.
     preds : torch.Tensor
         Model predictions.
@@ -478,30 +466,32 @@ def evaluate_predictions(
     alea_vars : torch.Tensor
         Aleatoric uncertainty estimates.
     model_type : str, optional
-        Type of model (e.g., "ensemble", "pnn"), by default "ensemble".
-    logger : Optional[logging.Logger], optional
-        Logger instance for logging messages, by default None.
-    epi_vars : Optional[torch.Tensor], optional
-        Epistemic uncertainty estimates, by default None.
+        Model type (e.g., "ensemble", "pnn"). Default is ``"ensemble"``.
+    logger : logging.Logger or None, optional
+        Logger instance.
+    epi_vars : torch.Tensor or None, optional
+        Epistemic uncertainty estimates. Default is ``None``.
     wandb_push : bool, optional
-        Whether to log results to Weights & Biases, by default False.
-    run_name : Optional[str], optional
-        Name of the Weights & Biases run, by default None.
-    project_name : Optional[str], optional
-        Weights & Biases project name, by default None.
-    figpath : Optional[str], optional
-        Path to save generated figures, by default None.
+        Whether to log results to Weights & Biases. Default is ``False``.
+    run_name : str or None, optional
+        Weights & Biases run name.
+    project_name : str or None, optional
+        Weights & Biases project name.
+    figpath : str or Path or None, optional
+        Path to save generated figures. Default is ``None``.
     export_preds : bool, optional
-        Whether to export predictions as CSV, by default True.
+        Whether to export predictions as CSV. Default is ``True``.
     verbose : bool, optional
-        Whether to print additional information, by default True.
-    csv_path : Optional[str], optional
-        Path to save prediction CSV file, by default None.
+        Whether to print additional information. Default is ``True``.
+    csv_path : str or None, optional
+        Path to save prediction CSV file.
+    nll : float or None, optional
+        Negative log-likelihood value.
 
-    Returns:
-    --------
-    Tuple[Dict[str, Any], Dict[str, Any], Any]
-        Dictionary of metrics, dictionary of plots, and the metrics logger object.
+    Returns
+    -------
+    tuple
+        ``(metrics_dict, plots_dict, metrics_logger)``.
     """
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
@@ -522,36 +512,32 @@ def evaluate_predictions(
         csv_path=csv_path,
     )
 
-    # preds, labels = predict(model, dataloaders["test"], return_targets=True)
     y_true, y_pred, y_err, y_alea, y_eps = process_preds(
         preds, labels, alea_vars, epi_vars, None, model_type
     )
     _ = create_df_preds(
         y_true,
         y_pred,
-        y_alea,  # y_std,
+        y_alea,
         y_err,
-        y_eps,  # y_alea,
+        y_eps,
         export_preds,
         data_specific_path,
         model_name,
         logger,
     )
-    # * calculate metrics for all the datapoints * #
     task_name = f"All {n_targets} Targets" if n_targets > 1 else "PCM"
     metrics, plots = uct_metrics_logger(
         y_pred=y_pred,
         y_std=y_alea,
         y_true=y_true,
         y_err=y_err,
-        # y_alea=y_alea,
         y_eps=y_eps,
         task_name=task_name,
         figpath=figpath,
         nll=nll,
     )
 
-    # getting calibration props
     props_df = get_calib_props(
         y_pred=y_pred,
         y_std=y_alea,
@@ -561,13 +547,11 @@ def evaluate_predictions(
         output_folder=figpath,
     )
 
-    # * calculate metrics for a subset of the datapoints * #
     submetrics, subplots = uct_metrics_logger(
         y_pred=y_pred,
         y_std=y_alea,
         y_true=y_true,
         y_err=y_err,
-        # y_alea=y_alea,
         y_eps=y_eps,
         task_name=task_name + "_subset_100",
         n_subset=100,
@@ -586,7 +570,6 @@ def evaluate_predictions(
                 y_std=y_alea,
                 y_true=y_true,
                 y_err=y_err,
-                # y_alea=y_alea,
                 y_eps=y_eps,
                 task_name=task_name,
                 figpath=figpath,
@@ -599,14 +582,12 @@ def evaluate_predictions(
                 y_std=y_alea,
                 y_true=y_true,
                 y_err=y_err,
-                # y_alea=y_alea,
                 y_eps=y_eps,
                 task_name=task_name + "_subset_100",
                 n_subset=100,
                 figpath=figpath,
             )
 
-    # * log the metrics and plots to wandb * #
     if wandb_push:
         uct_metrics_logger.wandb_log()
 
@@ -624,30 +605,30 @@ def initial_evaluation(
         tracker: str = "wandb",
 ) -> Tuple[float, float]:
     """
-    Performs an initial evaluation of the model on training and validation sets.
+    Perform an initial evaluation on train and validation sets.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The model to be evaluated.
+        Model to evaluate.
     train_loader : torch.utils.data.DataLoader
         DataLoader for training data.
     val_loader : torch.utils.data.DataLoader
         DataLoader for validation data.
-    loss_fn : Callable
+    loss_fn : callable
         Loss function used for evaluation.
     device : torch.device, optional
-        Device to run the model on, by default DEVICE.
+        Device to run the model on. Default is ``DEVICE``.
     epoch : int, optional
-        Current epoch number, by default 0.
+        Current epoch number. Default is ``0``.
     lossfname : str, optional
-        Loss function name, by default "".
+        Loss function name. Default is ``""``.
     tracker : str, optional
-        Tracker for logging results, by default "wandb".
+        Tracker for logging results. Default is ``"wandb"``.
 
-    Returns:
-    --------
-    Tuple[float, float]
+    Returns
+    -------
+    (float, float)
         Training loss and validation loss.
     """
     val_loss = evaluate(
@@ -689,41 +670,39 @@ def run_one_epoch(
         tracker: str = "wandb",
 ) -> Tuple[int, float, float]:
     """
-    Executes one training epoch including evaluation and learning rate scheduling.
+    Execute one training epoch, including evaluation and LR scheduling.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The model to be trained and evaluated.
+        Model to be trained and evaluated.
     train_loader : torch.utils.data.DataLoader
-        DataLoader for training data.
+        DataLoader for training.
     val_loader : torch.utils.data.DataLoader
-        DataLoader for validation data.
-    loss_fn : Callable
+        DataLoader for validation.
+    loss_fn : callable
         Loss function used for training and evaluation.
     optimizer : torch.optim.Optimizer
-        Optimizer for updating model parameters.
-    lr_scheduler : Optional[torch.optim.lr_scheduler._LRScheduler]
+        Optimizer for parameter updates.
+    lr_scheduler : torch.optim.lr_scheduler._LRScheduler or None, optional
         Learning rate scheduler.
     epoch : int, optional
-        Current epoch number, by default 0.
+        Current epoch number. Default is ``0``.
     device : torch.device, optional
-        Device to run the model on, by default DEVICE.
-    max_norm : Optional[float], optional
-        Maximum norm value for gradient clipping, by default None.
+        Device to run the model on. Default is ``DEVICE``.
+    max_norm : float or None, optional
+        Maximum norm for gradient clipping. Default is ``None``.
     lossfname : str, optional
-        Loss function name, by default "".
+        Loss function name. Default is ``""``.
     tracker : str, optional
-        Tracker to log results, by default "wandb".
+        Tracker for logging. Default is ``"wandb"``.
 
-    Returns:
-    --------
-    Tuple[int, float, float]
-        The epoch number, training loss, and validation loss.
+    Returns
+    -------
+    (int, float, float)
+        Epoch number, training loss, and validation loss.
     """
-    # pbar = None
     if epoch == 0:
-        # TODO fix values returned to accomodate the array from tensor tracker.
         train_loss, val_loss = initial_evaluation(
             model, train_loader, val_loader, loss_fn, device, epoch, lossfname, tracker
         )
@@ -753,10 +732,7 @@ def run_one_epoch(
         )
 
         if lr_scheduler is not None:
-            # check if val_loss in np array or not
             vloss = val_loss if not isinstance(val_loss, np.ndarray) else val_loss[1]
-            # v = val_loss if not isinstance(val_loss, )
-            # Update the learning rate
             lr_scheduler.step(vloss)
 
     return epoch, train_loss, val_loss
@@ -775,43 +751,41 @@ def train_model(
         tracker: str = "wandb",
 ) -> Tuple[torch.nn.Module, Callable, np.ndarray]:
     """
-    Trains the model with the specified configuration.
+    Train a model with the specified configuration.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The model to be trained.
-    config : Dict[str, Any]
+        Model to be trained.
+    config : dict
         Configuration dictionary containing hyperparameters.
     train_loader : torch.utils.data.DataLoader
         DataLoader for training data.
     val_loader : torch.utils.data.DataLoader
         DataLoader for validation data.
     n_targets : int, optional
-        Number of targets for multitask learning, by default -1.
+        Number of targets for multitask learning. Default is ``-1``.
     seed : int, optional
-        Random seed for reproducibility, by default 42.
+        Random seed for reproducibility. Default is ``42``.
     device : torch.device, optional
-        Device to run the model on, by default DEVICE.
-    logger : Optional[logging.Logger], optional
-        Logger instance for logging messages, by default None.
-    max_norm : Optional[float], optional
-        Maximum norm for gradient clipping, by default None.
+        Device to run the model on. Default is ``DEVICE``.
+    logger : logging.Logger or None, optional
+        Logger instance. Default is ``None``.
+    max_norm : float or None, optional
+        Maximum norm for gradient clipping. Default is ``None``.
     tracker : str, optional
-        Tracker for logging, by default "wandb".
+        Tracker for logging. Default is ``"wandb"``.
 
-    Returns:
-    --------
-    Tuple[torch.nn.Module, Callable, np.ndarray]
-        Trained model, loss function, and recorded metrics.
+    Returns
+    -------
+    (torch.nn.Module, callable, numpy.ndarray)
+        Trained model, loss function, and recorded training statistics.
     """
     try:
         set_seed(seed)
         multitask = n_targets > 1
 
         model = model.to(device)
-        # best_model = model
-        # best_model_params = model.state_dict()
         best_val_loss = float("inf")
         early_stop_counter = 0
         early_stop_criteria = int(config.get("early_stop", 10))
@@ -827,7 +801,6 @@ def train_model(
             reduction=config.get("loss_reduction", "mean"),
             lamb=config.get("lamb", 1e-2),
             mt=multitask,
-            # logger=logger
         )
         lr_scheduler = build_lr_scheduler(
             optimizer,
@@ -836,22 +809,15 @@ def train_model(
             config.get("lr_scheduler_factor", None),
         )
 
-        # start empty np array
-        # results_arr = np.array([], dtype=np.float32)
         results_arr = []
-        # "none", "mean", "sum"
-        # get a random number to add to the name of the best modelfor checkpointing
         random_num = np.random.randint(0, 10000000000)
 
-        # create ckpting path here
-        i = 0
         for epoch in tqdm(range(config.get("epochs", 10)), desc="Epochs"):
-            # for epoch in range(config.epochs + 1):
             try:
                 lossfname = config.get("loss", "mse")
                 (
                     epoch,
-                    train_loss,  # this can be an array if tracker is tensor
+                    train_loss,
                     val_loss,
                 ) = run_one_epoch(
                     model,
@@ -866,9 +832,7 @@ def train_model(
                     lossfname=lossfname,
                     tracker=tracker,
                 )
-                vloss = (
-                    val_loss if not isinstance(val_loss, np.ndarray) else val_loss[1]
-                )
+                vloss = val_loss if not isinstance(val_loss, np.ndarray) else val_loss[1]
                 if vloss < best_val_loss:
                     best_val_loss = vloss
                     early_stop_counter = 0
@@ -880,8 +844,6 @@ def train_model(
                         break
                 if tracker.lower() == "tensor":
                     results_arr.append(np.append(train_loss, val_loss[1:]))
-                    # results_tensor.append(train_loss)
-                    # results_tensor.append(val_loss[1:])
 
             except Exception as e:
                 raise RuntimeError(
@@ -890,7 +852,6 @@ def train_model(
 
         best_model = load_ckpt(model, config)
         if tracker.lower() == "tensor":
-            # stack all the list of arrays on dim 1
             results_arr = np.stack(results_arr, axis=0)
 
         return best_model, loss_fn, results_arr
@@ -908,37 +869,35 @@ def run_model(
         tracker: str = "wandb",
 ) -> Tuple[torch.nn.Module, float, np.ndarray]:
     """
-    Runs the full training and evaluation cycle.
+    Run the full training and evaluation cycle.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing hyperparameters.
     model : torch.nn.Module
         Model to train and evaluate.
-    dataloaders : Dict[str, torch.utils.data.DataLoader]
-        Dictionary of dataloaders for train, validation, and test sets.
+    dataloaders : dict of str -> torch.utils.data.DataLoader
+        Dataloaders for train, validation, and test sets.
     device : torch.device, optional
-        Device to run the model on, by default DEVICE.
-    logger : Optional[logging.Logger], optional
-        Logger instance, by default None.
-    max_norm : Optional[float], optional
-        Maximum norm for gradient clipping, by default None.
+        Device to run the model on. Default is ``DEVICE``.
+    logger : logging.Logger or None, optional
+        Logger instance. Default is ``None``.
+    max_norm : float or None, optional
+        Maximum norm for gradient clipping. Default is ``None``.
     tracker : str, optional
-        Tracker for logging, by default "wandb".
+        Tracker for logging. Default is ``"wandb"``.
 
-    Returns:
-    --------
-    Tuple[torch.nn.Module, float, np.ndarray]
+    Returns
+    -------
+    (torch.nn.Module, float, numpy.ndarray)
         Best trained model, test loss, and recorded training statistics.
     """
     if logger is None:
         logger = create_logger("run_model")
     seed = config.get("seed", 42)
     n_targets = config.get("n_targets", -1)
-    # aleatoric = config.get("aleatoric", False)
     mt = n_targets > 1
-    # Train the model
     best_model, loss_fn, results_arr = train_model(
         model,
         config,
@@ -952,8 +911,6 @@ def run_model(
         tracker=tracker,
     )
 
-    # Testing metrics on the best model
-    # TODO I think this might need another look when the tracker is not wandb but tensor
     test_loss = evaluate(
         best_model,
         dataloaders["test"],
@@ -971,17 +928,17 @@ def run_model(
 
 def assign_wandb_tags(run: Any, config: Dict[str, Any]) -> Any:
     """
-    Assigns metadata tags to a Weights & Biases (wandb) run.
+    Assign metadata tags to a Weights & Biases run.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     run : Any
-        The Weights & Biases run object.
-    config : Dict[str, Any]
+        Weights & Biases run object.
+    config : dict
         Configuration dictionary.
 
-    Returns:
-    --------
+    Returns
+    -------
     Any
         Updated wandb run object with assigned tags.
     """
@@ -1004,7 +961,6 @@ def assign_wandb_tags(run: Any, config: Dict[str, Any]) -> Any:
         config.get("tags", None),
         f"ev_lamb={config.get('lamb', None)}",
     ]
-    # filter out None values
     wandb_tags = [tag for tag in wandb_tags if tag]
     run.tags += tuple(wandb_tags)
     return run
@@ -1016,21 +972,21 @@ def get_dataloader(
         logger: Optional[logging.Logger] = None,
 ) -> Dict[str, torch.utils.data.DataLoader]:
     """
-    Creates dataloaders for training, validation, and testing.
+    Create dataloaders for training, validation, and testing.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing dataset parameters.
-    device : torch.device, optional
-        Device to load the dataset on, by default DEVICE.
-    logger : Optional[logging.Logger], optional
-        Logger instance, by default None.
+    device : torch.device or str, optional
+        Device to load the dataset on. Default is ``DEVICE``.
+    logger : logging.Logger or None, optional
+        Logger instance.
 
-    Returns:
-    --------
-    Dict[str, torch.utils.data.DataLoader]
-        Dictionary containing train, validation, and test dataloaders.
+    Returns
+    -------
+    dict of str -> torch.utils.data.DataLoader
+        Train, validation, and test dataloaders.
     """
     data_name = config.get("data_name", "papyrus")
     activity_type = config.get("activity_type", "xc50")
@@ -1076,33 +1032,32 @@ def post_training_save_model(
         write_model: bool = True,
 ) -> str:
     """
-    Saves the trained model and its configuration.
+    Save the trained model and configuration.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : torch.nn.Module
-        The trained model.
-    config : Dict[str, Any]
+        Trained model.
+    config : dict
         Configuration dictionary.
     model_type : str, optional
-        Type of the model, by default "pnn".
+        Type of the model. Default is ``"pnn"``.
     onnx : bool, optional
-        Whether to save the model in ONNX format, by default True.
+        Whether to save the model in ONNX format. Default is ``True``.
     tracker : str, optional
-        Tracker to log model information, by default "wandb".
-    run : Optional[Any], optional
-        Wandb run instance, by default None.
-    logger : Optional[logging.Logger], optional
-        Logger instance, by default None.
+        Tracker to log model information. Default is ``"wandb"``.
+    run : Any or None, optional
+        Wandb run instance.
+    logger : logging.Logger or None, optional
+        Logger instance.
     write_model : bool, optional
-        Whether to save the model file, by default True.
+        Whether to save the model file. Default is ``True``.
 
-    Returns:
-    --------
+    Returns
+    -------
     str
         Name of the saved model.
     """
-
     config["model_type"] = model_type
     model_name = get_model_name(config, run=run)
     data_specific_path = get_data_specific_path(config, logger=logger)
@@ -1131,18 +1086,18 @@ def get_tracker(
         config: Optional[Dict[str, Any]], tracker: str = "wandb"
 ) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
     """
-    Initializes and retrieves a tracking instance.
+    Initialize and retrieve a tracking instance.
 
-    Parameters:
-    -----------
-    config : Optional[Dict[str, Any]]
-        Configuration dictionary, if applicable.
+    Parameters
+    ----------
+    config : dict or None
+        Configuration dictionary.
     tracker : str, optional
-        Tracker type ("wandb" or other), by default "wandb".
+        Tracker type ("wandb" or other). Default is ``"wandb"``.
 
-    Returns:
-    --------
-    Tuple[Optional[Any], Optional[Dict[str, Any]]]
+    Returns
+    -------
+    (Any or None, dict or None)
         Tracking run instance and updated config.
     """
     if tracker.lower() == "wandb":
@@ -1177,33 +1132,33 @@ def train_model_e2e(
         write_model: bool = True,
 ) -> Tuple[torch.nn.Module, Dict[str, Any], np.ndarray, float]:
     """
-    Trains a model end-to-end, including dataset preparation, training, and evaluation.
+    Train a model end-to-end: dataset prep, training, and evaluation.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing training parameters.
-    model : Type[torch.nn.Module]
-        Model class to be instantiated and trained.
+    model : type of torch.nn.Module
+        Model class to instantiate and train.
     model_type : str, optional
-        Type of the model, by default "pnn".
-    model_kwargs : Optional[Dict[str, Any]], optional
-        Additional keyword arguments for model initialization, by default None.
-    logger : Optional[logging.Logger], optional
-        Logger instance, by default None.
+        Type of the model. Default is ``"pnn"``.
+    model_kwargs : dict or None, optional
+        Additional keyword arguments for model initialization.
+    logger : logging.Logger or None, optional
+        Logger instance.
     seed : int, optional
-        Random seed for reproducibility, by default 42.
+        Random seed for reproducibility. Default is ``42``.
     device : torch.device, optional
-        Device for training, by default DEVICE.
+        Device for training. Default is ``DEVICE``.
     tracker : str, optional
-        Tracker for logging progress, by default "wandb".
+        Tracker for logging progress. Default is ``"wandb"``.
     write_model : bool, optional
-        Whether to save the trained model, by default True.
+        Whether to save the trained model. Default is ``True``.
 
-    Returns:
-    --------
-    Tuple[torch.nn.Module, Dict[str, Any], np.ndarray, float]
-        Trained model, updated config, recorded training statistics, and test loss.
+    Returns
+    -------
+    (torch.nn.Module, dict, numpy.ndarray, float)
+        Trained model, updated config, training statistics, and test loss.
     """
     if model_kwargs is None:
         model_kwargs = {}
@@ -1215,7 +1170,7 @@ def train_model_e2e(
     descriptor_chemical = config.get("descriptor_chemical", None)
     split_type = config.get("split_type", "random")
     max_norm = config.get("max_norm", None)
-    seed = config.get("seed", seed)  # it has to be in that order here
+    seed = config.get("seed", seed)
 
     set_seed(seed)
     assert split_type in [
@@ -1229,14 +1184,12 @@ def train_model_e2e(
     config["MT"] = mt
     if mt and descriptor_protein:
         logger.warning(
-            "For multitask learning, only chemical descriptors will be used."
-            "Setting descriptor_protein to None"
+            "For multitask learning, only chemical descriptors will be used. Setting descriptor_protein to None"
         )
         descriptor_protein = None
     if mt and split_type == "time":
         logger.warning(
-            "For multitask learning, only random or scaffold split will be used."
-            f"Setting split_type={split_type} to random"
+            "For multitask learning, only random or scaffold split will be used. Setting split_type to random"
         )
         config["split_type"] = "random"
 
@@ -1284,34 +1237,34 @@ def recalibrate_model(
         nll: Optional[float] = None,
 ) -> Any:
     """
-    Recalibrates uncertainty estimates using validation and test predictions.
+    Recalibrate uncertainty estimates using validation and test predictions.
 
     Parameters
     ----------
-    preds_val : Union[np.ndarray, torch.Tensor, List[float]]
+    preds_val : array-like
         Predictions on the validation set.
-    labels_val : Union[np.ndarray, torch.Tensor, List[float]]
+    labels_val : array-like
         True labels for the validation set.
-    alea_vars_val : Union[np.ndarray, torch.Tensor, List[float]]
+    alea_vars_val : array-like
         Aleatoric uncertainties for validation predictions.
-    preds_test : Union[np.ndarray, torch.Tensor, List[float]]
+    preds_test : array-like
         Predictions on the test set.
-    labels_test : Union[np.ndarray, torch.Tensor, List[float]]
+    labels_test : array-like
         True labels for the test set.
-    alea_vars_test : Union[np.ndarray, torch.Tensor, List[float]]
+    alea_vars_test : array-like
         Aleatoric uncertainties for test predictions.
-    config : Dict[str, Any]
+    config : dict
         Configuration dictionary containing model and dataset settings.
-    epi_val : Optional[Union[np.ndarray, torch.Tensor, List[float]]], optional
-        Epistemic uncertainties for validation predictions, by default None.
-    epi_test : Optional[Union[np.ndarray, torch.Tensor, List[float]]], optional
-        Epistemic uncertainties for test predictions, by default None.
-    uct_logger : Optional[Any], optional
-        Logger for uncertainty quantification metrics, by default None.
-    figpath : Optional[Union[str, Path]], optional
-        Path to save calibration plots, by default None.
-    nll : Optional[float], optional
-        Negative log-likelihood value, by default None.
+    epi_val : array-like or None, optional
+        Epistemic uncertainties for validation predictions.
+    epi_test : array-like or None, optional
+        Epistemic uncertainties for test predictions.
+    uct_logger : Any or None, optional
+        Logger for uncertainty quantification metrics.
+    figpath : str or Path or None, optional
+        Path to save calibration plots.
+    nll : float or None, optional
+        Negative log-likelihood value.
 
     Returns
     -------
@@ -1323,7 +1276,6 @@ def recalibrate_model(
     model_type = config.get("model_type", None)
     figures_path = figpath or (FIGS_DIR / data_specific_path / model_name)
 
-    # Validation Set
     y_true_val, y_pred_val, y_err_val, y_alea_val, y_eps_val = process_preds(
         preds_val, labels_val, alea_vars_val, epi_vars=epi_val, model_type=model_type
     )
@@ -1335,7 +1287,7 @@ def recalibrate_model(
         model_type=model_type,
     )
 
-    iso_recal_model = recalibrate(  # , std_recal
+    iso_recal_model = recalibrate(
         y_true_val,
         y_pred_val,
         y_alea_val,

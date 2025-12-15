@@ -1,3 +1,10 @@
+"""
+Evidential Monte Carlo (EMC) utilities.
+
+This module provides helpers to run Monte Carlo dropout on evidential models,
+compute NLL, and orchestrate training/evaluation with recalibration.
+"""
+
 from typing import Tuple, Optional
 
 import torch
@@ -30,31 +37,26 @@ def emc_predict_params(
         device: torch.device = DEVICE,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     """
-    Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
-    While Averaging over the calculated means and uncertainties.
+    Perform Monte Carlo dropout sampling for an evidential model and average parameters.
 
     Parameters
     ----------
     ev_model : nn.Module
-        The evidential model with dropout layers.
+        Evidential model with dropout layers enabled during sampling.
     dataloader : torch.utils.data.DataLoader
         DataLoader for the dataset to be evaluated.
     num_mc_samples : int, optional
-        Number of Monte Carlo forward passes, by default 10.
+        Number of Monte Carlo forward passes. Default is 10.
     device : torch.device, optional
-        The device to run the model on, by default DEVICE.
+        Device for inference. Default is DEVICE.
 
     Returns
     -------
-    Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-        - mu
-        - v
-        - alpha
-        - beta
-        - Targets
+    tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+        (mu, v, alpha, beta, targets) averaged across MC samples.
     """
     mus, vs, alphas, betas = [], [], [], []
-    # targets = None
+    targets: Tensor | None = None
     for _ in range(num_mc_samples):
         ev_model.eval()
         enable_dropout(ev_model)
@@ -68,6 +70,8 @@ def emc_predict_params(
     mus, vs, alphas, betas = stack_vars(mus, vs, alphas, betas)
     mus, vs, alphas, betas = calculate_means(mus, vs, alphas, betas)
 
+    # targets is set during the last iteration above
+    assert targets is not None
     return mus, vs, alphas, betas, targets
 
     # alea_vars, epist_vars = ev_uncertainty(vs, alphas, betas)
@@ -82,27 +86,24 @@ def emc_predict(
         device: torch.device = DEVICE,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """
-    Performs Monte Carlo dropout sampling for an Evidential Deep Neural Network (EvDNN).
-    While Averaging over the calculated means and uncertainties.
+    Perform Monte Carlo dropout sampling and return averaged outputs and uncertainties.
 
     Parameters
     ----------
     ev_model : nn.Module
-        The evidential model with dropout layers.
+        Evidential model with dropout layers.
     dataloader : torch.utils.data.DataLoader
         DataLoader for the dataset to be evaluated.
     num_mc_samples : int, optional
-        Number of Monte Carlo forward passes, by default 10.
+        Number of Monte Carlo forward passes. Default is 10.
     device : torch.device, optional
-        The device to run the model on, by default DEVICE.
+        Device for inference. Default is DEVICE.
 
     Returns
     -------
-    Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-        - Stacked outputs from MC samples [batch_size, num_tasks, num_mc_samples]
-        - Labels [batch_size, num_tasks]
-        - Aleatoric uncertainties [batch_size, num_tasks, num_mc_samples]
-        - Epistemic uncertainties [batch_size, num_tasks, num_mc_samples]
+    tuple[Tensor, Tensor, Tensor, Tensor]
+        (outputs, targets, aleatoric_vars, epistemic_vars), shapes following
+        [batch, tasks] and [batch, tasks, num_mc_samples] where applicable.
     """
     mus, vs, alphas, betas, targets = emc_predict_params(
         ev_model, dataloader, num_mc_samples, device
@@ -117,9 +118,25 @@ def emc_nll(
         dataloader: torch.utils.data.DataLoader,
         num_mc_samples: int = 10,
         device: torch.device = DEVICE,
-):
+) -> float:
     """
-    Calculates the negative log-likelihood (NLL) of the Normal Inverse Gamma (NIG) distribution.
+    Calculate the negative log-likelihood (NLL) of the Normal Inverse Gamma distribution.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Evidential model.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader containing the dataset.
+    num_mc_samples : int, optional
+        Number of Monte Carlo forward passes. Default is 10.
+    device : torch.device, optional
+        Device for inference. Default is DEVICE.
+
+    Returns
+    -------
+    float
+        Negative log-likelihood value.
     """
     mus, vs, alphas, betas, targets_all = emc_predict_params(
         model, dataloader, num_mc_samples, device
@@ -204,20 +221,17 @@ def emc_nll(
 
 def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, dict]:
     """
-    Trains and evaluates an Evidential Monte Carlo (EMC) model.
+    Train and evaluate an Evidential Monte Carlo (EMC) model.
 
     Parameters
     ----------
-    config : dict, optional
-        Configuration dictionary for training and evaluation, by default None.
+    config : dict or None, optional
+        Configuration dictionary for training and evaluation. Default is None.
 
     Returns
     -------
     Tuple[nn.Module, nn.Module, dict, dict]
-        - The trained EMC model.
-        - The recalibration model.
-        - Evaluation metrics.
-        - Generated plots.
+        (trained_model, recalibration_model, metrics, plots).
     """
     logger = LOGGER
     num_mc_samples = config.get("num_mc_samples", 10)
@@ -289,20 +303,17 @@ def run_emc(config: Optional[dict] = None) -> Tuple[nn.Module, nn.Module, dict, 
 
 def run_emc_wrapper(**kwargs):
     """
-    Wrapper function for running an EMC model.
+    Wrapper for running EMC with a configuration built from keyword arguments.
 
     Parameters
     ----------
-    kwargs : dict
+    **kwargs
         Additional configuration parameters.
 
     Returns
     -------
     Tuple[nn.Module, nn.Module, dict, dict]
-        - The trained EMC model.
-        - The recalibration model.
-        - Evaluation metrics.
-        - Generated plots.
+        (trained_model, recalibration_model, metrics, plots).
     """
     global LOGGER
     LOGGER = create_logger(name="emc", file_level="debug", stream_level="info")

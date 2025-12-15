@@ -1,20 +1,38 @@
-"""UQDD models package.
+"""Models subpackage for UQDD
 
-Submodules:
-- ensemble: EnsembleDNN and helpers
-- evidential: Evidential DL utilities and losses
-- mcdropout: Monte Carlo Dropout training and inference
-- pnn: Base probabilistic neural network model
-- emc: Error-model calibration utilities
-- eoe: Evidential-on-ensembles routines
-- loss: Loss functions
-- model_parser: CLI/arg parsing for models
-- utils_metrics: Metrics utilities for training/eval
-- utils_models: Model config and helpers
-- utils_train: Training loops, dataloaders, evaluation
+The ``uqdd.models`` subpackage hosts model architectures, training utilities,
+losses, and parsers for uncertainty-aware drug discovery. It provides
+implementations for evidential learning, MC Dropout, ensembles, and PNN, plus
+helpers for configuration, metrics during training, and training loops.
 
-Access submodules as attributes, e.g., `uqdd.models.ensemble`. They are
-loaded lazily on first access to minimize import-time side effects.
+Modules
+-------
+- ``ensemble``: EnsembleDNN and helpers for bagging/aggregation and inference.
+- ``evidential``: Evidential deep learning utilities, priors, and losses.
+- ``mcdropout``: Monte Carlo Dropout training and inference routines.
+- ``pnn``: Base probabilistic neural network model and components.
+- ``emc``: Error-model calibration utilities.
+- ``eoe``: Evidential-on-ensembles routines to combine EDL with ensembles.
+- ``loss``: Loss functions used across model families.
+- ``model_parser``: CLI/arg parsing for models and experiments.
+- ``utils_metrics``: Metrics utilities for training/evaluation (loss/metrics hooks).
+- ``utils_models``: Model configuration and helper utilities.
+- ``utils_train``: Training loops, dataloaders, evaluation pipelines.
+
+Lazy Loading
+------------
+Submodules are loaded lazily on first attribute access to minimize import-time
+side effects, e.g., ``uqdd.models.ensemble`` triggers loading only when used.
+This keeps CLI startup fast and reduces dependencies during basic imports.
+
+Usage Notes
+-----------
+- Configuration: Use JSON files from ``uqdd/config`` and the ``model_parser``
+  helper to create reproducible experiments.
+- Device: Respect the global ``DEVICE`` from ``uqdd.__init__`` when constructing
+  models and dataloaders.
+- Logging: Prefer logging over printing during training; write under
+  ``uqdd/logs`` and use callbacks for metrics collection.
 """
 
 from typing import TYPE_CHECKING

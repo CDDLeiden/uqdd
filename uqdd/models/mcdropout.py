@@ -1,3 +1,10 @@
+"""
+Monte Carlo Dropout (MC Dropout) utilities.
+
+This module provides functions to enable dropout during inference and
+helpers to perform MC sampling to estimate epistemic uncertainty.
+"""
+
 from typing import Tuple, Optional, Dict, Any
 
 import torch
@@ -22,12 +29,16 @@ from uqdd.utils import create_logger
 
 def enable_dropout(model: torch.nn.Module) -> None:
     """
-    Enables dropout layers during inference for Monte Carlo Dropout.
+    Enable dropout layers during evaluation for MC sampling.
 
     Parameters
     ----------
     model : torch.nn.Module
-        The model in which dropout layers should be enabled in training mode.
+        Model in which dropout layers should be enabled during eval.
+
+    Returns
+    -------
+    None
     """
     for m in model.modules():
         if m.__class__.__name__.startswith("Dropout"):
@@ -36,44 +47,47 @@ def enable_dropout(model: torch.nn.Module) -> None:
 
 def mc_predict(
         model: torch.nn.Module,
-        test_loader: torch.utils.data.DataLoader,
-        num_mc_samples: int = 100,
-        device: torch.device = DEVICE,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        dataloader: torch.utils.data.DataLoader,
+        num_mc_samples: int = 10,
+        device: torch.device | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Performs Monte Carlo (MC) Dropout prediction with multiple stochastic forward passes.
+    Perform Monte Carlo dropout sampling and return mean predictions and variance.
 
     Parameters
     ----------
     model : torch.nn.Module
-        The trained model with dropout layers.
-    test_loader : torch.utils.data.DataLoader
-        DataLoader for the test set.
+        Trained model containing dropout layers.
+    dataloader : torch.utils.data.DataLoader
+        DataLoader for the dataset to evaluate.
     num_mc_samples : int, optional
-        Number of MC forward passes to perform, by default 100.
-    device : torch.device, optional
-        Device to run inference on, by default DEVICE.
+        Number of stochastic forward passes. Default is 10.
+    device : torch.device or None, optional
+        Device for inference. If None, use model’s device.
 
     Returns
     -------
-    Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-        - Stacked model predictions across MC samples.
-        - True labels.
-        - Stacked aleatoric uncertainties across MC samples.
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        (predictions_mean, predictions_var, targets).
     """
     # model.train()  # Enable dropout
     outputs_all, aleatoric_all = [], []  # targets_all  []
-    for _ in range(num_mc_samples):  # Multiple forward passes
+    # Prime targets to satisfy static analyzer
+    _out, targets, _alea = predict(model, dataloader, device=device, set_on_eval=True)
+    outputs_all.append(_out)
+    aleatoric_all.append(_alea)
+    for _ in range(num_mc_samples - 1):  # Multiple additional forward passes
         model.eval()
         enable_dropout(model)
-        outputs, targets, alea = predict(
-            model, test_loader, device=device, set_on_eval=False
+        outputs, _targets, alea = predict(
+            model, dataloader, device=device, set_on_eval=False
         )
         outputs_all.append(outputs)
         aleatoric_all.append(alea)
     # stack on dim 2
     outputs_all = torch.stack(outputs_all, dim=2)
     aleatoric_all = torch.stack(aleatoric_all, dim=2)
+    assert targets is not None
     return outputs_all.cpu(), targets.cpu(), aleatoric_all.cpu()
 
 

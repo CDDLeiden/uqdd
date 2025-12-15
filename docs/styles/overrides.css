@@ -1,4 +1,46 @@
 :root {
     /* Customize Material palette subtly if desired */
+
+    /* Enhanced styling for accordion toggle buttons */
+    .toc-accordion-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 1.5rem;
+        min-height: 1.5rem;
+        margin-right: 0.25rem;
+        padding: 0.125rem;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 1rem;
+        color: var(--md-default-fg-color);
+        transition: color 0.2s ease, transform 0.2s ease;
+        border-radius: 0.25rem;
+    }
+
+    /* Hover state - provide visual feedback */
+    .toc-accordion-toggle:hover {
+        color: var(--md-primary-fg-color);
+        background-color: rgba(0, 0, 0, 0.05);
+        transform: scale(1.15);
+    }
+
+    /* Active state - when aria-expanded is true */
+    .toc-accordion-toggle[aria-expanded="true"] {
+        color: var(--md-primary-fg-color);
+    }
+
+    /* Focus state for accessibility */
+    .toc-accordion-toggle:focus {
+        outline: 2px solid var(--md-accent-fg-color);
+        outline-offset: 2px;
+    }
+
+    /* Optional: hint collapsed items with slight opacity change */
+    .toc-collapsed > .md-nav__link {
+        opacity: 0.85;
+    }
 }
 

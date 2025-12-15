@@ -1,3 +1,10 @@
+"""
+Evidential Deep Ensemble (EoE) utilities.
+
+This module defines an ensemble of evidential models and end-to-end training
+and evaluation routines with recalibration.
+"""
+
 from typing import Tuple, Optional, Dict, Any, List
 
 import torch
@@ -30,19 +37,18 @@ from uqdd.utils import create_logger
 
 class EoEDNN(nn.Module):
     """
-    Evidential Deep Ensemble (EoE) Model.
+    Evidential Deep Ensemble (EoE) model.
 
-    This model consists of multiple `EvidentialDNN` models, forming an ensemble to
-    improve prediction uncertainty estimation.
+    This model wraps multiple `EvidentialDNN` instances to improve uncertainty estimation.
 
     Parameters
     ----------
-    config : Optional[Dict[str, Any]], optional
-        Configuration dictionary containing model hyperparameters, by default None.
-    model_list : Optional[List[nn.Module]], optional
-        Pretrained list of `EvidentialDNN` models for ensemble construction, by default None.
+    config : dict or None, optional
+        Configuration dictionary with model hyperparameters. Default is None.
+    model_list : list of nn.Module or None, optional
+        Pretrained `EvidentialDNN` models for ensemble construction. Default is None.
     **kwargs
-        Additional parameters for initializing individual `EvidentialDNN` models.
+        Extra parameters forwarded to `EvidentialDNN`.
     """
 
     def __init__(
@@ -81,17 +87,13 @@ class EoEDNN(nn.Module):
 
         Parameters
         ----------
-        inputs : Tuple[torch.Tensor, torch.Tensor]
-            Tuple containing (protein features, chemical features).
+        inputs : tuple of torch.Tensor
+            (protein_features, chemical_features).
 
         Returns
         -------
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-            Returns the stacked ensemble predictions for:
-            - Mean `mu`
-            - Variance `v`
-            - Alpha parameter `alpha`
-            - Beta parameter `beta`
+            Stacked ensemble predictions for mean (mu), variance (v), alpha, and beta.
         """
         # outputs = []
         mus, vs, alphas, betas = [], [], [], []
@@ -113,26 +115,24 @@ def run_eoe(
         config: Optional[Dict[str, Any]] = None
 ) -> Tuple[nn.Module, Any, Dict[str, Any], Dict[str, Any]]:
     """
-    Train an ensemble of Evidential Neural Networks (EoE) and perform uncertainty quantification.
+    Train an ensemble of evidential models and perform UQ evaluation.
 
     Parameters
     ----------
-    config : Optional[Dict[str, Any]], optional
-        Configuration dictionary containing training hyperparameters, by default None.
+    config : dict or None, optional
+        Training configuration. Default is None.
 
     Returns
     -------
-    Tuple[EoEDNN, Any, Dict[str, Any], Dict[str, Any]]
-        - Trained `EoEDNN` model.
-        - Isotonic recalibration model.
-        - Dictionary containing evaluation metrics.
-        - Dictionary containing generated plots.
+    Tuple[nn.Module, Any, Dict[str, Any], Dict[str, Any]]
+        (eoe_model, recalibration_model, metrics, plots).
     """
     ensemble_size = config.get("ensemble_size", 10)
     logger = LOGGER
     best_models = []
     result_arrs = []
     test_arrs = []
+    config_ = config
 
     # start wandb run
     run = wandb.init(
@@ -224,7 +224,7 @@ def run_eoe(
 
 def run_eoe_wrapper(**kwargs):
     """
-    Wrapper function to initialize and train an Evidential Deep Ensemble (EoE).
+    Wrapper to initialize and train an Evidential Deep Ensemble (EoE).
 
     Parameters
     ----------
@@ -233,11 +233,8 @@ def run_eoe_wrapper(**kwargs):
 
     Returns
     -------
-    Tuple[EoEDNN, Any, Dict[str, Any], Dict[str, Any]]
-        - Trained `EoEDNN` model.
-        - Isotonic recalibration model.
-        - Dictionary containing evaluation metrics.
-        - Dictionary containing generated plots.
+    Tuple[nn.Module, Any, Dict[str, Any], Dict[str, Any]]
+        (eoe_model, recalibration_model, metrics, plots).
     """
     global LOGGER
     LOGGER = create_logger(name="eoe", file_level="debug", stream_level="info")

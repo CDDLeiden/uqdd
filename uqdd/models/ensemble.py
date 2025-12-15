@@ -1,5 +1,13 @@
+"""
+Ensemble utilities.
+
+This module provides helpers to train and aggregate ensembles, process results,
+and compute uncertainty metrics across members.
+"""
+
 import logging
 from typing import Optional, List, Type, Tuple, Any
+from typing import Literal, cast
 
 import numpy as np
 import torch
@@ -91,6 +99,9 @@ class EnsembleDNN(nn.Module):
         for model in self.models:
             output, var_ = model(inputs)
             outputs.append(output)
+            # If model doesn't return variance, substitute zeros of matching shape
+            if var_ is None:
+                var_ = torch.zeros_like(output)
             vars_.append(var_)
         outputs = torch.stack(
             outputs, dim=2
@@ -215,25 +226,25 @@ def process_results_arrs(
         model_type: str = "ensemble",
 ) -> np.ndarray:
     """
-    Processes and logs results from multiple ensemble models.
+    Aggregate per-member training/test results and compute ensemble-level stats.
 
     Parameters
     ----------
-    result_arrs : List[np.ndarray | float]
-        List of training results from ensemble models.
-    test_arrs : List[np.ndarray | float]
-        List of test results from ensemble models.
+    result_arrs : list
+        List of per-member result arrays.
+    test_arrs : list
+        List of per-member test arrays.
     config : dict
-        Configuration dictionary containing experiment settings.
+        Configuration dictionary.
     logger : logging.Logger
-        Logger instance for debugging and tracking progress.
-    model_type : str, optional
-        The type of model used, by default "ensemble".
+        Logger instance.
+    model_type : str
+        Model type label.
 
     Returns
     -------
-    np.ndarray
-        Processed and aggregated result arrays.
+    dict
+        Aggregated results and statistics.
     """
     try:
         # get the maximum number of epochs
@@ -352,15 +363,16 @@ def run_ensemble(
     run = wandb.init(
         config=config,
         dir=WANDB_DIR,
-        mode=WANDB_MODE,
+        mode=cast(Literal["online","offline","disabled","shared"], WANDB_MODE),
         project=config.get("wandb_project_name", "ensemble_test"),
         reinit=True,
     )
 
     assign_wandb_tags(run, config)
 
-    for _ in range(ensemble_size):
-        best_model, config_, results_arr, test_arr = train_model_e2e(
+    config_ = config
+    for idx in range(ensemble_size):
+        best_model, config_tmp, results_arr, test_arr = train_model_e2e(
             config,
             model=PNN,
             model_type="ensemble",
@@ -370,10 +382,12 @@ def run_ensemble(
         )
         best_models.append(best_model)
         config["seed"] += 1
-
         result_arrs.append(results_arr)
         test_arrs.append(test_arr)
+        if idx == 0:
+            config_ = config_tmp
 
+    assert config_ is not None
     process_results_arrs(result_arrs, test_arrs, config_, logger)
 
     logger.debug(f"{len(best_models)=}")

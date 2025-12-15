@@ -1,9 +1,16 @@
 # Core analysis and plotting functions extracted from metrics_analysis.py
+"""
+Analysis and plotting utilities for model metrics.
+
+This module provides functions to aggregate experiment results, compute summary
+statistics, and visualize metrics via pairplots, line plots, histograms, bar plots,
+correlation matrices, calibration curves, and RMSE rejection curves.
+"""
 import os
 import shutil
 import sys
 import warnings
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Tuple
 
 import matplotlib.gridspec as gridspec
 import matplotlib.patches as mpatches
@@ -20,8 +27,41 @@ INTERACTIVE_MODE = hasattr(sys, "ps1") or sys.flags.interactive
 
 
 def aggregate_results_csv(
-    df, group_cols, numeric_cols, string_cols, order_by=None, output_file_path=None
-):
+    df: pd.DataFrame,
+    group_cols: List[str],
+    numeric_cols: List[str],
+    string_cols: List[str],
+    order_by: Optional[Union[str, List[str]]] = None,
+    output_file_path: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    Aggregate metrics by groups and export a compact CSV summary.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input results DataFrame.
+    group_cols : list of str
+        Column names to group by.
+    numeric_cols : list of str
+        Numeric metric columns to aggregate with mean and std.
+    string_cols : list of str
+        String columns to aggregate as lists.
+    order_by : str or list of str or None, optional
+        Column(s) to sort the final aggregated DataFrame by. Default is None.
+    output_file_path : str or None, optional
+        Path to write the aggregated CSV. If None, no file is written.
+
+    Returns
+    -------
+    pd.DataFrame
+        Aggregated DataFrame with combined mean(std) strings plus string/list aggregates.
+
+    Notes
+    -----
+    - A helper column `project_model` is constructed and included in the aggregates.
+    - When `output_file_path` is provided, the function ensures the directory exists.
+    """
     grouped = df.groupby(group_cols)
     aggregated = grouped[numeric_cols].agg(["mean", "std"])
     for col in numeric_cols:
@@ -64,7 +104,33 @@ def aggregate_results_csv(
     return final_aggregated
 
 
-def save_plot(fig, save_dir, plot_name, tighten=True, show_legend=False):
+def save_plot(
+    fig: plt.Figure,
+    save_dir: Optional[str],
+    plot_name: str,
+    tighten: bool = True,
+    show_legend: bool = False,
+) -> None:
+    """
+    Save a matplotlib figure to PNG, SVG, and PDF with optional tight layout.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Figure to save.
+    save_dir : str or None
+        Directory to save the figure files. If None, no files are written.
+    plot_name : str
+        Base filename (without extension).
+    tighten : bool, optional
+        If True, apply tight_layout and bbox_inches="tight". Default is True.
+    show_legend : bool, optional
+        If False, remove legend before saving. Default is False.
+
+    Returns
+    -------
+    None
+    """
     ax = fig.gca()
     if not show_legend:
         legend = ax.get_legend()
@@ -93,19 +159,56 @@ def save_plot(fig, save_dir, plot_name, tighten=True, show_legend=False):
         fig.savefig(os.path.join(save_dir, f"{plot_name}.pdf"), dpi=300)
 
 
-def handle_inf_values(df):
+def handle_inf_values(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Replace +/- infinity values in a DataFrame with NaN.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with infinite values replaced by NaN.
+    """
     return df.replace([float("inf"), -float("inf")], float("nan"))
 
 
 def plot_pairplot(
-    df,
-    title,
-    metrics,
-    save_dir=None,
-    cmap="viridis",
-    group_order=group_order,
-    show_legend=False,
-):
+    df: pd.DataFrame,
+    title: str,
+    metrics: List[str],
+    save_dir: Optional[str] = None,
+    cmap: str = "viridis",
+    group_order: Optional[List[str]] = group_order,
+    show_legend: bool = False,
+) -> None:
+    """
+    Plot a seaborn pairplot for a set of metrics colored by Group.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing the metrics and a 'Group' column.
+    title : str
+        Plot title.
+    metrics : list of str
+        Metric column names to include in the pairplot.
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    cmap : str, optional
+        Seaborn/matplotlib palette name. Default is "viridis".
+    group_order : list of str or None, optional
+        Order of class labels in the legend. Default is from constants.
+    show_legend : bool, optional
+        If True, keep the legend; otherwise it will be removed before saving.
+
+    Returns
+    -------
+    None
+    """
     df = handle_inf_values(df)
     sns.pairplot(
         df,
@@ -123,7 +226,36 @@ def plot_pairplot(
     plt.close()
 
 
-def plot_line_metrics(df, title, metrics, save_dir=None, group_order=group_order, show_legend=False):
+def plot_line_metrics(
+    df: pd.DataFrame,
+    title: str,
+    metrics: List[str],
+    save_dir: Optional[str] = None,
+    group_order: Optional[List[str]] = group_order,
+    show_legend: bool = False,
+) -> None:
+    """
+    Plot line charts of metrics over runs, colored by Group.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with 'wandb run', metrics, and 'Group'.
+    title : str
+        Plot title.
+    metrics : list of str
+        Metric column names to plot.
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    group_order : list of str or None, optional
+        Order of class labels in the legend. Default is from constants.
+    show_legend : bool, optional
+        If True, keep the legend; otherwise it will be removed before saving.
+
+    Returns
+    -------
+    None
+    """
     df = handle_inf_values(df)
     for metric in metrics:
         plt.figure(figsize=(14, 7))
@@ -148,14 +280,38 @@ def plot_line_metrics(df, title, metrics, save_dir=None, group_order=group_order
 
 
 def plot_histogram_metrics(
-    df,
-    title,
-    metrics,
-    save_dir=None,
-    group_order=group_order,
-    cmap="crest",
-    show_legend=False,
-):
+    df: pd.DataFrame,
+    title: str,
+    metrics: List[str],
+    save_dir: Optional[str] = None,
+    group_order: Optional[List[str]] = group_order,
+    cmap: str = "crest",
+    show_legend: bool = False,
+) -> None:
+    """
+    Plot histograms with KDE for metrics, split by Group.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with metrics and 'Group'.
+    title : str
+        Plot title.
+    metrics : list of str
+        Metric column names to plot.
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    group_order : list of str or None, optional
+        Order of class labels in the legend. Default is from constants.
+    cmap : str, optional
+        Seaborn/matplotlib palette name. Default is "crest".
+    show_legend : bool, optional
+        If True, keep the legend; otherwise it will be removed before saving.
+
+    Returns
+    -------
+    None
+    """
     df = handle_inf_values(df)
     for metric in metrics:
         plt.figure(figsize=(14, 7))
@@ -179,14 +335,38 @@ def plot_histogram_metrics(
 
 
 def plot_pairwise_scatter_metrics(
-    df,
-    title,
-    metrics,
-    save_dir=None,
-    group_order=group_order,
-    cmap="tab10_r",
-    show_legend=False,
-):
+    df: pd.DataFrame,
+    title: str,
+    metrics: List[str],
+    save_dir: Optional[str] = None,
+    group_order: Optional[List[str]] = group_order,
+    cmap: str = "tab10_r",
+    show_legend: bool = False,
+) -> None:
+    """
+    Plot pairwise scatterplots for all metric combinations, colored by Group.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with metrics and 'Group'.
+    title : str
+        Plot title.
+    metrics : list of str
+        Metric column names to plot pairwise.
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    group_order : list of str or None, optional
+        Order of class labels in the legend. Default is from constants.
+    cmap : str, optional
+        Matplotlib palette name. Default is "tab10_r".
+    show_legend : bool, optional
+        If True, keep the legend; otherwise it will be removed before saving.
+
+    Returns
+    -------
+    None
+    """
     df = handle_inf_values(df)
     num_metrics = len(metrics)
     fig, axes = plt.subplots(num_metrics, num_metrics, figsize=(15, 15))
@@ -235,6 +415,37 @@ def plot_metrics(
     fig_height: Optional[float] = None,
     show_legend: bool = False,
 ) -> Dict[str, str]:
+    """
+    Plot grouped bar charts showing mean and std for metrics across splits and model types.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with columns ['Split', 'Model type'] and metrics.
+    metrics : list of str
+        Metric column names to plot.
+    cmap : str, optional
+        Matplotlib colormap name used to derive distinct colors per model type. Default is "tab10_r".
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    hatches_dict : dict[str, str] or None, optional
+        Mapping from Split to hatch pattern. Default is None.
+    group_order : list of str or None, optional
+        Order of grouped labels (Split_Model type). Default derives from data.
+    show : bool, optional
+        If True, display plot in interactive mode. Default is True.
+    fig_width : float or None, optional
+        Width of the plot area (excluding legend). Default scales with number of metrics.
+    fig_height : float or None, optional
+        Height of the plot area (excluding legend). Default is 6.
+    show_legend : bool, optional
+        If True, include a legend of split/model combinations. Default is False.
+
+    Returns
+    -------
+    dict[str, str]
+        Color mapping from 'Model type' to RGBA string used in the plot.
+    """
     plot_width = fig_width if fig_width else max(10, len(metrics) * 2)
     plot_height = fig_height if fig_height else 6
     total_width = plot_width + 5
@@ -346,7 +557,37 @@ def plot_metrics(
     return color_dict
 
 
-def find_highly_correlated_metrics(df, metrics, threshold=0.8, save_dir=None, cmap="coolwarm", show_legend=False):
+def find_highly_correlated_metrics(
+    df: pd.DataFrame,
+    metrics: List[str],
+    threshold: float = 0.8,
+    save_dir: Optional[str] = None,
+    cmap: str = "coolwarm",
+    show_legend: bool = False,
+) -> List[Tuple[str, str, float]]:
+    """
+    Identify pairs of metrics with correlation above a threshold and plot the matrix.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing the metric columns.
+    metrics : list of str
+        Metric column names to include in the correlation analysis.
+    threshold : float, optional
+        Absolute correlation threshold for reporting pairs. Default is 0.8.
+    save_dir : str or None, optional
+        Directory to save the heatmap plot. Default is None.
+    cmap : str, optional
+        Matplotlib colormap name. Default is "coolwarm".
+    show_legend : bool, optional
+        If True, keep the legend; otherwise it will be removed before saving.
+
+    Returns
+    -------
+    list of tuple[str, str, float]
+        List of metric pairs and their absolute correlation values.
+    """
     corr_matrix = df[metrics].corr().abs()
     pairs = []
     for i in range(len(corr_matrix.columns)):
@@ -379,7 +620,35 @@ def plot_comparison_metrics(
     fig_height: Optional[float] = None,
     show_legend: bool = False,
     models_order: Optional[List[str]] = None,
-):
+) -> None:
+    """
+    Plot comparison bar charts across splits, model types, and calibration states.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with columns ['Split', 'Model type', 'Calibration'] and metrics.
+    metrics : list of str
+        Metric column names to plot.
+    cmap : str, optional
+        Matplotlib colormap name used to derive distinct colors per model type. Default is "tab10_r".
+    color_dict : dict[str, str] or None, optional
+        Precomputed color mapping from model type to color. If None, one is generated.
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    fig_width : float or None, optional
+        Width of the plot area (excluding legend). Default scales with the number of metrics.
+    fig_height : float or None, optional
+        Height of the plot area (excluding legend). Default is 6.
+    show_legend : bool, optional
+        If True, include a legend. Default is False.
+    models_order : list of str or None, optional
+        Explicit order of model types for coloring and grouping. Default derives from data.
+
+    Returns
+    -------
+    None
+    """
     plot_width = fig_width if fig_width else max(7, len(metrics) * 3)
     plot_height = fig_height if fig_height else 6
     total_width = plot_width + 5
@@ -506,7 +775,22 @@ def plot_comparison_metrics(
     plt.close()
 
 
-def load_and_aggregate_calibration_data(base_path, paths):
+def load_and_aggregate_calibration_data(base_path: str, paths: List[str]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Load calibration curve data from multiple model paths and aggregate statistics.
+
+    Parameters
+    ----------
+    base_path : str
+        Base directory from which model subpaths are resolved.
+    paths : list of str
+        Relative paths to model directories containing 'calibration_plot_data.csv'.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray, numpy.ndarray, numpy.ndarray)
+        Tuple of (expected_values, mean_observed, lower_bound, upper_bound), each of shape (n_bins,).
+    """
     expected_values = []
     observed_values = []
     for path in paths:
@@ -537,7 +821,37 @@ def plot_calibration_data(
     fig_width: Optional[float] = None,
     fig_height: Optional[float] = None,
     show_legend: bool = False,
-):
+) -> None:
+    """
+    Plot aggregated calibration curves for multiple groups against the perfect calibration line.
+
+    Parameters
+    ----------
+    df_aggregated : pd.DataFrame
+        Aggregated DataFrame containing 'Group' and 'project_model' lists for each group.
+    base_path : str
+        Base directory where model paths are located.
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    title : str, optional
+        Plot title. Default is "Calibration Plot".
+    color_name : str, optional
+        Colormap name used to derive distinct colors per group. Default is "tab10_r".
+    color_dict : dict[str, str] or None, optional
+        Precomputed color mapping from group to color. If None, one is generated.
+    group_order : list of str or None, optional
+        Order of groups in the legend. Default derives from data.
+    fig_width : float or None, optional
+        Width of the plot area. Default is 6.
+    fig_height : float or None, optional
+        Height of the plot area. Default is 6.
+    show_legend : bool, optional
+        If True, include a legend. Default is False.
+
+    Returns
+    -------
+    None
+    """
     plot_width = fig_width if fig_width else 6
     plot_height = fig_height if fig_height else 6
     total_width = plot_width + 4
@@ -590,7 +904,30 @@ def plot_calibration_data(
     plt.close()
 
 
-def move_model_folders(df, search_dirs, output_dir, overwrite=False):
+def move_model_folders(
+    df: pd.DataFrame,
+    search_dirs: List[str],
+    output_dir: str,
+    overwrite: bool = False,
+) -> None:
+    """
+    Move or merge model directories into a single output folder based on model names.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing a 'model name' column.
+    search_dirs : list of str
+        Directories to search for model subfolders.
+    output_dir : str
+        Destination directory where model folders will be moved or merged.
+    overwrite : bool, optional
+        If True, existing folders are merged (copied) with source. Default is False.
+
+    Returns
+    -------
+    None
+    """
     model_names = df["model name"].unique()
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
@@ -622,21 +959,66 @@ def move_model_folders(df, search_dirs, output_dir, overwrite=False):
             print(f"Model folder '{model_name}' not found in any of the search directories.")
 
 
-def load_predictions(model_path):
+def load_predictions(model_path: str) -> pd.DataFrame:
+    """
+    Load pickled predictions from a model directory.
+
+    Parameters
+    ----------
+    model_path : str
+        Path to the model directory containing 'preds.pkl'.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame loaded from the pickle file.
+    """
     preds_path = os.path.join(model_path, "preds.pkl")
     return pd.read_pickle(preds_path)
 
 
 def calculate_rmse_rejection_curve(
-    preds,
-    uncertainty_col="y_alea",
-    true_label_col="y_true",
-    pred_label_col="y_pred",
-    normalize_rmse=False,
-    random_rejection=False,
-    unc_type=None,
-    max_rejection_ratio=0.95,
-):
+    preds: pd.DataFrame,
+    uncertainty_col: str = "y_alea",
+    true_label_col: str = "y_true",
+    pred_label_col: str = "y_pred",
+    normalize_rmse: bool = False,
+    random_rejection: bool = False,
+    unc_type: Optional[str] = None,
+    max_rejection_ratio: float = 0.95,
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    """
+    Compute RMSE vs. rejection rate curve and its AUC by rejecting high-uncertainty predictions.
+
+    Parameters
+    ----------
+    preds : pd.DataFrame
+        DataFrame with columns for true labels, predicted labels, and uncertainty components.
+    uncertainty_col : str, optional
+        Column name for uncertainty to sort by if `unc_type` is None. Default is "y_alea".
+    true_label_col : str, optional
+        Column name for true labels. Default is "y_true".
+    pred_label_col : str, optional
+        Column name for predicted labels. Default is "y_pred".
+    normalize_rmse : bool, optional
+        If True, normalize RMSE by the initial RMSE before rejection. Default is False.
+    random_rejection : bool, optional
+        If True, randomly reject samples instead of sorting by uncertainty. Default is False.
+    unc_type : {"aleatoric", "epistemic", "both"} or None, optional
+        Which uncertainty to use. If "both", sums aleatoric and epistemic. If None, use `uncertainty_col`.
+    max_rejection_ratio : float, optional
+        Maximum fraction of samples to reject (exclusive of the tail). Default is 0.95.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray, float)
+        Tuple of (rejection_rates, rmses, AUC of the RMSE–rejection curve).
+
+    Raises
+    ------
+    ValueError
+        If `unc_type` is invalid or `uncertainty_col` is not present when needed.
+    """
     if unc_type == "aleatoric":
         uncertainty_col = "y_alea"
     elif unc_type == "epistemic":
@@ -671,17 +1053,40 @@ def calculate_rmse_rejection_curve(
             rmse /= initial_rmse
         rmses.append(rmse)
     auc_arc = auc(rejection_rates, rmses)
-    return rejection_rates, rmses, auc_arc
+    return rejection_rates, np.array(rmses), float(auc_arc)
 
 
 def calculate_rejection_curve(
-    df,
-    model_paths,
-    unc_col,
-    random_rejection=False,
-    normalize_rmse=False,
-    max_rejection_ratio=0.95,
-):
+    df: pd.DataFrame,
+    model_paths: List[str],
+    unc_col: str,
+    random_rejection: bool = False,
+    normalize_rmse: bool = False,
+    max_rejection_ratio: float = 0.95,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+    """
+    Aggregate RMSE–rejection curves across models and compute mean/std and AUC statistics.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Auxiliary DataFrame (not used directly, kept for API symmetry).
+    model_paths : list of str
+        Paths to model directories containing 'preds.pkl'.
+    unc_col : str
+        Uncertainty column name to use when computing curves (e.g., 'y_alea' or 'y_eps').
+    random_rejection : bool, optional
+        If True, randomly reject samples. Default is False.
+    normalize_rmse : bool, optional
+        If True, normalize RMSE by the initial RMSE. Default is False.
+    max_rejection_ratio : float, optional
+        Maximum fraction of samples to reject. Default is 0.95.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray, numpy.ndarray, float, float)
+        Tuple of (rejection_rates, mean_rmses, std_rmses, mean_auc, std_auc).
+    """
     aggregated_rmses = []
     auc_values = []
     rejection_rates = None
@@ -705,10 +1110,25 @@ def calculate_rejection_curve(
     std_rmses = np.std(aggregated_rmses, axis=0)
     mean_auc = np.mean(auc_values)
     std_auc = np.std(auc_values)
-    return rejection_rates, mean_rmses, std_rmses, mean_auc, std_auc
+    return rejection_rates, mean_rmses, std_rmses, float(mean_auc), float(std_auc)
 
 
-def get_handles_labels(ax, group_order):
+def get_handles_labels(ax: plt.Axes, group_order: List[str]) -> Tuple[List, List[str]]:
+    """
+    Extract legend handles/labels ordered by group prefix.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes object from which to retrieve legend entries.
+    group_order : list of str
+        Group prefixes to order legend entries by.
+
+    Returns
+    -------
+    (list, list of str)
+        Ordered handles and labels.
+    """
     handles, labels = ax.get_legend_handles_labels()
     ordered_handles = []
     ordered_labels = []
@@ -735,6 +1155,43 @@ def plot_rmse_rejection_curves(
     fig_height: Optional[float] = None,
     show_legend: bool = False,
 ) -> pd.DataFrame:
+    """
+    Plot RMSE–rejection curves per group, including random rejection baselines, and summarize AUCs.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing columns 'Group', 'Split', and 'project_model'.
+    base_dir : str
+        Base directory where model paths are located.
+    cmap : str, optional
+        Colormap name used to derive distinct colors per group. Default is "tab10_r".
+    color_dict : dict[str, str] or None, optional
+        Precomputed color mapping from group to color. If None, one is generated.
+    save_dir_plot : str or None, optional
+        Directory to save the plot images. Default is None.
+    add_to_title : str, optional
+        Suffix for the plot filename and title. Default is empty string.
+    normalize_rmse : bool, optional
+        If True, normalize RMSE by initial RMSE. Default is False.
+    unc_type : {"aleatoric", "epistemic", "both"}, optional
+        Uncertainty component to use for rejection. Default is "aleatoric".
+    max_rejection_ratio : float, optional
+        Maximum fraction of samples to reject. Default is 0.95.
+    group_order : list of str or None, optional
+        Order of groups in the legend. Default derives from data.
+    fig_width : float or None, optional
+        Plot width. Default is 6.
+    fig_height : float or None, optional
+        Plot height. Default is 6.
+    show_legend : bool, optional
+        If True, include a legend. Default is False.
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary DataFrame with columns ['Model type', 'Split', 'Group', 'AUC-RRC_mean', 'AUC-RRC_std'].
+    """
     assert unc_type in ["aleatoric", "epistemic", "both"], "Invalid unc_type"
     unc_col = "y_alea" if unc_type == "aleatoric" else "y_eps"
 
@@ -844,9 +1301,41 @@ def plot_auc_comparison(
     fig_width: Optional[float] = None,
     fig_height: Optional[float] = None,
     show_legend: bool = False,
-):
+) -> None:
+    """
+    Plot bar charts comparing RRC-AUC across splits and model types, including random reject baselines.
+
+    Parameters
+    ----------
+    stats_df : pd.DataFrame
+        Summary DataFrame with columns ['Group', 'Split', 'Model type', 'AUC-RRC_mean', 'AUC-RRC_std'].
+    cmap : str, optional
+        Colormap name used to derive distinct colors per model type. Default is "tab10_r".
+    color_dict : dict[str, str] or None, optional
+        Precomputed color mapping from model type to color. If None, one is generated.
+    save_dir : str or None, optional
+        Directory to save plot images. Default is None.
+    add_to_title : str, optional
+        Title suffix for the plot. Default is empty string.
+    min_y_axis : float, optional
+        Minimum y-axis limit. Default is 0.0.
+    hatches_dict : dict[str, str] or None, optional
+        Hatch mapping for splits (e.g., {"stratified": "\\\\"}). Default uses sensible defaults.
+    group_order : list of str or None, optional
+        Order of groups in the legend and x-axis. Default derives from data.
+    fig_width : float or None, optional
+        Plot width. Default is 6.
+    fig_height : float or None, optional
+        Plot height. Default is 6.
+    show_legend : bool, optional
+        If True, include a legend. Default is False.
+
+    Returns
+    -------
+    None
+    """
     if hatches_dict is None:
-        hatches_dict = {"stratified": "\\\\", "scaffold_cluster": "", "time": "/\/\/"}
+        hatches_dict = {"stratified": "\\\\", "scaffold_cluster": "", "time": "/\\/\\/"}
 
     if group_order:
         all_groups = group_order + list(stats_df.loc[stats_df["Group"].str.startswith("random reject"), "Group"].unique())
@@ -930,11 +1419,41 @@ def plot_auc_comparison(
     plt.close()
 
 
-def save_stats_df(stats_df, save_dir, add_to_title=""):
+def save_stats_df(stats_df: pd.DataFrame, save_dir: str, add_to_title: str = "") -> None:
+    """
+    Save a stats DataFrame to CSV in a given directory.
+
+    Parameters
+    ----------
+    stats_df : pd.DataFrame
+        DataFrame to save.
+    save_dir : str
+        Target directory to save the CSV.
+    add_to_title : str, optional
+        Suffix to append to the filename. Default is empty string.
+
+    Returns
+    -------
+    None
+    """
     os.makedirs(save_dir, exist_ok=True)
     stats_df.to_csv(os.path.join(save_dir, f"stats_df_{add_to_title}.csv"), index=False)
 
 
-def load_stats_df(save_dir, add_to_title=""):
-    return pd.read_csv(os.path.join(save_dir, f"stats_df_{add_to_title}.csv"))
+def load_stats_df(save_dir: str, add_to_title: str = "") -> pd.DataFrame:
+    """
+    Load a stats DataFrame from CSV in a given directory.
 
+    Parameters
+    ----------
+    save_dir : str
+        Directory containing the CSV.
+    add_to_title : str, optional
+        Suffix appended to the filename. Default is empty string.
+
+    Returns
+    -------
+    pd.DataFrame
+        Loaded DataFrame.
+    """
+    return pd.read_csv(os.path.join(save_dir, f"stats_df_{add_to_title}.csv"))

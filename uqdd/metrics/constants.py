@@ -98,7 +98,7 @@ group_order_no_time = [
 hatches_dict = {
     "stratified": "\\\\",
     "scaffold_cluster": "",
-    "time": "/\/\/",
+    "time": "...",
 }
 
 hatches_dict_no_time = {

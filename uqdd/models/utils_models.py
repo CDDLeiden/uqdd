@@ -1,3 +1,11 @@
+"""
+Model architecture helpers and utilities.
+
+This module provides functions for setting random seeds, computing norms,
+building datasets and data loaders, initializing optimizers and learning rate
+schedulers, saving and loading models, and generating model names and paths.
+"""
+
 import logging
 import math
 import random
@@ -21,15 +29,15 @@ string_types = (type(b""), type(""))
 
 def set_seed(seed: int = 42) -> None:
     """
-    Sets the random seed for reproducibility across libraries.
+    Set the random seed for reproducibility across libraries.
 
-    Parameters:
-    -----------
-    seed : int, default=42
-        The seed value to use for random number generation.
+    Parameters
+    ----------
+    seed : int, optional
+        Seed value to use for random number generation. Default is ``42``.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     random.seed(seed)
@@ -45,36 +53,37 @@ def set_seed(seed: int = 42) -> None:
 
 
 # Adapted from ChemProp - Uncertainty
+
 def compute_pnorm(model: nn.Module) -> float:
     """
-    Computes the norm of a model's parameters.
+    Compute the L2 norm of a model's parameters.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : nn.Module
-        The neural network model whose parameter norm is to be computed.
+        Neural network model.
 
-    Returns:
-    --------
+    Returns
+    -------
     float
-        The L2 norm of the model's parameters.
+        L2 norm of the model's parameters.
     """
     return math.sqrt(sum([p.norm().item() ** 2 for p in model.parameters()]))
 
 
 def compute_gnorm(model: nn.Module) -> float:
     """
-    Computes the norm of a model's gradients.
+    Compute the L2 norm of a model's gradients.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : nn.Module
-        The neural network model whose gradient norm is to be computed.
+        Neural network model.
 
-    Returns:
-    --------
+    Returns
+    -------
     float
-        The L2 norm of the model's gradients.
+        L2 norm of the model's gradients (over parameters with non-None gradients).
     """
     return math.sqrt(
         sum(
@@ -87,19 +96,53 @@ def compute_gnorm(model: nn.Module) -> float:
     )
 
 
+# Provide a thin wrapper so tests can patch uqdd.models.utils_models.get_datasets
+# without needing to import from the data module directly in build_datasets.
+
+def get_datasets(
+    n_targets: int,
+    activity_type: str,
+    split_type: str,
+    desc_prot: Optional[str],
+    desc_chem: Optional[str],
+    median_scaling: bool,
+    task_type: str,
+    ext: str,
+    logger: Optional[logging.Logger],
+    device: Union[str, torch.device],
+) -> Dict[str, torch.utils.data.Dataset]:
+    """
+    Wrapper around uqdd.data.data_papyrus.get_datasets for easier mocking in tests.
+    """
+    from uqdd.data.data_papyrus import get_datasets as _papyrus_get_datasets
+
+    return _papyrus_get_datasets(
+        n_targets=n_targets,
+        activity_type=activity_type,
+        split_type=split_type,
+        desc_prot=desc_prot,
+        desc_chem=desc_chem,
+        median_scaling=median_scaling,
+        task_type=task_type,
+        ext=ext,
+        logger=logger,
+        device=device,
+    )
+
+
 def get_desc_len_from_dataset(dataset: torch.utils.data.Dataset) -> Tuple[int, int]:
     """
-    Retrieves the lengths of protein and chemical descriptors from a dataset.
+    Retrieve the lengths of protein and chemical descriptors from a dataset sample.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     dataset : torch.utils.data.Dataset
-        The dataset containing descriptor information.
+        Dataset containing descriptor tensors.
 
-    Returns:
-    --------
-    Tuple[int, int]
-        A tuple containing the length of protein descriptors and chemical descriptors.
+    Returns
+    -------
+    (int, int)
+        Lengths of protein descriptors and chemical descriptors, respectively.
     """
     # desc_prot then descriptor_chemical
     inputs = dataset[0][0]
@@ -117,19 +160,19 @@ def get_desc_len(
         *descriptors: Optional[str], logger: Optional[logging.Logger] = None
 ) -> Tuple[int, ...]:
     """
-    Retrieves descriptor lengths from the configuration.
+    Retrieve descriptor lengths from configuration.
 
-    Parameters:
-    -----------
-    descriptors : Optional[str]
-        Variable number of descriptor names for which lengths are required.
-    logger : Optional[logging.Logger], default=None
-        Logger for debugging information.
+    Parameters
+    ----------
+    descriptors : str or None
+        Variable number of descriptor names to query.
+    logger : logging.Logger or None, optional
+        Logger for debug output.
 
-    Returns:
-    --------
-    Tuple[int, ...]
-        A tuple containing the lengths of the requested descriptors.
+    Returns
+    -------
+    tuple of int
+        Lengths of the requested descriptors (0 if missing).
     """
     desc_config = get_config(config_name="desc_dim", config_dir=CONFIG_DIR)
     lengths = []
@@ -143,19 +186,19 @@ def get_desc_len(
 
 def get_model_config(model_type: str = "pnn", **kwargs) -> Dict:
     """
-    Retrieves the configuration dictionary for model training.
+    Retrieve the configuration dictionary for model training.
 
-    Parameters:
-    -----------
-    model_type : str, default="pnn"
-        The type of model configuration to load (e.g., "pnn", "ensemble", "mcdropout").
-    **kwargs : dict
+    Parameters
+    ----------
+    model_type : str, optional
+        Model type (e.g., "pnn", "ensemble", "mcdropout"). Default is ``"pnn"``.
+    **kwargs
         Additional parameters to override default configuration values.
 
-    Returns:
-    --------
-    Dict
-        The model configuration dictionary.
+    Returns
+    -------
+    dict
+        Model configuration dictionary.
     """
     assert model_type in [
         "pnn",
@@ -169,7 +212,6 @@ def get_model_config(model_type: str = "pnn", **kwargs) -> Dict:
 
     split_type = kwargs.get("split_type", "random")
     activity_type = kwargs.get("activity_type", "xc50")
-    # print(split_type)
 
     return get_config(
         config_name=model_type,
@@ -182,27 +224,24 @@ def get_model_config(model_type: str = "pnn", **kwargs) -> Dict:
 
 def get_sweep_config(model_name: str = "pnn", **kwargs) -> Dict:
     """
-    Retrieves the sweep configuration for hyperparameter tuning.
+    Retrieve the sweep configuration for hyperparameter tuning.
 
-    Parameters:
-    -----------
-    model_name : str, default="pnn"
-        The name of the model to retrieve sweep configurations for.
-    **kwargs : dict
+    Parameters
+    ----------
+    model_name : str, optional
+        Model name to retrieve sweep configurations for. Default is ``"pnn"``.
+    **kwargs
         Additional parameters to override default sweep configurations.
 
-    Returns:
-    --------
-    Dict
-        The sweep configuration dictionary.
+    Returns
+    -------
+    dict
+        Sweep configuration dictionary.
 
-    Notes:
-    ------
-    - If `config` is None, the function will return the default sweep configuration.
-    - If `config` is a path to a YAML or JSON file, the function will load the configuration from the file.
-    - The default configuration values will be overridden by `config` and `kwargs`, if provided.
-    - If both `config` and `kwargs` contain the same key in the 'parameters' dictionary,
-        the value from `kwargs` will take precedence.
+    Notes
+    -----
+    - If ``config`` is None, returns the default sweep configuration.
+    - Default values are overridden by kwargs.
     """
     assert model_name in [
         "pnn",
@@ -234,45 +273,42 @@ def build_datasets(
         device: Union[str, torch.device] = DEVICE,
 ) -> Dict[str, torch.utils.data.Dataset]:
     """
-    Builds datasets for training and evaluation.
+    Build datasets for training and evaluation.
 
-    Parameters:
-    -----------
-    data_name : str, default="papyrus"
-        The name of the dataset to load ("papyrus", "tdc", or "other").
-    n_targets : int, default=-1
-        The number of target entries to load (-1 for all).
-    activity_type : str, default="xc50"
-        The type of bioactivity measurement.
-    split_type : str, default="random"
-        The type of dataset split (e.g., "random", "scaffold").
-    desc_prot : Optional[str], default=None
-        The type of protein descriptor to use.
-    desc_chem : Optional[str], default=None
-        The type of chemical descriptor to use.
-    median_scaling : bool, default=False
-        Whether to apply median scaling to labels.
-    task_type : str, default="regression"
-        The type of task ("regression" or "classification").
-    ext : str, default="pkl"
-        The file extension format for loading the dataset.
-    logger : Optional[logging.Logger], default=None
+    Parameters
+    ----------
+    data_name : str, optional
+        Dataset to load (e.g., "papyrus"). Default is ``"papyrus"``.
+    n_targets : int, optional
+        Number of targets (``-1`` for all). Default is ``-1``.
+    activity_type : str, optional
+        Type of bioactivity measurement. Default is ``"xc50"``.
+    split_type : str, optional
+        Dataset split type (e.g., "random", "scaffold"). Default is ``"random"``.
+    desc_prot : str or None, optional
+        Protein descriptor name.
+    desc_chem : str or None, optional
+        Chemical descriptor name.
+    median_scaling : bool, optional
+        Whether to apply median scaling to labels. Default is ``False``.
+    task_type : {"regression", "classification"}, optional
+        Task type. Default is ``"regression"``.
+    ext : str, optional
+        File extension for dataset files. Default is ``"pkl"``.
+    logger : logging.Logger or None, optional
         Logger for tracking dataset building.
-    device : str, default=DEVICE
-        The device on which data will be processed.
+    device : str or torch.device, optional
+        Device on which data will be processed. Default is ``DEVICE``.
 
-    Returns:
-    --------
-    Dict[str, torch.utils.data.Dataset]
-        A dictionary containing training, validation, and test datasets.
+    Returns
+    -------
+    dict of str -> torch.utils.data.Dataset
+        Training, validation, and test datasets.
     """
     logger = create_logger(name="build_datasets") if not logger else logger
     logger.debug(f"Building datasets for {data_name}")
-    # if isinstance(label_scaling_func, str):
-    #     label_scaling_func = get_label_scaling_func(scaling_type=label_scaling_func)
     if data_name == "papyrus":
-        from uqdd.data.data_papyrus import get_datasets
-
+        # Use the local wrapper for easier testing/mocking
         datasets = get_datasets(
             n_targets=n_targets,
             activity_type=activity_type,
@@ -302,26 +338,25 @@ def build_loader(
         wt_resampler: bool = False,
 ) -> Dict[str, DataLoader]:
     """
-    Constructs data loaders for training, validation, and testing.
+    Construct data loaders for training, validation, and testing.
 
-    Parameters:
-    -----------
-    datasets : Dict[str, torch.utils.data.Dataset]
-        A dictionary containing dataset splits (e.g., "train", "val", "test").
+    Parameters
+    ----------
+    datasets : dict of str -> torch.utils.data.Dataset
+        Dataset splits keyed by name (e.g., "train", "val", "test").
     batch_size : int
-        The batch size for loading data.
+        Batch size for loading data.
     shuffle : bool, optional
-        Whether to shuffle the data (default: False).
+        Whether to shuffle data. Default is ``False``.
     wt_resampler : bool, optional
-        Whether to use a weighted random sampler for the training set (default: False).
+        Whether to use a weighted random sampler for the training set. Default is ``False``.
 
-    Returns:
-    --------
-    Dict[str, DataLoader]
-        A dictionary containing the data loaders for each dataset split.
+    Returns
+    -------
+    dict of str -> DataLoader
+        Data loaders for each dataset split.
     """
     try:
-        # num_cpu_cores = os.cpu_count()
         dataloaders = {}
         for k, v in datasets.items():
             if k == "train" and wt_resampler:
@@ -333,8 +368,6 @@ def build_loader(
                 batch_size=batch_size,
                 shuffle=shuffle,
                 sampler=sampler,
-                # num_workers=4,
-                # pin_memory=True,
             )
         logging.debug("Data loaders created")
     except Exception as e:
@@ -347,19 +380,19 @@ def get_sampler(
         dataset: torch.utils.data.Dataset, bins: int = 50
 ) -> WeightedRandomSampler:
     """
-    Creates a weighted random sampler for handling imbalanced datasets.
+    Create a weighted random sampler for handling imbalanced datasets.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     dataset : torch.utils.data.Dataset
-        The dataset for which to create the sampler.
+        Dataset for which to create the sampler.
     bins : int, optional
-        The number of bins for discretizing the label distribution (default: 50).
+        Number of bins for discretizing the label distribution. Default is ``50``.
 
-    Returns:
-    --------
+    Returns
+    -------
     WeightedRandomSampler
-        A PyTorch weighted random sampler for balanced sampling.
+        Weighted random sampler for balanced sampling.
     """
     labels = dataset.labels
     min_val, max_val = labels.min(), labels.max()
@@ -378,7 +411,6 @@ def get_sampler(
         replacement=True,
         generator=torch.Generator(device=labels.device),
     )
-    # labels[torch.where(weights>1000)]
     return sampler
 
 
@@ -386,23 +418,23 @@ def build_optimizer(
         model: nn.Module, optimizer: str, lr: float, weight_decay: float
 ) -> optim.Optimizer:
     """
-    Initializes an optimizer for training a model.
+    Initialize an optimizer for training a model.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : nn.Module
-        The model whose parameters will be optimized.
+        Model whose parameters will be optimized.
     optimizer : str
-        The name of the optimizer to use (e.g., "adam", "sgd").
+        Name of optimizer (e.g., "adam", "sgd").
     lr : float
-        The learning rate for optimization.
+        Learning rate.
     weight_decay : float
-        The weight decay (L2 penalty) applied to the optimizer.
+        Weight decay (L2 penalty).
 
-    Returns:
-    --------
-    optim.Optimizer
-        The initialized optimizer instance.
+    Returns
+    -------
+    torch.optim.Optimizer
+        Initialized optimizer instance.
     """
     if optimizer.lower() == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -419,7 +451,7 @@ def build_optimizer(
             model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9
         )
     else:
-        raise ValueError("Unknown optimizer: {}".format(optimizer))
+        raise ValueError(f"Unknown optimizer: {optimizer}")
 
     return optimizer
 
@@ -432,25 +464,25 @@ def build_lr_scheduler(
         **kwargs,
 ) -> Optional[optim.lr_scheduler._LRScheduler]:
     """
-    Constructs a learning rate scheduler.
+    Construct a learning rate scheduler.
 
-    Parameters:
-    -----------
-    optimizer : optim.Optimizer
-        The optimizer for which to adjust the learning rate.
-    lr_scheduler : str, optional
-        The type of learning rate scheduler (e.g., "plateau", "step", "exp", "cos").
+    Parameters
+    ----------
+    optimizer : torch.optim.Optimizer
+        Optimizer for which to adjust the learning rate.
+    lr_scheduler : str or None, optional
+        Type of learning rate scheduler (e.g., "plateau", "step", "exp", "cos").
     patience : int, optional
-        The number of epochs with no improvement before reducing LR (default: 20).
+        Number of epochs with no improvement before reducing LR. Default is ``20``.
     factor : float, optional
-        The factor by which to reduce LR (default: 0.2).
-    **kwargs : dict
+        Factor by which to reduce LR. Default is ``0.2``.
+    **kwargs
         Additional parameters for the scheduler.
 
-    Returns:
-    --------
-    Optional[optim.lr_scheduler._LRScheduler]
-        The learning rate scheduler instance, or None if no scheduler is used.
+    Returns
+    -------
+    torch.optim.lr_scheduler._LRScheduler or None
+        Learning rate scheduler instance, or ``None``.
     """
     if lr_scheduler is None:
         return None
@@ -471,7 +503,7 @@ def build_lr_scheduler(
             optimizer, T_max=patience, **kwargs
         )
     else:
-        raise ValueError("Unknown lr_scheduler: {}".format(lr_scheduler))
+        raise ValueError(f"Unknown lr_scheduler: {lr_scheduler}")
 
     return lr_scheduler
 
@@ -487,29 +519,29 @@ def save_model(
         tracker: str = "wandb",
 ) -> None:
     """
-    Saves a trained model in both PyTorch and ONNX formats.
+    Save a trained model in both PyTorch and ONNX formats.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing model training parameters.
     model : nn.Module
-        The trained model to save.
+        Trained model to save.
     model_name : str, optional
-        The name of the saved model file (default: generated from date and settings).
-    data_specific_path : str, optional
-        Path for saving model-specific configurations (default: None).
+        Saved model file name. Default is a name generated from date and settings.
+    data_specific_path : str or None, optional
+        Path for saving model-specific configurations.
     desc_prot_len : int, optional
-        Length of protein descriptors (default: 0).
+        Length of protein descriptors. Default is ``0``.
     desc_chem_len : int, optional
-        Length of chemical descriptors (default: 1024).
+        Length of chemical descriptors. Default is ``1024``.
     onnx : bool, optional
-        Whether to save the model in ONNX format (default: True).
+        Whether to save the model in ONNX format. Default is ``True``.
     tracker : str, optional
-        Model tracking system to use ("wandb" or other) (default: "wandb").
+        Model tracking system to use (e.g., "wandb"). Default is ``"wandb"``.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     try:
@@ -519,10 +551,8 @@ def save_model(
         model_dir = MODELS_DIR / "saved_models" / data_specific_path
 
         model_dir.mkdir(parents=True, exist_ok=True)
-        # model_name = f"{TODAY}-{model_type}_{split_type}_{desc_prot}_{desc_chem}-{wandb.run.name}"
 
         pt_path = model_dir / f"{model_name}.pt"
-        # check if path exists
         i = 1
         while pt_path.exists():
             model_name += f"_{i}"
@@ -535,7 +565,6 @@ def save_model(
         if onnx:
             onnx_path = model_dir / f"{model_name}.onnx"
             batch_size = config.get("batch_size", 64)
-            # in case we have two inputs ?
             if desc_prot_len == 0:
                 dummy_input = {
                     "inputs": torch.zeros(
@@ -567,7 +596,6 @@ def save_model(
             torch.onnx.export(model, dummy_input, onnx_path)
             wandb_model_path = str(onnx_path)
 
-        # Model logging if wandb
         if tracker.lower() == "wandb":
             wandb.save(wandb_model_path, base_path=model_dir)
 
@@ -579,24 +607,23 @@ def add_prefix_to_state_dict_keys(
         state_dict: Dict[str, torch.Tensor], prefix: str
 ) -> Dict[str, torch.Tensor]:
     """
-    Adds a prefix to all keys in a model's state dictionary.
+    Add a prefix to all keys in a model's state dictionary.
 
-    Parameters:
-    -----------
-    state_dict : Dict[str, torch.Tensor]
-        The original state dictionary.
+    Parameters
+    ----------
+    state_dict : dict of str -> torch.Tensor
+        Original state dictionary.
     prefix : str
-        The prefix to append to each key.
+        Prefix to prepend to each key.
 
-    Returns:
-    --------
-    Dict[str, torch.Tensor]
-        The updated state dictionary with modified keys.
+    Returns
+    -------
+    dict of str -> torch.Tensor
+        Updated state dictionary with modified keys.
     """
     new_state_dict = OrderedDict()
     for key, value in state_dict.items():
         new_key = key if key.startswith(prefix) else f"{prefix}{key}"
-        # new_key = prefix + key
         new_state_dict[new_key] = value
     return new_state_dict
 
@@ -608,34 +635,31 @@ def load_model(
         **model_kwargs,
 ) -> nn.Module:
     """
-    Loads a PyTorch model from a saved state dictionary.
+    Load a PyTorch model from a saved state dictionary.
 
-    Parameters:
-    -----------
-    model_class : nn.Module
-        The class of the model to instantiate.
+    Parameters
+    ----------
+    model_class : nn.Module or Any
+        Model class to instantiate.
     model_path : str
         Path to the saved state dictionary.
-    prefix_to_state_keys : str, optional
+    prefix_to_state_keys : str or None, optional
         Prefix to prepend to state dictionary keys if needed.
-    **model_kwargs : dict
+    **model_kwargs
         Additional arguments for initializing the model.
 
-    Returns:
-    --------
+    Returns
+    -------
     nn.Module
-        The model instance with loaded weights.
+        Model instance with loaded weights.
     """
-    # Initialize the model
     model = model_class(**model_kwargs)
 
-    # Load the state dictionary from the specified path
     state_dict = torch.load(model_path)
 
     if prefix_to_state_keys:
         state_dict = add_prefix_to_state_dict_keys(state_dict, prefix_to_state_keys)
 
-    # Load the state dictionary into the model
     model.load_state_dict(state_dict)
 
     return model
@@ -643,16 +667,16 @@ def load_model(
 
 def get_ckpt_path(config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Generates and returns the path for model checkpoint storage.
+    Generate and return the path for model checkpoint storage.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing model details.
 
-    Returns:
-    --------
-    Dict[str, Any]
+    Returns
+    -------
+    dict
         Updated configuration dictionary with checkpoint path information.
     """
     dir = MODELS_DIR / "ckpt"
@@ -667,7 +691,6 @@ def get_ckpt_path(config: Dict[str, Any]) -> Dict[str, Any]:
         ckpt_name_m = ckpt_name + f"_{i}"
         model_path = dir / f"{ckpt_name_m}.pth"
         i += 1
-    # we need to create the file here as placeholder
     model_path.touch()
 
     config["ckpt_name"] = model_path.stem
@@ -678,22 +701,22 @@ def get_ckpt_path(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def ckpt(model: nn.Module, config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Saves a model checkpoint to disk.
+    Save a model checkpoint to disk.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : nn.Module
-        The model whose state should be saved.
-    config : Dict[str, Any]
+        Model whose state should be saved.
+    config : dict
         Configuration dictionary containing checkpoint details.
 
-    Returns:
-    --------
-    Dict[str, Any]
+    Returns
+    -------
+    dict
         Updated configuration dictionary with checkpoint path.
     """
     ckpt_path = config.get("ckpt_path", None)
-    if not ckpt_path:  # First time saving
+    if not ckpt_path:
         config = get_ckpt_path(config)
         ckpt_path = config["ckpt_path"]
     torch.save(model.state_dict(), ckpt_path)
@@ -702,19 +725,19 @@ def ckpt(model: nn.Module, config: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_ckpt(model: nn.Module, config: Dict[str, Any]) -> nn.Module:
     """
-    Loads a model checkpoint from disk.
+    Load a model checkpoint from disk.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     model : nn.Module
-        The model to which weights should be loaded.
-    config : Dict[str, Any]
+        Model to which weights should be loaded.
+    config : dict
         Configuration dictionary containing checkpoint path.
 
-    Returns:
-    --------
+    Returns
+    -------
     nn.Module
-        The model with restored weights.
+        Model with restored weights.
     """
     ckpt_path = config.get("ckpt_path", None)
     ckpt_name = config.get("ckpt_name", None)
@@ -726,19 +749,19 @@ def load_ckpt(model: nn.Module, config: Dict[str, Any]) -> nn.Module:
 
 def get_model_name(config: Dict[str, Any], run: Optional[wandb.run] = None) -> str:
     """
-    Generates a model name based on configuration settings.
+    Generate a model name based on configuration settings.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing model details.
-    run : wandb.run, optional
-        The W&B run object for naming the model.
+    run : wandb.run or None, optional
+        W&B run object for naming the model.
 
-    Returns:
-    --------
+    Returns
+    -------
     str
-        The generated model name.
+        Generated model name.
     """
     if config.get("model_name", None):
         model_name = config.get("model_name")
@@ -755,7 +778,6 @@ def get_model_name(config: Dict[str, Any], run: Optional[wandb.run] = None) -> s
         model_name = f"{TODAY}-{data_name}_{activity_type}_{model_type}_{split_type}_{descriptor_protein}_{descriptor_chemical}_{seed}"
         model_name += "_MT" if multitask else ""
 
-    # check if run and the name doesnt end with run.name already
     if run and not model_name.endswith(run.name):
         model_name += f"_{run.name}"
 
@@ -766,19 +788,19 @@ def get_data_specific_path(
         config: Dict[str, Any], logger: Optional[logging.Logger] = None
 ) -> Path:
     """
-    Constructs a data-specific directory path for model storage.
+    Construct a data-specific directory path for model storage.
 
-    Parameters:
-    -----------
-    config : Dict[str, Any]
+    Parameters
+    ----------
+    config : dict
         Configuration dictionary containing dataset details.
-    logger : logging.Logger, optional
-        Logger instance for debugging (default: None).
+    logger : logging.Logger or None, optional
+        Logger for debug output.
 
-    Returns:
-    --------
+    Returns
+    -------
     Path
-        The generated directory path for storing dataset-specific results.
+        Directory path for storing dataset-specific results.
     """
     if config.get("data_specific_path", None):
         return config.get("data_specific_path")
@@ -795,33 +817,33 @@ def get_data_specific_path(
 
 def calculate_means(*tensors: torch.Tensor) -> List[torch.Tensor]:
     """
-    Computes the mean along the last dimension for multiple tensors.
+    Compute the mean along the last dimension for multiple tensors.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     tensors : torch.Tensor
         One or more tensors to compute the mean over.
 
-    Returns:
-    --------
-    List[torch.Tensor]
-        A list containing the mean-reduced tensors.
+    Returns
+    -------
+    list of torch.Tensor
+        Mean-reduced tensors.
     """
     return [torch.mean(tensor, dim=2) for tensor in tensors]
 
 
 def stack_vars(*tensors: List[torch.Tensor]) -> List[torch.Tensor]:
     """
-    Stacks multiple tensors along the last dimension.
+    Stack multiple tensors along the last dimension.
 
-    Parameters:
-    -----------
-    tensors : torch.Tensor
+    Parameters
+    ----------
+    tensors : list of torch.Tensor
         One or more tensors to stack.
 
-    Returns:
-    --------
-    List[torch.Tensor]
-        A list containing the stacked tensors.
+    Returns
+    -------
+    list of torch.Tensor
+        Stacked tensors.
     """
     return [torch.stack(tensor, dim=2) for tensor in tensors]

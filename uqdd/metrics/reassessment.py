@@ -1,3 +1,12 @@
+"""
+Model reassessment utilities: loading trained models, generating predictions,
+computing NLL, exporting artifacts, and recalibrating with isotonic regression.
+
+This module wires together model loaders and predictors to re-run evaluation on
+saved runs, export standardized prediction pickles, append NLL to CSV logs, and
+apply isotonic recalibration using validation data.
+"""
+
 import os
 import glob
 import ast
@@ -15,7 +24,34 @@ from uqdd.models.utils_models import load_model, get_model_config
 from uqdd.models.utils_train import predict, evaluate_predictions, recalibrate_model, get_dataloader
 
 
-def nll_evidentials(evidential_model, test_dataloader, model_type="evidential", num_mc_samples=100, device=DEVICE):
+def nll_evidentials(
+    evidential_model,
+    test_dataloader,
+    model_type: str = "evidential",
+    num_mc_samples: int = 100,
+    device=DEVICE,
+):
+    """
+    Compute negative log-likelihood (NLL) for evidential-style models.
+
+    Parameters
+    ----------
+    evidential_model : torch.nn.Module
+        Trained model instance.
+    test_dataloader : torch.utils.data.DataLoader
+        DataLoader providing test set batches.
+    model_type : {"evidential", "eoe", "emc"}, optional
+        Model family determining the NLL backend. Default is "evidential".
+    num_mc_samples : int, optional
+        Number of MC samples for EMC models. Default is 100.
+    device : torch.device, optional
+        Device to run evaluation on. Default uses `DEVICE`.
+
+    Returns
+    -------
+    float or None
+        Scalar NLL if supported by the model type; None otherwise.
+    """
     if model_type in ["evidential", "eoe"]:
         return ev_nll(evidential_model, test_dataloader, device=device)
     elif model_type == "emc":
@@ -25,6 +61,26 @@ def nll_evidentials(evidential_model, test_dataloader, model_type="evidential", 
 
 
 def convert_to_list(val):
+    """
+    Parse a string representation of a Python list to a list; pass through non-strings.
+
+    Parameters
+    ----------
+    val : str or any
+        Input value, possibly a string encoding of a list.
+
+    Returns
+    -------
+    list
+        Parsed list if `val` is a valid string list, empty list on parse failure.
+    any
+        Original value if not a string.
+
+    Notes
+    -----
+    - Uses `ast.literal_eval` for safe evaluation.
+    - Prints a warning and returns [] when parsing fails.
+    """
     if isinstance(val, str):
         try:
             parsed_val = ast.literal_eval(val)
@@ -38,8 +94,60 @@ def convert_to_list(val):
     return val
 
 
-def preprocess_runs(runs_path, models_dir=MODELS_DIR, data_name="papyrus", activity_type="xc50", descriptor_protein="ankh-large", descriptor_chemical="ecfp2048", data_specific_path="papyrus/xc50/all", prot_input_dim=1536, chem_input_dim=2048):
-    runs_df = pd.read_csv(runs_path, converters={"chem_layers": convert_to_list, "prot_layers": convert_to_list, "regressor_layers": convert_to_list})
+def preprocess_runs(
+    runs_path: str,
+    models_dir: str = MODELS_DIR,
+    data_name: str = "papyrus",
+    activity_type: str = "xc50",
+    descriptor_protein: str = "ankh-large",
+    descriptor_chemical: str = "ecfp2048",
+    data_specific_path: str = "papyrus/xc50/all",
+    prot_input_dim: int = 1536,
+    chem_input_dim: int = 2048,
+) -> pd.DataFrame:
+    """
+    Read a runs CSV and enrich with resolved model paths and descriptor metadata.
+
+    Parameters
+    ----------
+    runs_path : str
+        Path to the CSV file containing run metadata.
+    models_dir : str, optional
+        Directory containing trained model .pt files. Default uses `MODELS_DIR`.
+    data_name : str, optional
+        Dataset identifier. Default is "papyrus".
+    activity_type : str, optional
+        Activity type (e.g., "xc50", "kc"). Default is "xc50".
+    descriptor_protein : str, optional
+        Protein descriptor type. Default is "ankh-large".
+    descriptor_chemical : str, optional
+        Chemical descriptor type. Default is "ecfp2048".
+    data_specific_path : str, optional
+        Subpath encoding dataset context for figures/exports. Default is "papyrus/xc50/all".
+    prot_input_dim : int, optional
+        Protein input dimensionality. Default is 1536.
+    chem_input_dim : int, optional
+        Chemical input dimensionality. Default is 2048.
+
+    Returns
+    -------
+    pd.DataFrame
+        Preprocessed runs DataFrame with columns like 'model_name', 'model_path', and descriptor fields.
+
+    Notes
+    -----
+    - Resolves `model_name` to actual .pt files via glob and sets 'model_path'.
+    - Adds multi-task flag 'MT' from 'n_targets' > 1.
+    - Converts layer columns from strings to lists using `convert_to_list`.
+    """
+    runs_df = pd.read_csv(
+        runs_path,
+        converters={
+            "chem_layers": convert_to_list,
+            "prot_layers": convert_to_list,
+            "regressor_layers": convert_to_list,
+        },
+    )
     runs_df.rename(columns={"Name": "run_name"}, inplace=True)
     i = 1
     for index, row in runs_df.iterrows():
@@ -67,6 +175,24 @@ def preprocess_runs(runs_path, models_dir=MODELS_DIR, data_name="papyrus", activ
 
 
 def get_model_class(model_type: str):
+    """
+    Map a model type name to the corresponding class.
+
+    Parameters
+    ----------
+    model_type : str
+        Model type identifier (e.g., "pnn", "ensemble", "evidential", "eoe", "emc", "mcdropout").
+
+    Returns
+    -------
+    type
+        Model class matching the type.
+
+    Raises
+    ------
+    ValueError
+        If the `model_type` is not recognized.
+    """
     if model_type.lower() in ["pnn", "mcdropout"]:
         return PNN
     elif model_type.lower() == "ensemble":
@@ -79,7 +205,27 @@ def get_model_class(model_type: str):
         raise ValueError(f"Model type {model_type} not recognized")
 
 
-def get_predict_fn(model_type: str, num_mc_samples=100):
+def get_predict_fn(model_type: str, num_mc_samples: int = 100):
+    """
+    Get the appropriate predict function and kwargs for a given model type.
+
+    Parameters
+    ----------
+    model_type : str
+        Model type identifier.
+    num_mc_samples : int, optional
+        Number of MC samples for MC Dropout or EMC models. Default is 100.
+
+    Returns
+    -------
+    (callable, dict)
+        Tuple of (predict_function, keyword_arguments).
+
+    Raises
+    ------
+    ValueError
+        If the `model_type` is not recognized.
+    """
     if model_type.lower() == "mcdropout":
         return mc_predict, {"num_mc_samples": num_mc_samples}
     elif model_type.lower() in ["ensemble", "pnn"]:
@@ -92,7 +238,34 @@ def get_predict_fn(model_type: str, num_mc_samples=100):
         raise ValueError(f"Model type {model_type} not recognized")
 
 
-def get_preds(model, dataloaders, model_type, subset="test", num_mc_samples=100):
+def get_preds(
+    model,
+    dataloaders,
+    model_type: str,
+    subset: str = "test",
+    num_mc_samples: int = 100,
+):
+    """
+    Run inference and unpack predictions for the requested subset.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Trained model instance.
+    dataloaders : dict
+        Dictionary of DataLoaders keyed by subset (e.g., 'train', 'val', 'test').
+    model_type : str
+        Model type determining the predict function and outputs.
+    subset : str, optional
+        Subset key to use from `dataloaders`. Default is "test".
+    num_mc_samples : int, optional
+        Number of MC samples for stochastic predictors. Default is 100.
+
+    Returns
+    -------
+    tuple
+        (preds, labels, alea_vars, epi_vars) where `epi_vars` may be None for non-evidential models.
+    """
     predict_fn, predict_kwargs = get_predict_fn(model_type, num_mc_samples=num_mc_samples)
     preds_res = predict_fn(model, dataloaders[subset], device=DEVICE, **predict_kwargs)
     if model_type in ["evidential", "eoe", "emc"]:
@@ -103,20 +276,96 @@ def get_preds(model, dataloaders, model_type, subset="test", num_mc_samples=100)
     return preds, labels, alea_vars, epi_vars
 
 
-def pkl_preds_export(preds, labels, alea_vars, epi_vars, outpath, model_type, logger=None):
+def pkl_preds_export(
+    preds,
+    labels,
+    alea_vars,
+    epi_vars,
+    outpath: str,
+    model_type: str,
+    logger=None,
+):
+    """
+    Export predictions and uncertainties to a standardized pickle and return the DataFrame.
+
+    Parameters
+    ----------
+    preds : numpy.ndarray or torch.Tensor
+        Model predictions.
+    labels : numpy.ndarray or torch.Tensor
+        True labels.
+    alea_vars : numpy.ndarray or torch.Tensor
+        Aleatoric uncertainty components.
+    epi_vars : numpy.ndarray or torch.Tensor or None
+        Epistemic uncertainty components, or None for non-evidential models.
+    outpath : str
+        Output directory to write 'preds.pkl'.
+    model_type : str
+        Model type used to guide `process_preds` behavior.
+    logger : logging.Logger or None, optional
+        Logger for messages. Default is None.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns [y_true, y_pred, y_err, y_alea, y_eps].
+    """
     y_true, y_pred, y_err, y_alea, y_eps = process_preds(preds, labels, alea_vars, epi_vars, None, model_type)
     df = create_df_preds(y_true=y_true, y_pred=y_pred, y_err=y_err, y_alea=y_alea, y_eps=y_eps, export=False, logger=logger)
     df.to_pickle(os.path.join(outpath, "preds.pkl"))
     return df
 
 
-def csv_nll_post_processing(csv_path):
+def csv_nll_post_processing(csv_path: str) -> None:
+    """
+    Normalize NLL values in a CSV by taking the first value per model name.
+
+    Parameters
+    ----------
+    csv_path : str
+        Path to the CSV file containing a 'model name' and 'NLL' column.
+
+    Returns
+    -------
+    None
+    """
     df = pd.read_csv(csv_path)
     df["NLL"] = df.groupby("model name")["NLL"].transform("first")
     df.to_csv(csv_path, index=False)
 
 
-def reassess_metrics(runs_df, figs_out_path, csv_out_path, project_out_name, logger):
+def reassess_metrics(
+    runs_df: pd.DataFrame,
+    figs_out_path: str,
+    csv_out_path: str,
+    project_out_name: str,
+    logger,
+) -> None:
+    """
+    Reassess metrics for each run: reload model, predict, compute NLL, evaluate, and recalibrate.
+
+    Parameters
+    ----------
+    runs_df : pd.DataFrame
+        Preprocessed runs DataFrame with resolved 'model_path' and configuration fields.
+    figs_out_path : str
+        Directory where per-model figures and prediction pickles are saved.
+    csv_out_path : str
+        Path to a CSV for logging metrics (passed to `evaluate_predictions`).
+    project_out_name : str
+        Name used for grouping results in downstream logging.
+    logger : logging.Logger
+        Logger instance used through evaluation and recalibration.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    - Skips models already reassessed when a figure directory exists.
+    - Uses validation split for isotonic recalibration and logs final metrics.
+    """
     runs_df = runs_df.sample(frac=1).reset_index(drop=True)
     for index, row in runs_df.iterrows():
         model_path = row["model_path"]
@@ -174,4 +423,3 @@ def reassess_metrics(runs_df, figs_out_path, csv_out_path, project_out_name, log
                 nll=nll,
             )
             uct_logger.csv_log()
-

@@ -1,6 +1,11 @@
-import argparse
+"""
+Model configuration parser utilities.
 
-import wandb
+This module parses configuration dictionaries/files and provides helpers to
+construct models and training setups.
+"""
+
+import argparse
 
 from uqdd.models.emc import run_emc_wrapper
 from uqdd.models.ensemble import run_ensemble_wrapper
@@ -11,8 +16,8 @@ from uqdd.models.pnn import run_pnn_wrapper, run_pnn_hyperparam
 from uqdd.utils import float_or_none, parse_list
 
 # Add requirement for wandb core
-wandb.sdk.require("core")
-wandb.require("core")
+# wandb.sdk.require("core")
+# wandb.require("core")
 
 query_dict = {
     "pnn": run_pnn_wrapper,

@@ -39,11 +39,16 @@ dependencies:
       - scikit-posthocs
       - scienceplots
       - pingouin
-      - mkdocs
-      - mkdocs-material
-      - mkdocstrings
+      - mkdocs>=1.5.3
+      - mkdocs-material==8.2.7
+      - mkdocstrings==1.0.0
+      - mkdocstrings-python==2.0.1
+      - mkdocs-autorefs==1.4.3
+      - mike==2.1.3
       - mkdocs-git-revision-date-localized-plugin
       - mkdocs-plugin-tags
       - cmake
       - mapie
       - pandas-stubs
+      - black
+      - ruff

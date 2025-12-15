@@ -22,21 +22,21 @@ def export_tasks(
         data_name: str, activity: str, n_targets: int, label_col: List[str]
 ) -> None:
     """
-    Exports the selected tasks to a pickle file.
+    Export the selected task labels to a pickle file.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     data_name : str
         Name of the dataset.
     activity : str
         Activity type.
     n_targets : int
         Number of targets.
-    label_col : List[str]
+    label_col : list of str
         List of label column names.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     topx = f"top{n_targets}" if n_targets > 0 else "all"
@@ -53,19 +53,19 @@ def export_dataset(
         cols_to_include: List[str] = None,
 ) -> None:
     """
-    Saves dataset splits to files.
+    Save dataset splits to files.
 
-    Parameters:
-    -----------
-    subsets_dict : Dict[str, pd.DataFrame]
+    Parameters
+    ----------
+    subsets_dict : dict of str -> pd.DataFrame
         Dictionary of dataset splits.
-    files_paths : Dict[str, Path]
-        Dictionary containing file paths for each split.
-    cols_to_include : List[str], optional
+    files_paths : dict of str -> Path
+        File paths for each split.
+    cols_to_include : list of str, optional
         Columns to include in the saved dataset.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     for subset in ["train", "val", "test"]:
@@ -76,10 +76,10 @@ def merge_preprocessed_desc(
         df: pd.DataFrame, preprocessed_df: pd.DataFrame, matching_col: str, desc_col: str
 ) -> pd.DataFrame:
     """
-    Merges preprocessed descriptors into the main dataset.
+    Merge preprocessed descriptors into the main dataset.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         Original dataset.
     preprocessed_df : pd.DataFrame
@@ -89,8 +89,8 @@ def merge_preprocessed_desc(
     desc_col : str
         Descriptor column to merge.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
         Updated dataset with descriptors merged.
     """
@@ -113,25 +113,25 @@ def load_desc_preprocessed(
         **kwargs,
 ) -> pd.DataFrame:
     """
-    Loads and merges preprocessed descriptors into the dataset.
+    Load and merge preprocessed descriptors into the dataset.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         Original dataset.
-    files_paths : Dict[str, Path]
+    files_paths : dict of str -> Path
         Paths to descriptor files.
-    desc_prot : str, optional
+    desc_prot : str or None, optional
         Protein descriptor column name.
-    desc_chem : str, optional
+    desc_chem : str or None, optional
         Chemical descriptor column name.
     prot_matching_col : str, optional
-        Column name for protein matching.
+        Column name for protein matching. Default is ``"target_id"``.
     chem_matching_col : str, optional
-        Column name for chemical matching.
+        Column name for chemical matching. Default is ``"SMILES"``.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
         Dataset with descriptors merged.
     """
@@ -153,15 +153,15 @@ def load_desc_preprocessed(
 
 def get_topx(n_targets: int) -> str:
     """
-    Returns a formatted string for the number of targets.
+    Return a formatted string for the number of targets.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     n_targets : int
         Number of targets.
 
-    Returns:
-    --------
+    Returns
+    -------
     str
         Formatted string representing the number of targets.
     """
@@ -170,10 +170,10 @@ def get_topx(n_targets: int) -> str:
 
 def get_tasks(data_name: str, activity: str, n_targets: int) -> List[str]:
     """
-    Loads task labels from a pickle file.
+    Load task labels from a pickle file.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     data_name : str
         Name of the dataset.
     activity : str
@@ -181,10 +181,10 @@ def get_tasks(data_name: str, activity: str, n_targets: int) -> List[str]:
     n_targets : int
         Number of targets.
 
-    Returns:
-    --------
-    List[str]
-        List of task labels.
+    Returns
+    -------
+    list of str
+        Task labels.
     """
     topx = get_topx(n_targets)
     target_col_path = DATASET_DIR / data_name / activity / topx / "target_col.pkl"
@@ -196,12 +196,12 @@ def get_tasks(data_name: str, activity: str, n_targets: int) -> List[str]:
 
 def get_dataset_sizes(datasets: Dict[str, pd.DataFrame]) -> None:
     """
-    Logs the sizes of the datasets.
+    Log the sizes of the dataset splits.
 
-    Parameters:
-    -----------
-    datasets : Dict[str, pd.DataFrame]
-        Dictionary containing dataset splits.
+    Parameters
+    ----------
+    datasets : dict of str -> pd.DataFrame
+        Dataset splits.
     """
     for name, dataset in datasets.items():
         logging.info(f"{name} set size: {len(dataset)}")
@@ -211,10 +211,10 @@ def get_data_info(
         train_data: pd.DataFrame, val_data: pd.DataFrame, test_data: pd.DataFrame
 ) -> pd.DataFrame:
     """
-    Computes summary statistics on dataset splits.
+    Compute summary statistics on dataset splits.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     train_data : pd.DataFrame
         Training dataset.
     val_data : pd.DataFrame
@@ -222,8 +222,8 @@ def get_data_info(
     test_data : pd.DataFrame
         Test dataset.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
         Dataframe summarizing dataset counts.
     """
@@ -242,10 +242,10 @@ def create_split_dict(
         split_type: str, train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
-    Creates a dictionary containing dataset splits.
+    Create a dictionary containing dataset splits.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     split_type : str
         Type of split (e.g., "random").
     train_df : pd.DataFrame
@@ -255,9 +255,9 @@ def create_split_dict(
     test_df : pd.DataFrame
         Test dataset.
 
-    Returns:
-    --------
-    Dict[str, Dict[str, pd.DataFrame]]
+    Returns
+    -------
+    dict of str -> dict of str -> pd.DataFrame
         Dictionary containing dataset splits.
     """
     out = {
@@ -274,17 +274,17 @@ def from_split_data_to_idx(
         split_dict: Dict[str, Dict[str, pd.DataFrame]]
 ) -> Dict[str, Dict[str, List[int]]]:
     """
-    Converts dataset splits to index lists.
+    Convert dataset splits to index lists.
 
-    Parameters:
-    -----------
-    split_dict : Dict[str, Dict[str, pd.DataFrame]]
-        Dictionary containing dataset splits.
+    Parameters
+    ----------
+    split_dict : dict of str -> dict of str -> pd.DataFrame
+        Dataset splits.
 
-    Returns:
-    --------
-    Dict[str, Dict[str, List[int]]]
-        Dictionary containing index lists for dataset splits.
+    Returns
+    -------
+    dict of str -> dict of str -> list of int
+        Index lists for dataset splits.
     """
     return {
         split_type: {
@@ -306,28 +306,28 @@ def random_split(
         print_info: bool = True,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
-    Splits a DataFrame into training, validation, and test sets based on specified fractions.
+    Split a DataFrame into training, validation, and test sets based on specified fractions.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The DataFrame to be split.
     train_frac : float
-        The fraction of the dataset to be used as the training set.
+        Fraction for the training set.
     val_frac : float
-        The fraction of the dataset to be used as the validation set.
+        Fraction for the validation set.
     test_frac : float
-        The fraction of the dataset to be used as the test set.
-    stratify_col : str, optional
+        Fraction for the test set.
+    stratify_col : str or None, optional
         Column for stratified splitting.
     seed : int
-        The random seed for reproducibility.
+        Random seed for reproducibility.
     print_info : bool
         Whether to print split details.
 
-    Returns:
-    --------
-    Dict[str, pd.DataFrame]
+    Returns
+    -------
+    dict of str -> pd.DataFrame
         Dictionary containing split datasets.
     """
     st = None
@@ -356,12 +356,12 @@ def random_split(
 
 def separate_min_count_df(
         df: pd.DataFrame, counting_col: str = "scaffold", threshold_count: int = 3
-) -> (pd.DataFrame, pd.DataFrame):
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Separates dataframe into subsets based on minimum count threshold.
+    Separate dataframe into subsets based on minimum count threshold.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         Input dataframe.
     counting_col : str, optional
@@ -369,9 +369,9 @@ def separate_min_count_df(
     threshold_count : int, optional
         Minimum count threshold.
 
-    Returns:
-    --------
-    Tuple[pd.DataFrame, pd.DataFrame]
+    Returns
+    -------
+    (pd.DataFrame, pd.DataFrame)
         DataFrames containing below and above threshold counts.
     """
     counts = df[counting_col].value_counts()
@@ -394,33 +394,33 @@ def random_split_stratified(
         export_path: Union[str, None] = None,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
-    Splits a dataset into training, validation, and test sets with stratification.
+    Split a dataset into training, validation, and test sets with stratification.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The dataset to be split.
     stratify_by : str, optional
-        The column used for stratified splitting (default: "scaffold").
+        The column used for stratified splitting. Default is ``"scaffold"``.
     max_k : int, optional
-        Maximum number of clusters for scaffold clustering (default: 500).
+        Maximum number of clusters for scaffold clustering. Default is ``500``.
     optimal_k : int or None, optional
-        Optimal number of clusters for scaffold clustering (default: None).
+        Optimal number of clusters for scaffold clustering. Default is ``None``.
     train_frac : float, optional
-        The fraction of the dataset used for training (default: 0.7).
+        Fraction used for training. Default is ``0.7``.
     val_frac : float, optional
-        The fraction of the dataset used for validation (default: 0.15).
+        Fraction used for validation. Default is ``0.15``.
     test_frac : float, optional
-        The fraction of the dataset used for testing (default: 0.15).
+        Fraction used for testing. Default is ``0.15``.
     seed : int, optional
-        Random seed for reproducibility (default: 42).
+        Random seed for reproducibility. Default is ``42``.
     export_path : str or None, optional
-        Path to export clustering results (default: None).
+        Path to export clustering results. Default is ``None``.
 
-    Returns:
-    --------
-    Dict[str, Dict[str, pd.DataFrame]]
-        A dictionary containing split datasets.
+    Returns
+    -------
+    dict of str -> dict of str -> pd.DataFrame
+        Split datasets keyed by split type.
     """
     if stratify_by == "scaffold" and "scaffold" not in df.columns:
         df = merge_scaffolds(df)
@@ -481,27 +481,27 @@ def scaffold_split(
         seed: int = 42,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
-    Splits a dataset into training, validation, and test sets based on scaffold structure.
+    Split a dataset into training, validation, and test sets based on scaffold structure.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The dataset to be split.
     smiles_col : str, optional
-        The column containing SMILES strings (default: "smiles").
+        The column containing SMILES strings. Default is ``"smiles"``.
     train_frac : float, optional
-        The fraction of the dataset used for training (default: 0.7).
+        Fraction used for training. Default is ``0.7``.
     val_frac : float, optional
-        The fraction of the dataset used for validation (default: 0.15).
+        Fraction used for validation. Default is ``0.15``.
     test_frac : float, optional
-        The fraction of the dataset used for testing (default: 0.15).
+        Fraction used for testing. Default is ``0.15``.
     seed : int, optional
-        Random seed for reproducibility (default: 42).
+        Random seed for reproducibility. Default is ``42``.
 
-    Returns:
-    --------
-    Dict[str, Dict[str, pd.DataFrame]]
-        A dictionary containing split datasets.
+    Returns
+    -------
+    dict of str -> dict of str -> pd.DataFrame
+        Split datasets keyed by split type.
     """
     # set random seed
     np.random.seed(seed)
@@ -548,35 +548,35 @@ def scaffold_cluster_split(
         seed: int = 42,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
-    Splits a dataset into training, validation, and test sets using scaffold clustering.
+    Split a dataset into training, validation, and test sets using scaffold clustering.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The dataset to be split.
     smiles_col : str, optional
-        The column containing SMILES strings (default: "smiles").
+        The column containing SMILES strings. Default is ``"smiles"``.
     train_frac : float, optional
-        The fraction of the dataset used for training (default: 0.7).
+        Fraction used for training. Default is ``0.7``.
     val_frac : float, optional
-        The fraction of the dataset used for validation (default: 0.15).
+        Fraction used for validation. Default is ``0.15``.
     test_frac : float, optional
-        The fraction of the dataset used for testing (default: 0.15).
+        Fraction used for testing. Default is ``0.15``.
     max_k : int, optional
-        Maximum number of clusters for scaffold clustering (default: 500).
+        Maximum number of clusters for scaffold clustering. Default is ``500``.
     optimal_k : int or None, optional
-        Optimal number of clusters for scaffold clustering (default: None).
+        Optimal number of clusters for scaffold clustering. Default is ``None``.
     withH : bool, optional
-        Whether to consider hydrogens in clustering (default: False).
+        Whether to consider hydrogens in clustering. Default is ``False``.
     export_mcs_path : str or None, optional
-        Path to export clustering results (default: None).
+        Path to export clustering results. Default is ``None``.
     seed : int, optional
-        Random seed for reproducibility (default: 42).
+        Random seed for reproducibility. Default is ``42``.
 
-    Returns:
-    --------
-    Dict[str, Dict[str, pd.DataFrame]]
-        A dictionary containing split datasets.
+    Returns
+    -------
+    dict of str -> dict of str -> pd.DataFrame
+        Split datasets keyed by split type.
     """
     # set random seed
     np.random.seed(seed)
@@ -626,32 +626,32 @@ def time_split(
         test_frac: float = 0.15,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
-    Splits a dataset into training, validation, and test sets based on a time column.
+    Split a dataset into training, validation, and test sets based on a time column.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The dataset to be split.
     time_col : str
         The column containing the time information.
     train_frac : float
-        The fraction of the dataset used for training (default: 0.7).
+        Fraction used for training. Default is ``0.7``.
     val_frac : float
-        The fraction of the dataset used for validation (default: 0.15).
+        Fraction used for validation. Default is ``0.15``.
     test_frac : float
-        The fraction of the dataset used for testing (default: 0.15).
+        Fraction used for testing. Default is ``0.15``.
 
-    Returns:
-    --------
-    Dict[str, Dict[str, pd.DataFrame]]
-        A dictionary containing split datasets.
+    Returns
+    -------
+    dict of str -> dict of str -> pd.DataFrame
+        Split datasets keyed by split type.
     """
 
     # order df by time_col and split
     df = df.sort_values(by=time_col)
     train_df = df.iloc[: int(train_frac * len(df))]
     val_df = df.iloc[int(train_frac * len(df)): int((train_frac + val_frac) * len(df))]
-    test_df = df.iloc[int((train_frac + val_frac) * len(df)):]
+    test_df = df.iloc[int((train_frac + val_frac) * len(df)) :]
     print(
         f"Time Split - Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}"
     )
@@ -676,41 +676,41 @@ def split_data(
         logger: Union[logging.Logger, None] = None,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
-    Splits a dataset into training, validation, and test sets based on the specified split type.
+    Split a dataset into training, validation, and test sets based on the specified split type.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input dataset.
-    split_type : str, optional
-        Type of split to use (default: "random").
+    split_type : str or list of str, optional
+        Type of split to use (or ``"all"``). Default is ``"random"``.
     smiles_col : str, optional
-        Column containing SMILES strings (default: "smiles").
+        Column containing SMILES strings. Default is ``"smiles"``.
     time_col : str, optional
-        Column containing time information (default: "year").
+        Column containing time information. Default is ``"year"``.
     stratify_col : str or None, optional
-        Column used for stratified splitting (default: None).
-    fractions : list, optional
-        List of fractions for train, validation, and test sets (default: [0.7, 0.15, 0.15]).
+        Column used for stratified splitting. Default is ``None``.
+    fractions : list of float or None, optional
+        Fractions for train/val/test (sum must be 1). Default is ``[0.7, 0.15, 0.15]``.
     max_k_clusters : int, optional
-        Maximum number of clusters for scaffold clustering (default: 500).
+        Maximum clusters for scaffold clustering. Default is ``500``.
     optimal_k : int or None, optional
-        Optimal number of clusters for scaffold clustering (default: None).
-    export_path : str or None, optional
-        Path to export clustering results (default: None).
+        Optimal number of clusters for scaffold clustering. Default is ``None``.
+    export_path : str or Path or None, optional
+        Path to export clustering/split results. Default is ``None``.
     return_indices : bool, optional
-        Whether to return indices instead of dataframes (default: False).
+        Whether to return indices instead of dataframes. Default is ``False``.
     recalculate : bool, optional
-        Whether to recalculate splits if they exist (default: False).
+        Whether to recalculate splits if they exist. Default is ``False``.
     seed : int, optional
-        Random seed for reproducibility (default: 42).
+        Random seed for reproducibility. Default is ``42``.
     logger : logging.Logger or None, optional
-        Logger instance for logging messages (default: None).
+        Logger instance. Default is ``None``.
 
-    Returns:
-    --------
-    Dict[str, Dict[str, pd.DataFrame]]
-        A dictionary containing split datasets.
+    Returns
+    -------
+    dict of str -> dict of str -> pd.DataFrame
+        Split datasets keyed by split type.
     """
     logger = logger or logging.getLogger(__name__)
     if fractions is None:
@@ -738,7 +738,7 @@ def split_data(
     # POSTPONED for now - only one split at a time can be done here
     all_data = {}
     split_type = (
-        ["random", "time", "scaffold", "scaffold_cluster"]  # ,
+        ["random", "time", "scaffold", "scaffold_cluster"]
         if split_type == "all"
         else split_type
     )
@@ -754,7 +754,6 @@ def split_data(
                 max_k_clusters=max_k_clusters,
                 optimal_k=optimal_k,
                 fractions=fractions,
-                # fig_output_path=fig_output_path,
                 export_path=export_path,
                 return_indices=return_indices,
                 recalculate=recalculate,
@@ -768,6 +767,7 @@ def split_data(
             split_file_name = (
                 f"{split_type}_split_dict{'_indices' if return_indices else ''}.pkl"
             )
+            split_file_path = None
             if export_path:
                 split_file_path = Path(export_path) / split_file_name
                 if split_file_path.exists() and not recalculate:
@@ -783,7 +783,7 @@ def split_data(
                 "random": (
                     random_split,
                     {"stratify_col": stratify_col},
-                ),  # , "export_path": export_path
+                ),
                 "random_stratified": (
                     random_split_stratified,
                     {
@@ -820,12 +820,11 @@ def split_data(
                 train_frac=train_frac,
                 val_frac=val_frac,
                 test_frac=test_frac,
-                # return_indices=return_indices,
                 seed=seed,
             )
             sub_dict = from_split_data_to_idx(sub_dict) if return_indices else sub_dict
             all_data.update(sub_dict)
-            if export_path:
+            if export_path and split_file_path is not None:
                 logger.info(f"Saving splits to {split_file_path}")
                 save_pickle(sub_dict, split_file_path)
 
@@ -850,19 +849,19 @@ def stratified_distribution(
         df: pd.DataFrame, stratified_col: str = "scaffold"
 ) -> pd.DataFrame:
     """
-    Calculates the distribution of a stratified column.
+    Calculate the distribution of a stratified column.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input dataset.
     stratified_col : str, optional
-        The column to stratify by (default: "scaffold").
+        The column to stratify by. Default is ``"scaffold"``.
 
-    Returns:
-    --------
-    pd.DataFrame
-        A dataframe containing stratified value counts and proportions.
+    Returns
+    -------
+    dict
+        Stratified value counts (normalized).
     """
     stratified_dist = df[stratified_col].value_counts(normalize=True).to_dict()
     return stratified_dist
@@ -875,10 +874,10 @@ def get_dist_df(
         stratified_col: str = "scaffold",
 ) -> pd.DataFrame:
     """
-    Generates a dataframe of stratified distributions across dataset splits.
+    Generate a DataFrame of stratified distributions across dataset splits.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     train_df : pd.DataFrame
         Training dataset.
     val_df : pd.DataFrame
@@ -886,12 +885,12 @@ def get_dist_df(
     test_df : pd.DataFrame
         Test dataset.
     stratified_col : str, optional
-        Column used for stratification (default: "scaffold").
+        Column used for stratification. Default is ``"scaffold"``.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
-        A dataframe containing stratified distributions for each split.
+        Stratified distributions for each split.
     """
     train_dist = stratified_distribution(train_df, stratified_col)
     val_dist = stratified_distribution(val_df, stratified_col)
@@ -912,21 +911,21 @@ def plot_scaffold_distribution(
         output_path: Union[str, None] = None,
 ) -> None:
     """
-    Plots the scaffold distribution across dataset splits.
+    Plot the scaffold distribution across dataset splits.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     dist_df : pd.DataFrame
-        Dataframe containing scaffold distributions.
+        DataFrame containing scaffold distributions.
     stratified_col : str, optional
-        Column used for stratification (default: "scaffold").
+        Column used for stratification. Default is ``"scaffold"``.
     split_type : str, optional
-        Type of dataset split (default: "random").
+        Type of dataset split. Default is ``"random"``.
     output_path : str or None, optional
-        Path to save the output plot (default: None).
+        Path to save the output plot. Default is ``None``.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     # Plot the scaffold distributions
@@ -952,15 +951,15 @@ def plot_scaffold_distribution(
 
 def check_distribution_js_similarity(dist_df: pd.DataFrame) -> bool:
     """
-    Computes the Jensen-Shannon divergence to check similarity between dataset distributions.
+    Compute the Jensen-Shannon divergence to check similarity between dataset distributions.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     dist_df : pd.DataFrame
         The DataFrame containing the scaffold distributions.
 
-    Returns:
-    --------
+    Returns
+    -------
     bool
         True if the distributions are similar (JS divergence below a threshold), False otherwise.
     """
@@ -985,16 +984,16 @@ def check_distribution_js_similarity(dist_df: pd.DataFrame) -> bool:
 
 def check_distribution_similarity(dist_df: pd.DataFrame) -> Tuple[float, float, float]:
     """
-    Computes the mean absolute differences between train, validation, and test distributions.
+    Compute the mean absolute differences between train, validation, and test distributions.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     dist_df : pd.DataFrame
         The DataFrame containing the scaffold distributions.
 
-    Returns:
-    --------
-    Tuple[float, float, float]
+    Returns
+    -------
+    (float, float, float)
         Mean absolute differences between train-val, train-test, and val-test distributions.
     """
     train_val_diff = np.abs(dist_df["train"] - dist_df["val"]).mean()
@@ -1020,19 +1019,19 @@ def check_distribution(
         output_path: Union[str, None] = None,
 ) -> None:
     """
-    Evaluates the scaffold distribution across train, validation, and test splits.
+    Evaluate the scaffold distribution across train, validation, and test splits.
 
-    Parameters:
-    -----------
-    split_dict : Dict[str, Dict[str, pd.DataFrame]]
-        Dictionary containing dataset splits.
+    Parameters
+    ----------
+    split_dict : dict of str -> dict of str -> pd.DataFrame
+        Dataset splits.
     stratified_col : str, optional
-        Column used for stratification (default: "scaffold").
+        Column used for stratification. Default is ``"scaffold"``.
     output_path : str or None, optional
-        Path to save the output plot (default: None).
+        Path to save the output plot. Default is ``None``.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     split_types = list(split_dict.keys())
@@ -1063,28 +1062,28 @@ def check_if_processed_file(
         file_ext: str = "pkl",
 ) -> Tuple[bool, Dict[str, Path]]:
     """
-    Checks whether dataset files for a specific split and descriptor combination already exist.
+    Check whether dataset files for a specific split and descriptor combination already exist.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     data_name : str, optional
-        Name of the dataset (default: "papyrus").
+        Name of the dataset. Default is ``"papyrus"``.
     activity_type : str, optional
-        Type of activity data (default: "xc50").
+        Type of activity data. Default is ``"xc50"``.
     n_targets : int, optional
-        Number of targets (default: -1 for all targets).
+        Number of targets. Default is ``-1`` for all targets.
     split_type : str, optional
-        Type of data split (default: "random").
+        Type of data split. Default is ``"random"``.
     desc_prot : str or None, optional
-        Protein descriptor type (default: None).
+        Protein descriptor type.
     desc_chem : str, optional
-        Chemical descriptor type (default: "ecfp1024").
+        Chemical descriptor type. Default is ``"ecfp1024"``.
     file_ext : str, optional
-        File extension for saved data (default: "pkl").
+        File extension for saved data. Default is ``"pkl"``.
 
-    Returns:
-    --------
-    Tuple[bool, Dict[str, Path]]
+    Returns
+    -------
+    (bool, dict of str -> Path)
         Boolean indicating whether all files exist and a dictionary of expected file paths.
     """
     topx = f"top{n_targets}" if n_targets > 0 else "all"
@@ -1111,19 +1110,19 @@ def apply_label_scaling(
         label_scaling_func: Union[Callable, None] = None,
 ) -> pd.DataFrame:
     """
-    Applies a scaling function to the label column(s) of a DataFrame.
+    Apply a scaling function to the label column(s) of a DataFrame.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input DataFrame.
-    label_col : str or list
-        The name of the column(s) to be scaled.
-    label_scaling_func : function, optional
-        The scaling function to be applied to the label column(s) (default: None).
+    label_col : str or list of str
+        Column(s) to be scaled.
+    label_scaling_func : callable or None, optional
+        Scaling function applied to the label column(s).
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
         The DataFrame with the label column(s) scaled.
     """
@@ -1145,27 +1144,27 @@ def apply_median_scaling(
         logger: Union[logging.Logger, None] = None,
 ) -> Tuple[pd.DataFrame, List[float]]:
     """
-    Applies median scaling to label columns in a DataFrame.
+    Apply median scaling to label columns in a DataFrame.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input DataFrame.
-    label_col : str or list
+    label_col : str or list of str
         Column(s) to apply median scaling.
-    train_median : float or list, optional
-        The median value(s) to subtract (default: 6.0).
+    train_median : float or list of float, optional
+        Median value(s) to subtract. Default is ``6.0``.
     calc_median : bool, optional
-        If True, calculate median from the dataset (default: False).
+        If True, calculate median from the dataset. Default is ``False``.
     median_scaling : bool, optional
-        If True, apply median scaling (default: False).
+        If True, apply median scaling. Default is ``False``.
     logger : logging.Logger or None, optional
-        Logger for logging messages (default: None).
+        Logger for logging messages.
 
-    Returns:
-    --------
-    Tuple[pd.DataFrame, List[float]]
-        The modified DataFrame and the computed median values.
+    Returns
+    -------
+    (pd.DataFrame, list of float)
+        Modified DataFrame and the computed median values.
     """
     if isinstance(train_median, float):
         train_median = [train_median]
@@ -1176,8 +1175,8 @@ def apply_median_scaling(
         train_median = df[label_col].median().tolist()
 
     if median_scaling:
-        logger.info(f"Applying median scaling to label columns: {label_col}")
-        # for col, median in zip(label_col, train_median):
+        if logger:
+            logger.info(f"Applying median scaling to label columns: {label_col}")
         df[label_col] = df[label_col] - train_median
     return df, train_median
 
@@ -1186,18 +1185,18 @@ def subtract_label_median(
         df_label_series: pd.Series, median: Union[float, None] = None
 ) -> Tuple[pd.Series, float]:
     """
-    Subtracts the median value from a label series.
+    Subtract the median value from a label series.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df_label_series : pd.Series
         The label series.
     median : float or None, optional
-        Median value to subtract (default: None, computed from series).
+        Median value to subtract. If ``None``, it is computed from the series.
 
-    Returns:
-    --------
-    Tuple[pd.Series, float]
+    Returns
+    -------
+    (pd.Series, float)
         Modified series and used median value.
     """
     if not median:
@@ -1206,21 +1205,20 @@ def subtract_label_median(
     return df_label_series - median, median
 
 
-# TODO : check this func and add it to get_datasets
 def get_label_scaling_func(scaling_type: str, **kwargs) -> Union[Callable, None]:
     """
-    Returns the appropriate label scaling function based on the specified type.
+    Return the appropriate label scaling function based on the specified type.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     scaling_type : str
         The type of scaling to apply (e.g., 'median', 'standard', 'minmax').
-    kwargs : dict
+    **kwargs : dict
         Additional arguments for the scaling function.
 
-    Returns:
-    --------
-    Callable or None
+    Returns
+    -------
+    callable or None
         The selected scaling function.
     """
     if scaling_type == "median":
@@ -1254,16 +1252,16 @@ def get_label_scaling_func(scaling_type: str, **kwargs) -> Union[Callable, None]
 
 def check_normality(series: pd.Series) -> Tuple[float, float, bool]:
     """
-    Checks normality of a data series using the Shapiro-Wilk test.
+    Check normality of a data series using the Shapiro-Wilk test.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     series : pd.Series
         The data series to test.
 
-    Returns:
-    --------
-    Tuple[float, float, bool]
+    Returns
+    -------
+    (float, float, bool)
         Test statistic, p-value, and normality assumption result.
     """
     from scipy.stats import shapiro
@@ -1283,27 +1281,27 @@ def target_filtering(
         normal: bool = False,
 ) -> pd.DataFrame:
     """
-    Filters the dataset based on the number of datapoints and active compounds.
+    Filter the dataset based on the number of datapoints and active compounds.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input DataFrame.
     target_col : str, optional
-        Column containing the target IDs (default: "target_id").
+        Column containing the target IDs. Default is ``"target_id"``.
     label_col : str, optional
-        Column containing the labels (default: "pchembl_value_Mean").
+        Column containing the labels. Default is ``"pchembl_value_Mean"``.
     min_datapoints : int, optional
-        Minimum number of datapoints required for a target (default: 50).
+        Minimum number of datapoints required for a target. Default is ``50``.
     min_actives : int, optional
-        Minimum number of active compounds required for a target (default: 10).
+        Minimum number of active compounds required for a target. Default is ``10``.
     activity_threshold : float, optional
-        Activity threshold to use for filtering (default: 6.5).
+        Activity threshold to use for filtering. Default is ``6.5``.
     normal : bool, optional
-        If True, assumes labels are normally distributed and applies normality check (default: False).
+        If True, assumes labels are normally distributed and applies normality check.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
         Filtered DataFrame with targets meeting the criteria.
     """
@@ -1344,17 +1342,17 @@ def target_filtering(
 
 def check_homoscedasticity(y_true: pd.Series, y_pred: pd.Series) -> bool:
     """
-    Checks homoscedasticity using Bartlett's test.
+    Check homoscedasticity using Bartlett's test.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     y_true : pd.Series
         The true values.
     y_pred : pd.Series
         The predicted values.
 
-    Returns:
-    --------
+    Returns
+    -------
     bool
         True if homoscedasticity assumption holds, False otherwise.
     """
@@ -1370,17 +1368,17 @@ def check_homoscedasticity(y_true: pd.Series, y_pred: pd.Series) -> bool:
 
 def get_target_data_distribution(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
     """
-    Computes the count, mean, and standard deviation of labels per target.
+    Compute the count, mean, and standard deviation of labels per target.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input DataFrame.
     target_col : str
         Column containing the target IDs.
 
-    Returns:
-    --------
+    Returns
+    -------
     pd.DataFrame
         Dataframe with target ID, count, mean, and standard deviation of labels.
     """
@@ -1406,19 +1404,19 @@ def fig_target_data_distribution(
         df: pd.DataFrame, target_col: str, output_path: Union[str, None] = None
 ) -> None:
     """
-    Plots the distribution of data points per target.
+    Plot the distribution of data points per target.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input DataFrame.
     target_col : str
         Column containing the target IDs.
     output_path : str or None, optional
-        Path to save the output plot (default: None).
+        Path to save the output plot.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     distribution = get_target_data_distribution(df, target_col)
@@ -1442,19 +1440,19 @@ def fig_label_distribution(
         output_path: Union[str, None] = None,
 ) -> None:
     """
-    Plots the distribution of label values.
+    Plot the distribution of label values.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     df : pd.DataFrame
         The input DataFrame.
     label_col : str, optional
-        Column containing the labels (default: "pchembl_value_Mean").
+        Column containing the labels. Default is ``"pchembl_value_Mean"``.
     output_path : str or None, optional
-        Path to save the output plot (default: None).
+        Path to save the output plot.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     plt.figure(figsize=(10, 6))
@@ -1475,19 +1473,19 @@ def fig_label_distribution_across_splits(
         output_path: Union[str, None] = None,
 ) -> None:
     """
-    Plots the label distribution across dataset splits.
+    Plot the label distribution across dataset splits.
 
-    Parameters:
-    -----------
-    split_dict : Dict[str, Dict[str, pd.DataFrame]]
+    Parameters
+    ----------
+    split_dict : dict of str -> dict of str -> pd.DataFrame
         Dictionary containing dataset splits.
-    label_col : str, optional
-        Column containing the labels (default: "pchembl_value_Mean").
+    label_col : str or list of str, optional
+        Column containing the labels. If a list, the first element is used.
     output_path : str or None, optional
-        Path to save the output plot (default: None).
+        Path to save the output plot.
 
-    Returns:
-    --------
+    Returns
+    -------
     None
     """
     if isinstance(label_col, list):

@@ -10,7 +10,7 @@ from uqdd.metrics import (
 if __name__ == "__main__":
     # Build paths relative to the repository root
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    results_dir = os.path.join(repo_root, "../results_revision")
+    results_dir = os.path.join(repo_root, "../results")
 
     xc50 = os.path.join(results_dir, "final_xc50.csv")
     kx = os.path.join(results_dir, "final_kx.csv")
