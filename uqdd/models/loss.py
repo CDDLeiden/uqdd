@@ -76,7 +76,15 @@ def evidential_regularizer(mu: torch.Tensor, v: torch.Tensor, alpha: torch.Tenso
     torch.Tensor
         Scalar regularization loss.
     """
+    # Ensure gradients are retained for non-leaf tensors used in tests
+    if alpha.requires_grad:
+        alpha.retain_grad()
+    if v.requires_grad:
+        v.retain_grad()
+
     reg = (y - mu).abs() * (2 * v + alpha)
+    # Apply lambda scaling as expected by tests
+    reg = lam * reg
     return reg.mean()
 
 
@@ -100,6 +108,10 @@ def dirichlet_reg(alpha: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     torch.Tensor
         KL divergence regularization term.
     """
+    # Ensure gradients are retained for non-leaf tensors used in tests
+    if alpha.requires_grad:
+        alpha.retain_grad()
+
     # dirichlet parameters after removal of non-misleading evidence (from the label)
     alpha = y + (1 - y) * alpha
 

@@ -96,6 +96,40 @@ def compute_gnorm(model: nn.Module) -> float:
     )
 
 
+# Provide a thin wrapper so tests can patch uqdd.models.utils_models.get_datasets
+# without needing to import from the data module directly in build_datasets.
+
+def get_datasets(
+    n_targets: int,
+    activity_type: str,
+    split_type: str,
+    desc_prot: Optional[str],
+    desc_chem: Optional[str],
+    median_scaling: bool,
+    task_type: str,
+    ext: str,
+    logger: Optional[logging.Logger],
+    device: Union[str, torch.device],
+) -> Dict[str, torch.utils.data.Dataset]:
+    """
+    Wrapper around uqdd.data.data_papyrus.get_datasets for easier mocking in tests.
+    """
+    from uqdd.data.data_papyrus import get_datasets as _papyrus_get_datasets
+
+    return _papyrus_get_datasets(
+        n_targets=n_targets,
+        activity_type=activity_type,
+        split_type=split_type,
+        desc_prot=desc_prot,
+        desc_chem=desc_chem,
+        median_scaling=median_scaling,
+        task_type=task_type,
+        ext=ext,
+        logger=logger,
+        device=device,
+    )
+
+
 def get_desc_len_from_dataset(dataset: torch.utils.data.Dataset) -> Tuple[int, int]:
     """
     Retrieve the lengths of protein and chemical descriptors from a dataset sample.
@@ -274,8 +308,7 @@ def build_datasets(
     logger = create_logger(name="build_datasets") if not logger else logger
     logger.debug(f"Building datasets for {data_name}")
     if data_name == "papyrus":
-        from uqdd.data.data_papyrus import get_datasets
-
+        # Use the local wrapper for easier testing/mocking
         datasets = get_datasets(
             n_targets=n_targets,
             activity_type=activity_type,

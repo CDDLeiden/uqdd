@@ -99,6 +99,9 @@ class EnsembleDNN(nn.Module):
         for model in self.models:
             output, var_ = model(inputs)
             outputs.append(output)
+            # If model doesn't return variance, substitute zeros of matching shape
+            if var_ is None:
+                var_ = torch.zeros_like(output)
             vars_.append(var_)
         outputs = torch.stack(
             outputs, dim=2

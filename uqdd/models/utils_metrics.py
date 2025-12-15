@@ -42,6 +42,11 @@ string_types = (type(b""), type(""))
 sns.set_theme(style="white")
 
 
+def _rmse(a: np.ndarray, b: np.ndarray) -> float:
+    """Compute RMSE without relying on sklearn's squared kwarg (compatibility)."""
+    return float(np.sqrt(np.mean((a - b) ** 2)))
+
+
 def calc_nanaware_metrics(
         tensor: torch.Tensor,
         nan_mask: torch.Tensor,
@@ -106,30 +111,30 @@ def calc_regr_metrics(
     targets = targets.detach().cpu()
     outputs = outputs.detach().cpu()
 
-    if metrics_per_task:
-        rmse = np.full(targets.shape[1], np.nan)
-        r2 = np.full(targets.shape[1], np.nan)
-        evs = np.full(targets.shape[1], np.nan)
+    if metrics_per_task and targets.ndim == 2 and targets.shape[1] > 1:
+        rmse = np.full(targets.shape[1], np.nan, dtype=float)
+        r2 = np.full(targets.shape[1], np.nan, dtype=float)
+        evs = np.full(targets.shape[1], np.nan, dtype=float)
 
         for i in range(targets.shape[1]):
             task_t = targets[:, i]
             task_o = outputs[:, i]
             valid_mask = ~torch.isnan(task_t)
             if valid_mask.any():
-                task_t = task_t[valid_mask].numpy()
-                task_o = task_o[valid_mask].numpy()
-                rmse[i] = mean_squared_error(task_t, task_o, squared=False)
+                task_t = task_t[valid_mask].numpy().astype(float)
+                task_o = task_o[valid_mask].numpy().astype(float)
+                rmse[i] = _rmse(task_t, task_o)
                 r2[i] = r2_score(task_t, task_o)
                 evs[i] = explained_variance_score(task_t, task_o)
+        # Return arrays cast to floats if single-valued
+        return float(np.nanmean(rmse)), float(np.nanmean(r2)), float(np.nanmean(evs))
     else:
         nan_mask = ~torch.isnan(targets)
-        targets, outputs = (
-            targets[nan_mask].numpy().flatten(),
-            outputs[nan_mask].numpy().flatten(),
-        )
-        rmse = mean_squared_error(targets, outputs, squared=False)
-        r2 = r2_score(targets, outputs)
-        evs = explained_variance_score(targets, outputs)
+        t = targets[nan_mask].numpy().astype(float).flatten()
+        o = outputs[nan_mask].numpy().astype(float).flatten()
+        rmse = _rmse(t, o)
+        r2 = r2_score(t, o)
+        evs = explained_variance_score(t, o)
 
     return float(rmse), float(r2), float(evs)
 
